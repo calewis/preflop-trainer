@@ -209,6 +209,22 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
 .hbtn{flex:1;border:none;border-radius:11px;padding:12px;font-size:14px;font-weight:800;
   color:#0b0f0d;background:linear-gradient(#e9c46a,#d9ae4b);min-height:46px}
 .hbtn.ghost{flex:0 0 auto;padding:12px 16px;color:#f0857f;background:var(--panel2);border:1px solid var(--line)}
+.csr-edit{background:none;border:none;color:var(--gold);font-size:16px;font-weight:800;padding:2px 6px}
+/* range builder */
+.bld-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px}
+.bld-in{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;
+  padding:8px 10px;font-size:14px;font-weight:600;min-width:0}
+.bld-in.name{flex:1;min-width:120px}
+.bld-in.num{width:78px}
+.bld-note{font-size:13px;color:var(--dim);margin:4px 0 8px;line-height:1.35}
+.bld-sublab{font-size:12px;color:var(--dim);font-weight:700;margin:8px 0 4px;letter-spacing:.4px}
+.bld-grid{display:grid;grid-template-columns:repeat(13,1fr);gap:1px;width:100%;
+  max-width:min(94vw,460px);aspect-ratio:1/1;margin:10px auto 0;touch-action:none;
+  user-select:none;-webkit-user-select:none}
+.bcell{position:relative;border-radius:2px;display:flex;align-items:center;justify-content:center;
+  font-size:min(2.5vw,11px);font-weight:700;color:rgba(255,255,255,.92);
+  text-shadow:0 1px 1px rgba(0,0,0,.6);overflow:hidden;cursor:pointer}
+.swatch{width:22px;height:22px;border-radius:6px;border:1px solid var(--line);display:inline-block;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -292,9 +308,9 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
     <div class="setgrp">
       <h3>Chart Set</h3>
       <div class="chartlist" id="chartList"></div>
-      <div class="rowbtns"><button id="loadChartsBtn">Load Charts…</button></div>
+      <div class="rowbtns"><button id="loadChartsBtn">Load Charts…</button><button id="buildChartsBtn">Build / Edit…</button></div>
       <input type="file" id="chartFile" accept="application/json,.json" style="display:none">
-      <div class="hintline" id="chartMsg">Load your own <b>ranges.json</b> (e.g. exported charts). Stored only on this device — tap a set to switch.</div>
+      <div class="hintline" id="chartMsg">Load your own <b>ranges.json</b>, or <b>Build / Edit</b> your own by painting each position. Stored only on this device — tap a set to switch, ✎ to edit.</div>
     </div>
     <div class="setgrp">
       <h3>Stats</h3>
@@ -302,6 +318,61 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
       <div class="rowbtns"><button class="danger" id="resetStats">Reset Stats</button></div>
     </div>
     <div class="hintline" id="srcLine"></div>
+  </div>
+</div>
+
+<!-- range builder overlay -->
+<div id="bldOverlay" class="overlay hidden">
+  <div class="ohead">
+    <div class="grow"><h2 id="bldTitle">Range Builder</h2><div class="osub">Design custom charts — saved on this device</div></div>
+    <button class="closeX" id="bldClose">✕</button>
+  </div>
+  <div class="settingsScroll">
+    <div class="setgrp">
+      <h3>Chart Set</h3>
+      <div class="bld-row">
+        <input id="bldName" class="bld-in name" placeholder="Set name (e.g. My 6-max)" maxlength="60">
+        <input id="bldStack" class="bld-in num" type="number" placeholder="bb" title="Stack depth (bb)">
+      </div>
+      <div class="bld-note" id="bldSummary"></div>
+    </div>
+    <div class="setgrp">
+      <h3>Spot to Edit</h3>
+      <div class="chips" id="bldScen"></div>
+      <div class="bld-sublab">Hero position</div>
+      <div class="chips" id="bldHero"></div>
+      <div id="bldVsWrap"><div class="bld-sublab">Reacting to (villain)</div>
+        <div class="chips" id="bldVs"></div></div>
+      <div class="bld-sublab">Button label &amp; raise size</div>
+      <div class="bld-row">
+        <input id="bldLabel" class="bld-in name" placeholder="e.g. 3-Bet 9bb" maxlength="24">
+        <input id="bldSize" class="bld-in num" type="number" step="0.5" placeholder="size" title="Raise size in bb; leave blank for all-in / call-only">
+      </div>
+    </div>
+    <div class="setgrp">
+      <h3>Paint</h3>
+      <div class="chips" id="bldBrushes"></div>
+      <div id="bldMixWrap" class="hidden">
+        <div class="bld-row" style="margin-top:8px;align-items:center">
+          <span class="swatch" id="bldMixSw"></span>
+          <label class="bld-note" style="margin:0">Raise% <input id="bldMixR" class="bld-in num" type="number" min="0" max="100" step="5" value="50"></label>
+          <label class="bld-note" style="margin:0">Call% <input id="bldMixC" class="bld-in num" type="number" min="0" max="100" step="5" value="0"></label>
+        </div>
+      </div>
+      <div class="bld-note">Tap or drag across the grid to paint the selected mix. Fold% = 100 − Raise% − Call%.</div>
+      <div class="bld-grid" id="bldGrid"></div>
+      <div class="bld-note" id="bldStats" style="text-align:center;margin-top:10px"></div>
+      <div class="rowbtns"><button id="bldClear">Clear (all fold)</button><button id="bldFill">Fill 100% raise</button></div>
+    </div>
+    <div class="setgrp">
+      <h3>Save</h3>
+      <div class="hbtns" style="margin-bottom:8px">
+        <button class="hbtn" id="bldSave">Save Set &amp; Activate</button>
+        <button class="hbtn ghost" id="bldExport">Export</button>
+        <button class="hbtn ghost" id="bldDiscard">Discard</button>
+      </div>
+      <div class="bld-note" id="bldMsg">Export downloads a <b>ranges.json</b> file — share it, and others load it via <b>Load Charts…</b>.</div>
+    </div>
   </div>
 </div>
 
@@ -331,6 +402,166 @@ function addChartSet(text){
 }
 function activateSet(name){ if(name) localStorage.setItem(ACTIVE_LS,name); else localStorage.removeItem(ACTIVE_LS); location.reload(); }
 function deleteSet(name){ const s=loadSets(); delete s[name]; saveSets(s); if(activeSetName()===name) localStorage.removeItem(ACTIVE_LS); location.reload(); }
+function exportSet(data,fallback){
+  const name=(data.meta&&data.meta.source)||fallback||"ranges";
+  const fn=name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,48)||"ranges";
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const url=URL.createObjectURL(blob), a=document.createElement("a");
+  a.href=url; a.download=fn+".json"; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); },0);
+}
+
+/* ===================================================================
+   Range Builder — paint custom charts in-app, save into the library.
+   =================================================================== */
+const DRAFT_LS="preflopTrainer.draft";
+const round3=x=>Math.round(x*1000)/1000;
+const DEF_SPOT={
+  rfi:    {label:"Raise 2.5bb",  size:2.5},
+  vs_rfi: {label:"3-Bet 9bb",    size:9},
+  vs_3bet:{label:"4-Bet 22bb",   size:22},
+  vs_4bet:{label:"5-Bet All-In", size:null},
+  vs_5bet:{label:"Call All-In",  size:null},
+};
+const BRUSHES=[
+  {id:"raise",lab:"Raise",f:[1,0,0]},
+  {id:"call", lab:"Call", f:[0,1,0]},
+  {id:"fold", lab:"Fold", f:[0,0,1]},
+  {id:"mix",  lab:"Mix…", f:null},
+];
+let BUILDER=null, origName=null, bScen="rfi", bHero="CO", bVs="BTN";
+let brushId="raise", brush=[1,0,0], painting=false, gridWired=false;
+
+function ckey(scen,hero,vs){ return `${scen}|${hero}|${vs||""}`; }
+function parseSize(v){ v=String(v==null?"":v).trim(); if(v==="") return null; const n=parseFloat(v); return isFinite(n)?n:null; }
+function blankGrid(){ const g={}; for(let i=0;i<13;i++)for(let j=0;j<13;j++)g[handName(i,j)]=[0,0,1]; return g; }
+function newBuilder(){ return {name:"", stack:100, charts:{}}; }
+
+function setToBuilder(data,name){
+  const b={name:name||"", stack:(data.meta&&data.meta.stack)||100, charts:{}};
+  (data.charts||[]).forEach(c=>{
+    const g=blankGrid();
+    Object.keys(c.grid||{}).forEach(h=>{ if(g[h]) g[h]=c.grid[h].slice(); });
+    b.charts[ckey(c.scenario,c.hero,c.vs)]={hero:c.hero, vs:c.vs||null, scenario:c.scenario,
+      raise_label:c.raise_label||"", raise_size:(c.raise_size==null?null:c.raise_size), grid:g};
+  });
+  return b;
+}
+function builderToSet(b){
+  const charts=[];
+  Object.keys(b.charts).forEach(k=>{
+    const c=b.charts[k], grid={}; let any=false;
+    Object.keys(c.grid).forEach(h=>{ const f=c.grid[h]; if(f[0]>0||f[1]>0){ grid[h]=[round3(f[0]),round3(f[1]),round3(f[2])]; any=true; } });
+    if(!any) return;                    // skip spots left entirely on fold
+    charts.push({hero:c.hero, vs:c.vs||null, scenario:c.scenario,
+      raise_label:c.raise_label||DEF_SPOT[c.scenario].label,
+      raise_size:(c.raise_size==null?null:c.raise_size), grid});
+  });
+  return {meta:{stack:b.stack||100, source:b.name, positions:SEATS.slice()}, charts};
+}
+function saveDraft(){ try{ localStorage.setItem(DRAFT_LS, JSON.stringify({b:BUILDER,orig:origName})); }catch(e){} }
+function loadDraft(){ try{ return JSON.parse(localStorage.getItem(DRAFT_LS)); }catch(e){ return null; } }
+function clearDraft(){ try{ localStorage.removeItem(DRAFT_LS); }catch(e){} }
+
+function curVs(){ return bScen==="rfi"?null:bVs; }
+function curChart(){ return BUILDER.charts[ckey(bScen,bHero,curVs())]||null; }
+function ensureCurChart(){
+  const k=ckey(bScen,bHero,curVs());
+  if(!BUILDER.charts[k]) BUILDER.charts[k]={hero:bHero, vs:curVs(), scenario:bScen,
+    raise_label:$("bldLabel").value||DEF_SPOT[bScen].label, raise_size:parseSize($("bldSize").value), grid:blankGrid()};
+  return BUILDER.charts[k];
+}
+
+function startBuilder(b,orig){
+  BUILDER=b||newBuilder(); origName=orig||null;
+  const ip=inPlaySeats();
+  bScen="rfi"; bHero=ip.includes("CO")?"CO":(ip[ip.length-1]||"CO"); bVs=SEATS.find(p=>p!==bHero);
+  brushId="raise"; brush=[1,0,0];
+  $("bldTitle").textContent=origName?("Edit: "+origName):"Range Builder";
+  bmsg(""); renderBuilder(); showOverlay("bldOverlay");
+}
+function bmsg(t,bad){ $("bldMsg").innerHTML=bad?`<span style="color:var(--bad)">${t}</span>`:(t||""); }
+
+function chipRow(id,items,active,cb){
+  const el=$(id); el.innerHTML="";
+  items.forEach(([val,lab])=>{ const c=document.createElement("div");
+    c.className="chip mini2"+(val===active?" on":""); c.textContent=lab; c.onclick=()=>cb(val); el.appendChild(c); });
+}
+function renderBuilder(){
+  $("bldName").value=BUILDER.name||"";
+  $("bldStack").value=BUILDER.stack||100;
+  renderSpot();
+}
+function renderSpot(){
+  chipRow("bldScen", SCENARIOS.map(s=>[s.id,s.name]), bScen, id=>{ bScen=id; if(bHero===bVs) bVs=SEATS.find(p=>p!==bHero); renderSpot(); });
+  chipRow("bldHero", SEATS.map(p=>[p,SEAT_LABEL[p]]), bHero, id=>{ bHero=id; if(bVs===bHero) bVs=SEATS.find(p=>p!==bHero); renderSpot(); });
+  if(bScen==="rfi"){ $("bldVsWrap").classList.add("hidden"); }
+  else { $("bldVsWrap").classList.remove("hidden");
+    chipRow("bldVs", SEATS.filter(p=>p!==bHero).map(p=>[p,SEAT_LABEL[p]]), bVs, id=>{ bVs=id; renderSpot(); }); }
+  renderBrushes();
+  const c=curChart(), d=DEF_SPOT[bScen];
+  $("bldLabel").value=c?c.raise_label:d.label;
+  $("bldSize").value=c?(c.raise_size==null?"":c.raise_size):(d.size==null?"":d.size);
+  renderBGrid(); updateBStats(); renderBSummary();
+}
+function renderBrushes(){
+  const el=$("bldBrushes"); el.innerHTML="";
+  BRUSHES.forEach(bs=>{ const c=document.createElement("div");
+    c.className="chip mini2"+(bs.id===brushId?" on":""); c.textContent=bs.lab;
+    c.onclick=()=>{ brushId=bs.id; if(bs.f) brush=bs.f.slice(); else brush=currentMix(); renderBrushes(); };
+    el.appendChild(c); });
+  $("bldMixWrap").classList.toggle("hidden", brushId!=="mix");
+  if(brushId==="mix") currentMix();
+}
+function currentMix(){
+  let r=+$("bldMixR").value||0, ca=+$("bldMixC").value||0;
+  r=Math.max(0,Math.min(100,r)); ca=Math.max(0,Math.min(100,ca));
+  if(r+ca>100){ ca=100-r; $("bldMixC").value=ca; }
+  const f=[r/100, ca/100, (100-r-ca)/100]; paintCellColor($("bldMixSw"),f); return f;
+}
+function paintCellColor(cell,f){
+  let r=0,g=0,b=0; for(let k=0;k<3;k++){ r+=f[k]*COL_RGB[k][0]; g+=f[k]*COL_RGB[k][1]; b+=f[k]*COL_RGB[k][2]; }
+  cell.style.background=`rgb(${r|0},${g|0},${b|0})`;
+}
+function renderBGrid(){
+  const wrap=$("bldGrid"); wrap.innerHTML="";
+  const c=curChart();
+  for(let i=0;i<13;i++)for(let j=0;j<13;j++){
+    const h=handName(i,j), f=(c&&c.grid[h])||[0,0,1];
+    const cell=document.createElement("div"); cell.className="bcell"; cell.dataset.hand=h;
+    paintCellColor(cell,f);
+    cell.textContent=h.length===2?h:(h.slice(0,2)+(h.endsWith("s")?"s":"o"));
+    wrap.appendChild(cell);
+  }
+  if(!gridWired) wireGridPaint();
+}
+function applyBrushToHand(h){
+  const c=ensureCurChart(); if(!c.grid[h]) return;
+  c.grid[h]=brush.slice();
+  const cell=$("bldGrid").querySelector('[data-hand="'+h+'"]'); if(cell) paintCellColor(cell,brush);
+  updateBStats();
+}
+function wireGridPaint(){
+  const wrap=$("bldGrid"); gridWired=true;
+  const handOf=t=>t&&t.dataset?t.dataset.hand:null;
+  wrap.addEventListener("pointerdown",e=>{ painting=true; const h=handOf(e.target); if(h){ applyBrushToHand(h); e.preventDefault(); } });
+  wrap.addEventListener("pointermove",e=>{ if(!painting) return; const h=handOf(document.elementFromPoint(e.clientX,e.clientY)); if(h) applyBrushToHand(h); });
+  window.addEventListener("pointerup",()=>{ if(painting){ painting=false; saveDraft(); } });
+  window.addEventListener("pointercancel",()=>{ if(painting){ painting=false; saveDraft(); } });
+}
+function updateBStats(){
+  const c=curChart();
+  if(!c){ $("bldStats").textContent="Nothing painted yet — whole grid folds."; renderBSummary(); return; }
+  let tot=0,ra=0,ca=0;
+  for(let i=0;i<13;i++)for(let j=0;j<13;j++){ const h=handName(i,j), w=combosOf(h), f=c.grid[h]||[0,0,1];
+    tot+=w; ra+=w*f[0]; ca+=w*f[1]; }
+  $("bldStats").innerHTML=`Range played: <b>${(100*(ra+ca)/tot).toFixed(1)}%</b> &nbsp;·&nbsp; raise ${(100*ra/tot).toFixed(1)}% · call ${(100*ca/tot).toFixed(1)}%`;
+  renderBSummary();
+}
+function renderBSummary(){
+  const set=builderToSet(BUILDER); const n=set.charts.length;
+  $("bldSummary").innerHTML=n?`<b>${n}</b> spot${n===1?"":"s"} defined in this set.`:`No spots defined yet. Pick a spot below and paint the grid.`;
+}
 /* ---------- constants ---------- */
 const RANKS = "AKQJT98765432".split("");
 const RVAL = {}; RANKS.forEach((r,i)=>RVAL[r]=14-i);
@@ -1038,8 +1269,17 @@ function renderChartList(){
     lab.innerHTML=`${r.label}<span class="csr-sub">${r.nc} charts · ${r.stack}bb${r.def?" · built-in":""}</span>`;
     dot.onclick=lab.onclick=()=>activateSet(r.name);
     row.appendChild(dot); row.appendChild(lab);
+    const ex=document.createElement("button"); ex.className="csr-edit"; ex.textContent="⬇"; ex.title="Export / share (.json)";
+    ex.onclick=e=>{ e.stopPropagation(); exportSet(r.def?EMBEDDED_RANGES:loadSets()[r.name], r.label); };
+    row.appendChild(ex);
+    const ed=document.createElement("button"); ed.className="csr-edit";
+    ed.textContent=r.def?"⧉":"✎"; ed.title=r.def?"Duplicate & edit":"Edit";
+    ed.onclick=e=>{ e.stopPropagation(); hideOverlay("setOverlay");
+      r.def ? startBuilder(setToBuilder(EMBEDDED_RANGES,""), null)
+            : startBuilder(setToBuilder(loadSets()[r.name], r.name), r.name); };
+    row.appendChild(ed);
     if(!r.def){ const del=document.createElement("button"); del.className="csr-del"; del.textContent="✕";
-      del.onclick=()=>deleteSet(r.name); row.appendChild(del); }
+      del.onclick=e=>{ e.stopPropagation(); deleteSet(r.name); }; row.appendChild(del); }
     el.appendChild(row);
   });
 }
@@ -1064,6 +1304,40 @@ $("chartFile").onchange=e=>{ const f=e.target.files&&e.target.files[0]; if(!f) r
   const r=new FileReader(); r.onload=()=>{ const err=addChartSet(r.result);
     if(err) $("chartMsg").innerHTML=`<span style="color:var(--bad)">${err}</span>`; };
   r.readAsText(f); };
+
+/* ---- range builder wiring ---- */
+$("buildChartsBtn").onclick=()=>{ hideOverlay("setOverlay");
+  const dr=loadDraft(); startBuilder(dr&&dr.b?dr.b:newBuilder(), dr?dr.orig:null); };
+$("bldClose").onclick=()=>{ saveDraft(); hideOverlay("bldOverlay"); openSettingsBack(); };
+$("bldName").oninput=()=>{ BUILDER.name=$("bldName").value; saveDraft(); };
+$("bldStack").oninput=()=>{ BUILDER.stack=parseFloat($("bldStack").value)||100; saveDraft(); };
+$("bldLabel").oninput=()=>{ const c=curChart(); if(c){ c.raise_label=$("bldLabel").value; saveDraft(); } };
+$("bldSize").oninput =()=>{ const c=curChart(); if(c){ c.raise_size=parseSize($("bldSize").value); saveDraft(); } };
+$("bldMixR").oninput=$("bldMixC").oninput=()=>{ if(brushId==="mix") brush=currentMix(); };
+$("bldClear").onclick=()=>{ const c=ensureCurChart(); Object.keys(c.grid).forEach(h=>c.grid[h]=[0,0,1]); renderBGrid(); updateBStats(); saveDraft(); };
+$("bldFill").onclick =()=>{ const c=ensureCurChart(); Object.keys(c.grid).forEach(h=>c.grid[h]=[1,0,0]); renderBGrid(); updateBStats(); saveDraft(); };
+$("bldExport").onclick=()=>{
+  BUILDER.name=($("bldName").value||"").trim(); BUILDER.stack=parseFloat($("bldStack").value)||100;
+  if(!BUILDER.name){ bmsg("Give your set a name first.",true); return; }
+  const set=builderToSet(BUILDER);
+  if(!set.charts.length){ bmsg("Paint at least one hand in one spot before exporting.",true); return; }
+  exportSet(set); bmsg("Exported "+set.charts.length+" spot"+(set.charts.length===1?"":"s")+" — check your downloads.");
+};
+$("bldDiscard").onclick=()=>{ if(!confirm("Discard this draft? Unsaved painting will be lost.")) return;
+  clearDraft(); hideOverlay("bldOverlay"); openSettingsBack(); };
+$("bldSave").onclick=()=>{
+  BUILDER.name=($("bldName").value||"").trim();
+  BUILDER.stack=parseFloat($("bldStack").value)||100;
+  if(!BUILDER.name){ bmsg("Give your set a name first.",true); return; }
+  const set=builderToSet(BUILDER);
+  if(!set.charts.length){ bmsg("Paint at least one hand in one spot before saving.",true); return; }
+  const sets=loadSets();
+  if(origName && origName!==BUILDER.name) delete sets[origName];   // rename: drop old key
+  sets[BUILDER.name]=set;
+  if(!saveSets(sets)){ bmsg("Device storage is full — remove another set and try again.",true); return; }
+  clearDraft(); localStorage.setItem(ACTIVE_LS,BUILDER.name); location.reload();
+};
+function openSettingsBack(){ renderSettings(); showOverlay("setOverlay"); }
 
 /* boot */
 loadHistory(); loadMistakes();
