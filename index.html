@@ -341,7 +341,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
       <div class="chips" id="bldScen"></div>
       <div class="bld-sublab">Hero position</div>
       <div class="chips" id="bldHero"></div>
-      <div id="bldVsWrap"><div class="bld-sublab">Reacting to (villain)</div>
+      <div id="bldVsWrap"><div class="bld-sublab" id="bldVsLab">Reacting to (villain)</div>
         <div class="chips" id="bldVs"></div></div>
       <div class="bld-sublab">Button label &amp; raise size</div>
       <div class="bld-row">
@@ -418,6 +418,7 @@ const DRAFT_LS="preflopTrainer.draft";
 const round3=x=>Math.round(x*1000)/1000;
 const DEF_SPOT={
   rfi:    {label:"Raise 2.5bb",  size:2.5},
+  vs_limp:{label:"ISO 5bb",      size:5},
   vs_rfi: {label:"3-Bet 9bb",    size:9},
   vs_3bet:{label:"4-Bet 22bb",   size:22},
   vs_4bet:{label:"5-Bet All-In", size:null},
@@ -464,8 +465,10 @@ function loadDraft(){ try{ return JSON.parse(localStorage.getItem(DRAFT_LS)); }c
 function clearDraft(){ try{ localStorage.removeItem(DRAFT_LS); }catch(e){} }
 
 function curVs(){ return bScen==="rfi"?null:bVs; }
-function curChart(){ return BUILDER.charts[ckey(bScen,bHero,curVs())]||null; }
+function spotValid(){ return !(bScen!=="rfi" && !bVs); }   // vs_limp w/ no valid limper count
+function curChart(){ if(!spotValid()) return null; return BUILDER.charts[ckey(bScen,bHero,curVs())]||null; }
 function ensureCurChart(){
+  if(!spotValid()) return null;
   const k=ckey(bScen,bHero,curVs());
   if(!BUILDER.charts[k]) BUILDER.charts[k]={hero:bHero, vs:curVs(), scenario:bScen,
     raise_label:$("bldLabel").value||DEF_SPOT[bScen].label, raise_size:parseSize($("bldSize").value), grid:blankGrid()};
@@ -492,12 +495,32 @@ function renderBuilder(){
   $("bldStack").value=BUILDER.stack||100;
   renderSpot();
 }
+function maxLimpersFor(hero){ return SEATS.indexOf(hero); }   // seats acting before hero
+function normalizeVs(){
+  if(bScen==="rfi"){ return; }
+  if(bScen==="vs_limp"){
+    const maxL=maxLimpersFor(bHero);
+    if(maxL<1) bVs=null;
+    else if(!/^L\d+$/.test(String(bVs)) || limpN(bVs)>maxL) bVs=limpTok(1);
+  } else if(bVs===bHero || /^L\d+$/.test(String(bVs)) || !SEATS.includes(bVs)){
+    bVs=SEATS.find(p=>p!==bHero);
+  }
+}
 function renderSpot(){
-  chipRow("bldScen", SCENARIOS.map(s=>[s.id,s.name]), bScen, id=>{ bScen=id; if(bHero===bVs) bVs=SEATS.find(p=>p!==bHero); renderSpot(); });
-  chipRow("bldHero", SEATS.map(p=>[p,SEAT_LABEL[p]]), bHero, id=>{ bHero=id; if(bVs===bHero) bVs=SEATS.find(p=>p!==bHero); renderSpot(); });
+  normalizeVs();
+  chipRow("bldScen", SCENARIOS.map(s=>[s.id,s.name]), bScen, id=>{ bScen=id; renderSpot(); });
+  chipRow("bldHero", SEATS.map(p=>[p,SEAT_LABEL[p]]), bHero, id=>{ bHero=id; renderSpot(); });
   if(bScen==="rfi"){ $("bldVsWrap").classList.add("hidden"); }
-  else { $("bldVsWrap").classList.remove("hidden");
-    chipRow("bldVs", SEATS.filter(p=>p!==bHero).map(p=>[p,SEAT_LABEL[p]]), bVs, id=>{ bVs=id; renderSpot(); }); }
+  else if(bScen==="vs_limp"){
+    $("bldVsWrap").classList.remove("hidden"); $("bldVsLab").textContent="Number of limpers";
+    const maxL=maxLimpersFor(bHero);
+    if(maxL<1){ $("bldVs").innerHTML=`<div class="bld-note" style="margin:0">${SEAT_LABEL[bHero]} acts first — no one can limp in front of it. Pick a later hero position.</div>`; }
+    else { const items=[]; for(let k=1;k<=maxL;k++) items.push([limpTok(k), k+" limper"+(k>1?"s":"")]);
+      chipRow("bldVs", items, bVs, id=>{ bVs=id; renderSpot(); }); }
+  } else {
+    $("bldVsWrap").classList.remove("hidden"); $("bldVsLab").textContent="Reacting to (villain)";
+    chipRow("bldVs", SEATS.filter(p=>p!==bHero).map(p=>[p,SEAT_LABEL[p]]), bVs, id=>{ bVs=id; renderSpot(); });
+  }
   renderBrushes();
   const c=curChart(), d=DEF_SPOT[bScen];
   $("bldLabel").value=c?c.raise_label:d.label;
@@ -536,7 +559,7 @@ function renderBGrid(){
   if(!gridWired) wireGridPaint();
 }
 function applyBrushToHand(h){
-  const c=ensureCurChart(); if(!c.grid[h]) return;
+  const c=ensureCurChart(); if(!c || !c.grid[h]) return;
   c.grid[h]=brush.slice();
   const cell=$("bldGrid").querySelector('[data-hand="'+h+'"]'); if(cell) paintCellColor(cell,brush);
   updateBStats();
@@ -572,15 +595,27 @@ const ACT_COL = {raise:0,call:1,fold:2};
 const COL_RGB = [[240,67,58],[79,179,95],[63,124,192]]; // raise/call/fold
 const SCENARIOS = [
   {id:"rfi",     name:"RFI (open)"},
+  {id:"vs_limp", name:"vs Limp (ISO)"},
   {id:"vs_rfi",  name:"vs Open"},
   {id:"vs_3bet", name:"vs 3-Bet"},
   {id:"vs_4bet", name:"vs 4-Bet"},
   {id:"vs_5bet", name:"vs 5-Bet"},
 ];
 
+/* ISO (vs_limp) ranges are keyed by number of limpers, encoded in the `vs`
+   field as "L1", "L2", … — so 1 limper and 3 limpers can be different charts. */
+function limpN(vs){ const m=/^L(\d+)$/.exec(String(vs||"")); return m?+m[1]:1; }
+function limpTok(n){ return "L"+n; }
+function vsLabel(scen,vs){ if(scen==="vs_limp"){ const n=limpN(vs); return n+" limper"+(n>1?"s":""); } return SEAT_LABEL[vs]||vs||""; }
+
 /* chart index: key = scenario|hero|vs */
 const CHARTS = {};
 DATA.charts.forEach(c=>{ CHARTS[`${c.scenario}|${c.hero}|${c.vs||""}`]=c; });
+/* limper counts (1,2,…) that the active set defines for a given hero */
+function limpCountsFor(hero){ const out=[];
+  Object.keys(CHARTS).forEach(k=>{ const p=k.split("|"); if(p[0]==="vs_limp"&&p[1]===hero){ const n=limpN(p[2]); if(!out.includes(n)) out.push(n); } });
+  return out.sort((a,b)=>a-b); }
+const HAS_LIMP = Object.keys(CHARTS).some(k=>k.startsWith("vs_limp|"));
 
 /* Heads-up (2-max) uses purpose-built ranges generated in-app
    (SB = button/opener). */
@@ -833,19 +868,38 @@ function newHand(_try){
   const play=inPlaySeats(), n=play.length, idx=s=>play.indexOf(s);
   const allowed=play.filter(s=>S.seats[s]);
   if(!allowed.length){ $("feedback").innerHTML="No seats selected.<span class='sub'>Open ⚙ Settings.</span>"; $("buttons").innerHTML=""; return; }
-  // ~70% of hands start folded to you (RFI); ~30% you face one open
-  let faceOpen = Math.random()>0.70;
-  let pool = faceOpen ? allowed.filter(s=>idx(s)>0) : allowed.filter(s=>s!=="BB");
-  if(!pool.length){ faceOpen=!faceOpen; pool = faceOpen?allowed.filter(s=>idx(s)>0):allowed.filter(s=>s!=="BB"); }
-  if(!pool.length) pool=allowed;
+  // pick a mode: RFI (folded to you), face one open, or (if the set defines ISO
+  // ranges) face one-or-more limpers. Distribution unchanged when no ISO charts.
+  const canLimp = HAS_LIMP && allowed.some(s=>idx(s)>0 && limpCountsFor(s).length);
+  const roll=Math.random();
+  let mode = canLimp ? (roll<0.14?"limp":(roll<0.42?"open":"rfi")) : (roll<0.30?"open":"rfi");
+  const poolFor=m=> m==="limp" ? allowed.filter(s=>idx(s)>0 && limpCountsFor(s).length)
+                  : m==="open" ? allowed.filter(s=>idx(s)>0)
+                  :              allowed.filter(s=>s!=="BB");
+  let pool=poolFor(mode);
+  if(!pool.length){ mode="rfi"; pool=poolFor("rfi"); }
+  if(!pool.length){ mode="open"; pool=poolFor("open"); }
+  if(!pool.length){ mode="rfi"; pool=allowed; }
   const hero=pick(pool), sb=play[n-2], bb=play[n-1], hi=idx(hero);
   H={play,n,hero,sb,bb,deck:shuffle(freshDeck()),committed:{},folded:new Set(),cards:{},act:{},
      level:0,aggressor:null,opener:null,heroRole:null,villain:null,raiser:{},pot:1.5,vrange:{},
+     limpers:null,limpVs:null,
      node:null,ended:false,result:"",heroHand:null,heroCards:null,reviewChart:null,reviewHand:null,decisions:[]};
   H.committed[sb]=0.5; H.committed[bb]=1;
   H.act[sb]={t:"post",label:"SB 0.5"}; H.act[bb]={t:"post",label:"BB 1"};
-  let opener=null;
-  if(faceOpen && hi>0){
+  let opener=null, node=null;
+  if(mode==="limp"){
+    const before=play.slice(0,hi);
+    const counts=limpCountsFor(hero).filter(c=>c<=before.length);
+    if(!counts.length){ return newHand((_try||0)+1); }
+    const nl=pick(counts), tok=limpTok(nl), ch=getChart("vs_limp",hero,tok);
+    if(!ch){ return newHand((_try||0)+1); }
+    const limpers=shuffle(before.slice()).slice(0,nl);
+    before.forEach(s=>{ if(limpers.includes(s)){ H.committed[s]=1; H.act[s]={t:"call",label:"Limps"}; H.cards[s]=dealTwo(); }
+                        else { H.act[s]={t:"fold",label:"Fold"}; H.folded.add(s); } });
+    recalcPot(); H.limpers=limpers; H.limpVs=tok;
+    node=makeNode("vs_limp",ch,tok);
+  } else if(mode==="open" && hi>0){
     const before=play.slice(0,hi);
     opener=pick(before);
     before.forEach(s=>{ if(s!==opener){ H.act[s]={t:"fold",label:"Fold"}; H.folded.add(s);} });
@@ -854,11 +908,11 @@ function newHand(_try){
     doRaise(opener,1,OPEN(opener),`Raises ${fmt(OPEN(opener))}`);
     if(orfi) H.vrange[opener]={chart:orfi,idx:0};   // opener's opening range
     H.opener=opener;
+    node=makeNode("vs_rfi",getChart("vs_rfi",hero,opener),opener);
   } else {
     for(let k=0;k<hi;k++){ const s=play[k]; H.act[s]={t:"fold",label:"Fold"}; H.folded.add(s); }
+    node=makeNode("rfi",getChart("rfi",hero,null),null);
   }
-  const node = opener ? makeNode("vs_rfi",getChart("vs_rfi",hero,opener),opener)
-                      : makeNode("rfi",getChart("rfi",hero,null),null);
   if(!node.chart){
     if((_try||0)>=10){ $("feedback").innerHTML="No trainable spot for this table/seat setup.<span class='sub'>Adjust seats in ⚙ Settings.</span>"; $("buttons").innerHTML=""; return; }
     return newHand((_try||0)+1);
@@ -882,6 +936,14 @@ function answerHero(col){
   present();
 }
 function heroCall(scen){
+  if(scen==="vs_limp"){                    // over-limp: complete, multiway flop with the limpers
+    H.committed[H.hero]=1; recalcPot();
+    H.act[H.hero]={t:"call",label: H.hero===H.bb?"Checks":"Over-limps"};
+    H.play.forEach(s=>{ if(s===H.hero) return;
+      const inHand=(H.limpers&&H.limpers.includes(s))||s===H.bb;   // limpers + BB see the flop
+      if(!inHand && !H.folded.has(s)){ H.act[s]={t:"fold",label:"Fold"}; H.folded.add(s); } });
+    endHand("You over-limp — see a flop."); return;
+  }
   const amt=maxCommitted(); H.committed[H.hero]=amt; recalcPot();
   const limp=scen==="rfi";
   H.act[H.hero]={t:"call",label: scen==="vs_5bet"?"Call ALL-IN":(limp?"Limps":"Calls "+fmt(amt))};
@@ -891,6 +953,9 @@ function heroCall(scen){
 }
 function heroRaise(scen){
   if(scen==="rfi"){ H.heroRole="opener"; doRaise(H.hero,1,OPEN(H.hero),`Raises ${fmt(OPEN(H.hero))}`); resolveOpen(); }
+  else if(scen==="vs_limp"){ H.heroRole="isolator";
+    const ch=getChart("vs_limp",H.hero,H.limpVs), sz=(ch&&ch.raise_size)||5;
+    doRaise(H.hero,1,sz,`ISO ${fmt(sz)}`); resolveIso(); }
   else if(scen==="vs_rfi"){ H.heroRole="3bettor"; H.villain=H.opener;
     const ch=getChart("vs_rfi",H.hero,H.opener), sz=(ch&&ch.raise_size)||11;
     H.play.forEach(s=>{ if(s!==H.hero&&s!==H.opener&&!H.folded.has(s)){H.act[s]={t:"fold",label:"Fold"};H.folded.add(s);} });
@@ -912,6 +977,30 @@ function resolveOpen(){
   }
   if(tb){ H.villain=tb; H.heroRole="opener"; H.node=makeNode("vs_3bet",getChart("vs_3bet",H.hero,tb),tb); }
   else endHand(caller ? "Called — you take a flop." : "It folds around — you win the blinds! 🎉");
+}
+/* players behind + the limpers respond to hero's isolation raise */
+function resolveIso(){
+  const hi=H.play.indexOf(H.hero); let tb=null, called=false;
+  for(let k=hi+1;k<H.n;k++){                       // seats behind react (proxy: their vs-open chart)
+    const s=H.play[k]; if(H.folded.has(s)) continue;
+    const ch=getChart("vs_rfi",s,H.hero); let a=villainAct(s,ch);
+    if(a==="raise" && !getChart("vs_3bet",H.hero,s)) a="call";   // no follow-up chart -> flat
+    if(a==="raise"){ tb=s; const sz=(ch&&ch.raise_size)||11; doRaise(s,2,sz,`3-Bets ${fmt(sz)}`); H.vrange[s]={chart:ch,idx:0};
+      for(let m=k+1;m<H.n;m++){ const s2=H.play[m]; if(!H.folded.has(s2)){H.act[s2]={t:"fold",label:"Fold"};H.folded.add(s2);} } break; }
+    else if(a==="call"){ called=true; H.committed[s]=H.committed[H.hero]; H.act[s]={t:"call",label:"Calls "+fmt(H.committed[H.hero])}; recalcPot(); H.vrange[s]={chart:ch,idx:1}; }
+    else { H.act[s]={t:"fold",label:"Fold"}; H.folded.add(s); }
+  }
+  (H.limpers||[]).forEach(lp=>{                     // limpers call or fold the raise (no 3-bet)
+    if(H.folded.has(lp)) return;
+    if(tb){ H.act[lp]={t:"fold",label:"Fold"}; H.folded.add(lp); return; }   // folds to the 3-bet behind
+    const ch=getChart("vs_rfi",lp,H.hero); let cont;
+    if(ch){ const f=ch.grid[cardsToHand(H.cards[lp])]||[0,0,1]; cont=Math.random()<(f[0]+f[1]); }
+    else cont=Math.random()<0.35;
+    if(cont){ H.committed[lp]=H.committed[H.hero]; H.act[lp]={t:"call",label:"Calls "+fmt(H.committed[H.hero])}; recalcPot(); called=true; }
+    else { H.act[lp]={t:"fold",label:"Fold"}; H.folded.add(lp); }
+  });
+  if(tb){ H.villain=tb; H.heroRole="opener"; H.node=makeNode("vs_3bet",getChart("vs_3bet",H.hero,tb),tb); }
+  else endHand(called ? "Called — you take a flop." : "Everyone folds — you win it! 🎉");
 }
 /* the single opponent responds to hero's 3-bet / 4-bet / 5-bet */
 function resolveResponse(){
@@ -1030,6 +1119,7 @@ function storyFor(node){
     case "rfi":    return H.play.indexOf(H.hero)===0
                      ? `You're first to act in the ${P[H.hero]}. Open or fold?`
                      : `Folded to you in the ${P[H.hero]}. Open or fold?`;
+    case "vs_limp": { const nl=limpN(node.vs); return `${nl} player${nl>1?"s":""} limp${nl>1?"":"s"} in. Isolate, over-limp, or fold?`; }
     case "vs_rfi": return `${P[node.vs]} opens to ${fmt(OPEN(node.vs))}. Action on you.`;
     case "vs_3bet":return `You opened, ${P[node.vs]} 3-bets. Your move.`;
     case "vs_4bet":return `You 3-bet, ${P[node.vs]} 4-bets. Your move.`;
@@ -1045,6 +1135,7 @@ function buttonSpec(scen,chart){
     case "rfi": return hasLimp
       ? [{l:"Fold",col:2,cls:"fold"},{l:"Limp",col:1,cls:"call"},{l:rl,col:0,cls:"raise"}]
       : [{l:rl,col:0,cls:"raise"},{l:"Fold",col:2,cls:"fold"}];
+    case "vs_limp": return [{l:"Fold",col:2,cls:"fold"},{l:"Over-limp",col:1,cls:"call"},{l:rl,col:0,cls:"raise"}];
     case "vs_rfi":
     case "vs_3bet": return [{l:"Fold",col:2,cls:"fold"},{l:"Call",col:1,cls:"call"},{l:rl,col:0,cls:"raise"}];
     case "vs_4bet": return [{l:"Fold",col:2,cls:"fold"},{l:"Call",col:1,cls:"call"},{l:"All-In",col:0,cls:"raise"}];
@@ -1095,7 +1186,7 @@ function renderGrid(chart,highlightHand){
   }
 }
 function legendRaiseWord(c){
-  return {rfi:"Raise",vs_rfi:"3-Bet",vs_3bet:"4-Bet",vs_4bet:"5-Bet",vs_5bet:"Raise"}[c.scenario]||"Raise";
+  return {rfi:"Raise",vs_limp:"ISO raise",vs_rfi:"3-Bet",vs_3bet:"4-Bet",vs_4bet:"5-Bet",vs_5bet:"Raise"}[c.scenario]||"Raise";
 }
 function showChartOverlay(c,hand,missNote){
   $("rangeTitle").textContent=chartTitle(c);
@@ -1110,6 +1201,7 @@ function showChartOverlay(c,hand,missNote){
 function flashChart(chart,hand,chosenCol){ showChartOverlay(chart,hand,true); }
 function chartTitle(c){
   if(c.scenario==="rfi") return `${SEAT_LABEL[c.hero]} — RFI (open)`;
+  if(c.scenario==="vs_limp") return `${SEAT_LABEL[c.hero]} — ISO vs ${vsLabel("vs_limp",c.vs)}`;
   const label={vs_rfi:"vs Open",vs_3bet:"vs 3-Bet",vs_4bet:"vs 4-Bet",vs_5bet:"vs 5-Bet"}[c.scenario];
   return `${SEAT_LABEL[c.hero]} ${label} ${SEAT_LABEL[c.vs]}`;
 }
@@ -1118,8 +1210,11 @@ function showChartCurrent(){ if(!H||!H.reviewChart) return; showChartOverlay(H.r
 /* ---------- hand history ---------- */
 function glyph(c){ const p=cardParts(c); return `<span class="hcard ${p.cls}">${p.r}${p.sym}</span>`; }
 function scLabel(d){ const P=SEAT_LABEL;
+  if(d.scenario==="vs_limp") return `ISO vs ${vsLabel("vs_limp",d.vs)}`;
   return {rfi:"Open (RFI)",vs_rfi:`vs ${P[d.vs]} open`,vs_3bet:`vs ${P[d.vs]} 3-bet`,vs_4bet:`vs ${P[d.vs]} 4-bet`,vs_5bet:`vs ${P[d.vs]} 5-bet`}[d.scenario]||d.scenario; }
-function actName(d){ return (d.scenario==="rfi"&&d.col===1)?"Limp":["Raise","Call","Fold"][d.col]; }
+function actName(d){ if(d.scenario==="rfi"&&d.col===1) return "Limp";
+  if(d.scenario==="vs_limp") return ["ISO-raise","Over-limp","Fold"][d.col];
+  return ["Raise","Call","Fold"][d.col]; }
 function openHistory(){
   const list=$("histList"); list.innerHTML="";
   const nMiss=Object.keys(MISTAKES).length;
@@ -1173,7 +1268,14 @@ function drillSetup(m){
   const act={}, folded=new Set(), committed={};
   committed[sb]=0.5; committed[bb]=1; act[sb]={t:"post",label:"SB 0.5"}; act[bb]={t:"post",label:"BB 1"};
   const open=OPEN(vs||hero);
+  let dLimpers=null;
   if(m.scenario==="rfi"){ for(let k=0;k<oi(hero);k++){act[play[k]]={t:"fold",label:"Fold"};folded.add(play[k]);} }
+  else if(m.scenario==="vs_limp"){
+    const nl=limpN(vs), before=play.slice(0,oi(hero));
+    dLimpers=shuffle(before.slice()).slice(0,Math.min(nl,before.length));
+    play.forEach(s=>{ if(s===hero)return;
+      if(dLimpers.includes(s)){ committed[s]=1; act[s]={t:"call",label:"Limps"}; }
+      else { act[s]={t:"fold",label:"Fold"}; folded.add(s); } }); }
   else if(m.scenario==="vs_rfi"){
     play.forEach(s=>{ if(s!==hero&&s!==vs){act[s]={t:"fold",label:"Fold"};folded.add(s);} });
     committed[vs]=open; act[vs]={t:"raise",label:`Raises ${fmt(open)}`}; }
@@ -1186,8 +1288,10 @@ function drillSetup(m){
   else if(m.scenario==="vs_5bet"){ play.forEach(s=>{ if(s!==hero&&s!==vs){act[s]={t:"fold",label:"Fold"};folded.add(s);} });
     committed[hero]=24; committed[vs]=100; act[hero]={t:"raise",label:`4-Bet`}; act[vs]={t:"raise",label:`5-Bet ALL-IN`}; }
   const chart=resolveChart(m.size,hero,m.scenario,vs);
-  H={play,n,hero,sb,bb,deck:[],committed,folded,cards:{[hero]:m.cards},act,level:0,aggressor:vs||bb,
-     opener:(m.scenario==="vs_rfi"?vs:hero),heroRole:null,villain:vs,raiser:{},pot:1.5,vrange:{},
+  const isoM=m.scenario==="vs_limp";
+  H={play,n,hero,sb,bb,deck:[],committed,folded,cards:{[hero]:m.cards},act,level:0,aggressor:isoM?bb:(vs||bb),
+     opener:(m.scenario==="vs_rfi"?vs:hero),heroRole:null,villain:isoM?null:vs,raiser:{},pot:1.5,vrange:{},
+     limpers:dLimpers,limpVs:isoM?vs:null,
      node:makeNode(m.scenario,chart,vs),ended:false,result:"",heroHand:m.hand,heroCards:m.cards,
      reviewChart:null,reviewHand:null,decisions:[],drill:true};
   recalcPot();
@@ -1314,8 +1418,8 @@ $("bldStack").oninput=()=>{ BUILDER.stack=parseFloat($("bldStack").value)||100; 
 $("bldLabel").oninput=()=>{ const c=curChart(); if(c){ c.raise_label=$("bldLabel").value; saveDraft(); } };
 $("bldSize").oninput =()=>{ const c=curChart(); if(c){ c.raise_size=parseSize($("bldSize").value); saveDraft(); } };
 $("bldMixR").oninput=$("bldMixC").oninput=()=>{ if(brushId==="mix") brush=currentMix(); };
-$("bldClear").onclick=()=>{ const c=ensureCurChart(); Object.keys(c.grid).forEach(h=>c.grid[h]=[0,0,1]); renderBGrid(); updateBStats(); saveDraft(); };
-$("bldFill").onclick =()=>{ const c=ensureCurChart(); Object.keys(c.grid).forEach(h=>c.grid[h]=[1,0,0]); renderBGrid(); updateBStats(); saveDraft(); };
+$("bldClear").onclick=()=>{ const c=ensureCurChart(); if(!c) return; Object.keys(c.grid).forEach(h=>c.grid[h]=[0,0,1]); renderBGrid(); updateBStats(); saveDraft(); };
+$("bldFill").onclick =()=>{ const c=ensureCurChart(); if(!c) return; Object.keys(c.grid).forEach(h=>c.grid[h]=[1,0,0]); renderBGrid(); updateBStats(); saveDraft(); };
 $("bldExport").onclick=()=>{
   BUILDER.name=($("bldName").value||"").trim(); BUILDER.stack=parseFloat($("bldStack").value)||100;
   if(!BUILDER.name){ bmsg("Give your set a name first.",true); return; }
