@@ -1265,12 +1265,13 @@ function renderTable(){
     let cards;
     if(isHero) cards=`<div class="cards"></div>`;
     else cards=`<div class="cards"><div class="mini back"></div><div class="mini back"></div></div>`;
-    // only ever your own equity — you don't get to see a villain's at the table
+    // hand equity is yours alone (a villain's would leak the cards they hold);
+    // range equity is public study information, so show it for everyone
     const chips=[];
     if(isHero && showdown && H.equity && H.equity[seat]!=null)
       chips.push(`<div class="eq" title="Your exact hand vs the other players' ranges">${Math.round(H.equity[seat]*100)}%<span class="eqr">hand</span></div>`);
-    if(isHero && showdown && H.eqRange && H.eqRange[seat]!=null)
-      chips.push(`<div class="eq rng" title="The whole range your line reps, vs theirs">${Math.round(H.eqRange[seat]*100)}%<span class="eqr">range</span></div>`);
+    if(showdown && H.eqRange && H.eqRange[seat]!=null)
+      chips.push(`<div class="eq rng" title="${isHero?"The whole range your line reps, vs theirs":"This player's range vs the others"}">${Math.round(H.eqRange[seat]*100)}%<span class="eqr">range</span></div>`);
     const eq = chips.length ? `<div class="eqbox">${chips.join("")}</div>` : "";
     const dchip = seat===btnSeat ? '<div class="dchip">D</div>' : '';
     el.innerHTML=`<span class="action-tag" data-tag></span><div class="pod">${dchip}<div class="pos">${SEAT_LABEL[seat]}</div><div class="stack">100 bb</div>${cards}</div>${eq}`;
@@ -1541,9 +1542,12 @@ function historyRow(rec){
   });
   if(rec.flop){
     const fl=rec.flop.map(glyph).join(" ");
-    // your own equity only — a villain's number is nothing you'd have at the table
-    const eqStr=(rec.equity && rec.equity[rec.hero]!=null) ? `hand ${Math.round(rec.equity[rec.hero]*100)}%` : "";
-    const rngStr=(rec.eqRange && rec.eqRange[rec.hero]!=null) ? ` · range ${Math.round(rec.eqRange[rec.hero]*100)}%` : "";
+    // your hand equity only; range equity for everyone still in
+    const eqStr=(rec.equity && rec.equity[rec.hero]!=null) ? `your hand ${Math.round(rec.equity[rec.hero]*100)}%` : "";
+    const rngStr=rec.eqRange
+      ? " · ranges: "+(rec.remaining||[]).filter(s=>rec.eqRange[s]!=null)
+          .map(s=>(s===rec.hero?"you":P[s])+" "+Math.round(rec.eqRange[s]*100)+"%").join(" · ")
+      : "";
     const div=document.createElement("div"); div.className="hflop";
     div.innerHTML=`<span>Flop ${fl}</span><span class="eqs">${eqStr}${rngStr}</span>`;
     el.appendChild(div);
