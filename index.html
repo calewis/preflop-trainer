@@ -10266,29 +10266,49 @@ const pctS=x=>Math.round(x*100)+"%";
 /* postflop the blinds act first, then it runs round to the button */
 function postflopOrder(){ const p=H.play, n=p.length; return p.slice(n-2).concat(p.slice(0,n-2)); }
 function flopLive(){ return H.fOrder.filter(s=>!H.folded.has(s)); }
+/* best 5-card rank from 5, 6 or 7 cards (lower is better). The 6-card case
+   takes the best of its six 5-card subsets, which avoids vendoring phe's
+   113KB six-card table for the one street that needs it. */
+const SIX=[0,0,0,0,0];
+function bestRank(ids){
+  if(ids.length===7) return rank7(ids);
+  if(ids.length===5) return rank5(ids);
+  let best=1e9;
+  for(let skip=0;skip<6;skip++){
+    let k=0; for(let i=0;i<6;i++){ if(i!==skip) SIX[k++]=ids[i]; }
+    const v=rank5(SIX); if(v<best) best=v;
+  }
+  return best;
+}
 /* 0 high card, 1 pair, 2 two pair, 3 trips, 4 straight, 5 flush, 6 boat,
    7 quads, 8 straight flush — phe ranks run the other way, so this flips them
    (boundaries lifted from phe's own handRank) */
-function madeTier(cards2){
-  const v=rank5(toIds(cards2.concat(H.flop)));
+function tierOf(cards2, board){
+  const v=bestRank(toIds(cards2.concat(board)));
   return v>6185?0 : v>3325?1 : v>2467?2 : v>1609?3 : v>1599?4 : v>322?5 : v>166?6 : v>10?7 : 8;
 }
-function hasFlushDraw(cards2){
-  const cnt={}; cards2.concat(H.flop).forEach(c=>cnt[c[1]]=(cnt[c[1]]||0)+1);
-  return Object.values(cnt).some(v=>v===4);
+function flushDrawOn(cards2, board){
+  const cnt={}; cards2.concat(board).forEach(c=>cnt[c[1]]=(cnt[c[1]]||0)+1);
+  return Object.values(cnt).some(v=>v===4);          // exactly four to a suit = live draw
 }
-function isTopPairPlus(cards2){
-  const t=madeTier(cards2); if(t>=2) return true; if(t!==1) return false;
-  const br=H.flop.map(c=>RVAL[c[0]]), hi=Math.max(...br), hr=cards2.map(c=>RVAL[c[0]]);
+function topPairPlusOn(cards2, board){
+  const t=tierOf(cards2,board); if(t>=2) return true; if(t!==1) return false;
+  const br=board.map(c=>RVAL[c[0]]), hi=Math.max(...br), hr=cards2.map(c=>RVAL[c[0]]);
   if(hr[0]===hr[1]) return hr[0]>=hi;                      // overpair
   return hr.some(r=>br.includes(r) && r>=hi);              // paired the top card
 }
-function villainFlopAct(seat, toCall){
-  const c=H.cards[seat], t=madeTier(c), strong=isTopPairPlus(c), draw=hasFlushDraw(c), r=Math.random();
+const madeTier=c=>tierOf(c,H.flop);
+const hasFlushDraw=c=>flushDrawOn(c,H.flop);
+const isTopPairPlus=c=>topPairPlusOn(c,H.flop);
+/* the villain policy, usable on any street and any pot — the flop wrapper below
+   is what the live hand calls, the simulator drives it on turn and river too */
+function botAct(cards2, board, toCall, pot){
+  const t=tierOf(cards2,board), strong=topPairPlusOn(cards2,board),
+        draw=board.length<5 && flushDrawOn(cards2,board), r=Math.random();
   if(toCall>0){
     // defend on price, not on a flat frequency — otherwise fold equity barely
     // moves with bet size and the app would teach you to over-bluff
-    const odds=toCall/(H.pot+toCall);
+    const odds=toCall/(pot+toCall);
     if(t>=2)    return r<0.35?"raise":"call";
     if(strong)  return r<(odds<0.45?0.92:0.7)?"call":"fold";
     if(draw)    return r<Math.max(0.15,0.95-odds*1.5)?"call":"fold";
@@ -10300,6 +10320,7 @@ function villainFlopAct(seat, toCall){
   if(draw)   return r<0.4?"bet":"check";
   return r<0.15?"bet":"check";                              // some air, so they aren't face-up
 }
+function villainFlopAct(seat, toCall){ return botAct(H.cards[seat], H.flop, toCall, H.pot); }
 /* everyone sits behind 100bb, so nothing on the flop can be bet that a player
    hasn't got left after the preflop action */
 const STACK=100;
@@ -10366,16 +10387,92 @@ function villainFlopStep(s){
   const to=flopRaiseTo(); flopPut(s,to-(H.fCommit[s]||0)); H.fBet=to; H.fRaises++;
   H.act[s]={t:"raise",label:"Raises to "+fmt(to)};
 }
-/* Implied odds: extra money you expect to win on later streets when you get
-   there. It only attaches to the improving part of your equity, so a made hand
-   earns none. PAYOFF is the one genuine assumption in here — how much more goes
-   in when you hit — so it is stated, not hidden. */
-const PAYOFF=0.9;
-function impliedExtra(drawShare, heroEq, pot){
-  // scale by the ABSOLUTE chance of getting there and winning, not by the share
-  // of your equity — otherwise air, which wins only by improving, scores highest
-  const hitAndWin=drawShare*heroEq;
-  return Math.round(Math.min(hitAndWin*PAYOFF*pot, stackLeft(H.hero))*10)/10;
+/* EXACT hand-vs-range equity: every villain combo against all 990 turn/river
+   runouts. No sampling error at all. Only affordable heads-up against a range
+   of sane size, so callers fall back to mcEquities otherwise. */
+const EXACT_COMBO_CAP=700;
+function exactVsRange(heroCards, board, vseat){
+  const dead=new Set([...heroCards, ...board]);
+  let items=rangeCombos(H.vrange[vseat]).filter(it=>!it.cards.some(c=>dead.has(c)));
+  if(!items.length) items=[{cards:H.cards[vseat],w:1}];
+  if(items.length>EXACT_COMBO_CAP) return null;               // too many; sample instead
+  const hIds=toIds(heroCards), bIds=toIds(board), base=freshDeck().filter(c=>!dead.has(c));
+  const seven=[0,0,bIds[0],bIds[1],bIds[2],0,0], five=[bIds[0],bIds[1],bIds[2],0,0];
+  let win=0, tot=0, drawWin=0;
+  for(const it of items){
+    const vIds=toIds(it.cards);
+    const rest=base.filter(c=>c!==it.cards[0] && c!==it.cards[1]).map(c=>PHE_ID[c]);
+    five[3]=hIds[0]; five[4]=hIds[1]; const hFlop=rank5(five);
+    five[3]=vIds[0]; five[4]=vIds[1]; const vFlop=rank5(five);
+    const heroBehindNow = hFlop>vFlop;                        // lower rank is better
+    for(let i=0;i<rest.length;i++) for(let j=i+1;j<rest.length;j++){
+      seven[5]=rest[i]; seven[6]=rest[j];
+      seven[0]=hIds[0]; seven[1]=hIds[1]; const hv=rank7(seven);
+      seven[0]=vIds[0]; seven[1]=vIds[1]; const vv=rank7(seven);
+      const share = hv<vv?1 : hv===vv?0.5 : 0;
+      win+=it.w*share; tot+=it.w;
+      if(share>0 && heroBehindNow) drawWin+=it.w*share;
+    }
+  }
+  const eq=tot?win/tot:0, out=[eq,1-eq];
+  out.drawShare = (tot && eq>0) ? (drawWin/tot)/eq : 0;
+  out.exact=true;
+  return out;
+}
+/* What calling is ACTUALLY worth: play the rest of the hand out against the
+   bots and average hero's result. Implied odds fall out of this rather than
+   being assumed — the extra money won when the draw lands, less the money lost
+   paying off when it lands and is still second best. Heads-up only; multiway
+   betting trees are left to a later pass. Returns bb won relative to folding. */
+function simulateCall(vseat, toCall, SAMPLES){
+  const hero=H.cards[H.hero], dead=new Set([...H.flop, ...hero]);
+  let items=rangeCombos(H.vrange[vseat]).filter(it=>!it.cards.some(c=>dead.has(c)));
+  if(!items.length) items=[{cards:H.cards[vseat],w:1}];
+  const tot=items.reduce((a,b)=>a+b.w,0), base=freshDeck().filter(c=>!dead.has(c));
+  const heroLeft=stackLeft(H.hero), vLeft=stackLeft(vseat)-toCall;
+  let sum=0, n=0;
+  for(let s=0;s<SAMPLES;s++){
+    let x=Math.random()*tot, pick=items[items.length-1];
+    for(const it of items){ x-=it.w; if(x<=0){ pick=it; break; } }
+    const vc=pick.cards;
+    const deck=base.filter(c=>c!==vc[0] && c!==vc[1]);
+    const t1=deck[rnd(deck.length)]; let t2=t1; while(t2===t1) t2=deck[rnd(deck.length)];
+    let pot=Math.round((H.pot+toCall)*10)/10;    // hero has called
+    let invested=toCall, vInv=0, folded=null;
+    const board=H.flop.slice();
+    for(const card of [t1,t2]){
+      if(folded) break;
+      board.push(card);
+      const sizeOf=p=>Math.max(0.5, Math.round(p*FLOP_BET*2)/2);
+      const va=botAct(vc,board,0,pot);
+      if(va==="bet"||va==="raise"){
+        const b=Math.min(sizeOf(pot), vLeft-vInv, heroLeft-invested);
+        if(b>0.4){
+          // hero continues with a real hand or a live draw, otherwise folds
+          const cont = topPairPlusOn(hero,board) || (board.length<5 && flushDrawOn(hero,board));
+          if(!cont){ folded="hero"; break; }
+          pot=Math.round((pot+2*b)*10)/10; invested+=b; vInv+=b;
+        }
+      } else if(tierOf(hero,board)>=2){
+        const b=Math.min(sizeOf(pot), heroLeft-invested, vLeft-vInv);
+        if(b>0.4){
+          const resp=botAct(vc,board,b,pot+b);
+          if(resp==="fold"){ folded="villain"; pot=Math.round((pot+b)*10)/10; invested+=b; break; }
+          pot=Math.round((pot+2*b)*10)/10; invested+=b; vInv+=b;
+        }
+      }
+    }
+    let net;
+    if(folded==="hero")            net=-invested;
+    else if(folded==="villain")    net=pot-invested;
+    else {
+      const full=board.concat();
+      const hv=bestRank(toIds(hero.concat(full))), vv=bestRank(toIds(vc.concat(full)));
+      net = (hv<vv ? pot : hv===vv ? pot/2 : 0) - invested;
+    }
+    sum+=net; n++;
+  }
+  return n? sum/n : 0;
 }
 /* How often the villains fold to a bet of `size`. This one is exact rather than
    assumed: they are a function we wrote, so we sample the range each of them
@@ -10410,9 +10507,12 @@ function presentFlopDecision(){
    your equity against the live ranges, and the price the pot is laying you */
 function gradeFlop(col, toCall){
   const live=flopLive().filter(s=>s!==H.hero);
-  const eq=mcEquities({cards:H.cards[H.hero]}, H.flop, live, 3000, true);
+  // heads-up we can enumerate every runout exactly; multiway we sample (and can
+  // afford far more samples than before the evaluator swap)
+  const eq=(live.length===1 && exactVsRange(H.cards[H.hero], H.flop, live[0]))
+        || mcEquities({cards:H.cards[H.hero]}, H.flop, live, 12000, true);
   const sig=heroRangeSig();
-  const rq=sig ? mcEquities({sig}, H.flop, live, 2500) : null;
+  const rq=sig ? mcEquities({sig}, H.flop, live, 8000) : null;
   H.equity={}; H.equity[H.hero]=eq[0]; live.forEach((s,i)=>H.equity[s]=eq[i+1]);
   if(rq){ H.eqRange={}; H.eqRange[H.hero]=rq[0]; live.forEach((s,i)=>H.eqRange[s]=rq[i+1]); }
   H.revealEq=true;
@@ -10422,29 +10522,44 @@ function gradeFlop(col, toCall){
   let correct, close=false;
 
   if(toCall>0){
-    // three zones: clearly enough on raw odds / clearly not enough even with
-    // implied odds / a judgment band in between, where either way is defensible
     const needRaw=toCall/(H.pot+toCall);
-    const extra=impliedExtra(drawShare,heroEq,H.pot);
-    const needImp=toCall/(H.pot+toCall+extra);
+    // the honest verdict: play the hand out and see what calling is worth
+    const ev = live.length===1 ? simulateCall(live[0], toCall, 4000) : null;
     const M=0.02;
-    if(heroEq>=needRaw-M){ correct=(col!==2); }
-    else if(heroEq<needImp-M){ correct=(col===2); }
-    else { correct=true; close=true; }
-    const bar=extra>0.05?needImp:needRaw;
+    if(ev!=null){
+      if(ev>0.15)       correct=(col!==2);
+      else if(ev<-0.15) correct=(col===2);
+      else { correct=true; close=true; }
+    } else {                                   // multiway: raw pot odds only
+      if(heroEq>=needRaw-M) correct=(col!==2);
+      else if(heroEq<needRaw-M) correct=(col===2);
+      if(Math.abs(heroEq-needRaw)<0.03){ correct=true; close=true; }
+    }
     B.push({m:"nu", t:`<b>Pot odds — you need ${pctS(needRaw)}.</b> `
        +`You're paying ${fmt(toCall)} to win a pot of ${fmt(H.pot)}.`});
-    if(extra>0.05) B.push({m:"nu",
-      t:`<b>Implied odds drop that to ${pctS(needImp)}.</b> ${pctS(drawShare)} of your equity comes from `
-       +`hitting a draw, and you win more than the pot when you get there.`});
-    B.push({m:correct?"ok":"no",
-      t:`<b>Your equity — ${pctS(heroEq)}.</b> That's how often this hand wins <b>by the river</b> against `
-       +`${live.length>1?"their ranges":"their range"} — draws included, not just how often you're ahead now.`});
-    B.push({m:"nu", t: close
-      ? `${pctS(heroEq)} sits right on the ${pctS(bar)} you need — too close to be a mistake either way.`
-      : heroEq>=bar
-        ? `${pctS(heroEq)} beats the ${pctS(bar)} you need, so calling makes money long run.`
-        : `${pctS(heroEq)} is short of the ${pctS(bar)} you need, so folding is the profitable choice.`});
+    B.push({m:"nu",
+      t:`<b>Your equity — ${pctS(heroEq)}${eq.exact?"":" (sampled)"}.</b> How often this hand wins `
+       +`<b>by the river</b> against ${live.length>1?"their ranges":"their range"} — draws included, not `
+       +`just how often you're ahead right now.`});
+    if(ev!=null){
+      const gap=heroEq-needRaw;
+      B.push({m:correct?"ok":"no",
+        t:`<b>Calling is worth ${ev>=0?"+":""}${fmt(Math.round(ev*10)/10)}bb.</b> `
+         +`That's from playing the hand out against these opponents 4,000 times — folding is worth 0.`});
+      if(gap<0 && ev>0.15) B.push({m:"nu",
+        t:`Note you're <b>below</b> the ${pctS(needRaw)} pot odds, yet calling still profits: that gap `
+         +`<b>is</b> your implied odds — the extra you win on later streets when the draw lands.`});
+      else if(gap>0 && ev<-0.15) B.push({m:"nu",
+        t:`Note you're <b>above</b> the ${pctS(needRaw)} pot odds, yet calling loses: you pay off too `
+         +`often on later streets when you improve and are still second best.`});
+      else if(close) B.push({m:"nu", t:`Close to break-even either way, so this isn't a mistake.`});
+    } else {
+      B.push({m:correct?"ok":"no", t: close
+        ? `${pctS(heroEq)} sits right on the ${pctS(needRaw)} you need — too close to be a mistake either way.`
+        : heroEq>=needRaw
+          ? `${pctS(heroEq)} beats the ${pctS(needRaw)} you need, so calling makes money long run.`
+          : `${pctS(heroEq)} is short of the ${pctS(needRaw)} you need, so folding is the profitable choice.`});
+    }
   } else {
     // betting: value if you're well ahead of your fair share, or a profitable
     // semi-bluff if they fold often enough to beat the price you're laying
