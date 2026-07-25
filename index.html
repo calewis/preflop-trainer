@@ -175,6 +175,10 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
 .legend{display:flex;gap:14px;justify-content:center;margin-top:10px;font-size:15px;flex-wrap:wrap}
 .legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-1px}
 .mixnote{text-align:center;font-size:15px;color:var(--dim);margin-top:8px}
+.rangenav{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.rangenav .chips{justify-content:center}
+.rangenav .chip{padding:6px 10px;font-size:13px}
+.rangenav #rangeVs .chip{padding:5px 9px;font-size:12px;border-radius:14px}
 
 /* settings */
 .setgrp{background:var(--panel);border:1px solid var(--line);border-radius:12px;
@@ -332,6 +336,10 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
   <div class="ohead">
     <div class="grow"><h2 id="rangeTitle">Range</h2><div class="osub" id="rangeSub"></div></div>
     <button class="closeX" id="rangeClose">✕</button>
+  </div>
+  <div id="rangeNav" class="rangenav hidden">
+    <div class="chips" id="rangeScen"></div>
+    <div class="chips" id="rangeVs"></div>
   </div>
   <div id="gridWrap"><div id="rangeGrid"></div></div>
   <div class="legend">
@@ -1544,7 +1552,7 @@ function renderTable(){
     const eq = chips.length ? `<div class="eqbox">${chips.join("")}</div>` : "";
     const dchip = seat===btnSeat ? '<div class="dchip">D</div>' : '';
     el.innerHTML=`<span class="action-tag" data-tag></span><div class="pod">${dchip}<div class="pos">${SEAT_LABEL[seat]}</div><div class="stack">100 bb</div>${cards}</div>${eq}`;
-    el.onclick=()=>openPlayerRanges(seat);
+    el.onclick=()=>openSeatRange(seat);
     seatsEl.appendChild(el);
   }
   $("pot").textContent="Pot "+H.pot+" bb";
@@ -1697,7 +1705,59 @@ function colCombos(chart,col){
   let n=0; for(const h in chart.grid) n+=(chart.grid[h][col]||0)*combosOf(h);
   return n;
 }
+/* every chart the active set holds for one seat, grouped by scenario */
+function seatChartMap(seat){
+  const map={}, play=inPlaySeats();
+  SCENARIOS.forEach(sc=>{
+    const vss=[];
+    if(sc.id==="rfi"){ if(getChart("rfi",seat,null)) vss.push(null); }
+    else if(sc.id==="vs_limp"){
+      limpCountsFor(seat).forEach(k=>{ if(getChart("vs_limp",seat,limpTok(k))) vss.push(limpTok(k)); });
+    } else play.forEach(v=>{ if(v!==seat && getChart(sc.id,seat,v)) vss.push(v); });
+    if(vss.length) map[sc.id]=vss;
+  });
+  return map;
+}
+/* the range overlay, with chips to walk every other range that seat has */
+function showSeatRanges(seat, scen, vs){
+  const map=seatChartMap(seat), ids=Object.keys(map);
+  if(!ids.length){
+    $("rangeTitle").textContent=SEAT_LABEL[seat]+" — no charts";
+    $("rangeSub").textContent=""; $("rangeNav").classList.add("hidden");
+    $("mixNote").textContent="The loaded chart set has nothing for this seat at this table size.";
+    renderGrid({grid:{}},null); showOverlay("rangeOverlay"); return;
+  }
+  if(!scen || !map[scen]) scen=ids[0];
+  const list=map[scen];
+  if(vs===undefined || !list.some(v=>v===vs)) vs=list[0];
+  showChartOverlay(getChart(scen,seat,vs), null, false);
+  const nav=$("rangeNav"); nav.classList.remove("hidden");
+  const scRow=$("rangeScen"); scRow.innerHTML="";
+  SCENARIOS.filter(s=>map[s.id]).forEach(s=>{
+    const c=document.createElement("div"); c.className="chip mini2"+(s.id===scen?" on":"");
+    c.textContent=s.name; c.onclick=()=>showSeatRanges(seat,s.id,undefined); scRow.appendChild(c);
+  });
+  const vsRow=$("rangeVs"); vsRow.innerHTML="";
+  if(list.length>1 || list[0]!=null) list.forEach(v=>{
+    const c=document.createElement("div"); c.className="chip mini2"+(v===vs?" on":"");
+    c.textContent = v==null ? "—" : vsLabel(scen,v);
+    c.onclick=()=>showSeatRanges(seat,scen,v); vsRow.appendChild(c);
+  });
+}
+/* tapping a seat: open what they repped this hand, then browse from there */
+function openSeatRange(seat){
+  if(!H) return;
+  if(H.node && H.node.scenario==="flop" && !H.revealEq){ openPlayerRanges(seat); return; }
+  const sig = seat===H.hero
+    ? (H.node && H.node.chart ? {chart:H.node.chart} : heroRangeSig())
+    : H.vrange[seat];
+  if(sig && sig.chart && sig.chart.scenario!=="any")
+    showSeatRanges(seat, sig.chart.scenario, sig.chart.vs||null);
+  else if(sig && sig.chart) showChartOverlay(sig.chart,null,false);
+  else showSeatRanges(seat, null, undefined);
+}
 function showChartOverlay(c,hand,missNote){
+  $("rangeNav").classList.add("hidden");        // shown again only for seat browsing
   $("rangeTitle").textContent=chartTitle(c);
   $("rangeSub").textContent=c.raise_label||"";
   $("lgRaise").textContent=legendRaiseWord(c);
@@ -1760,7 +1820,7 @@ function openPlayerRanges(focusSeat){
     list.innerHTML=`<div class="hempty">No one has acted yet this hand.</div>`;
     showOverlay("plOverlay"); return;
   }
-  $("plSub").textContent="Tap a player to open their full chart";
+  $("plSub").textContent="Tap a player for their full chart — then browse all their ranges";
   rows.forEach(r=>{
     const row=document.createElement("div");
     row.className="prow"+(r.me?" me":"")+(H.folded.has(r.seat)?" out":"");
@@ -1783,7 +1843,9 @@ function openPlayerRanges(focusSeat){
     if(r.sig){
       const chev=document.createElement("span"); chev.className="pchev"; chev.textContent="›";
       row.appendChild(chev);
-      row.onclick=()=>showChartOverlay(r.sig.chart,null,false);
+      row.onclick=()=> r.sig.chart.scenario==="any"
+        ? showChartOverlay(r.sig.chart,null,false)
+        : showSeatRanges(r.seat, r.sig.chart.scenario, r.sig.chart.vs||null);
     }
     list.appendChild(row);
   });
