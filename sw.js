@@ -1,5 +1,5 @@
 /* Preflop Trainer service worker — full offline. Bump CACHE on each app update. */
-const CACHE = 'preflop-v2';
+const CACHE = 'preflop-v3';
 const SHELL = ['./', './index.html', './sw.js'];
 self.addEventListener('install', e => e.waitUntil(
   caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())));

@@ -36,8 +36,15 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
 .stat span{font-size:11px;letter-spacing:.5px;color:var(--dim);text-transform:uppercase}
 #top .grow{flex:1}
 .iconbtn{background:var(--panel);border:1px solid var(--line);color:var(--txt);
-  width:46px;height:46px;border-radius:10px;font-size:24px;display:flex;
+  width:46px;height:46px;border-radius:10px;font-size:24px;display:flex;flex:0 0 auto;
   align-items:center;justify-content:center}
+.iconbtn[disabled]{opacity:.35}
+@media (max-width:410px){
+  #top{gap:6px;padding:8px 8px 6px}
+  .stat{min-width:44px;padding:5px 6px}
+  .stat b{font-size:17px}
+  .iconbtn{width:40px;height:40px;font-size:20px}
+}
 
 /* ---- table ---- */
 #tableWrap{flex:1;position:relative;min-height:0;padding:6px 10px}
@@ -70,10 +77,17 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
   display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:.9}
 .vcard .r{font-size:19px;font-weight:800}.vcard .s{font-size:14px}
 .vcard.red{color:#d21f2b}.vcard.blk{color:#111}
-.eq{position:absolute;left:50%;top:100%;transform:translateX(-50%);margin-top:3px;white-space:nowrap;z-index:8;
-  font-size:12px;font-weight:800;color:#0b0f0d;background:var(--gold);padding:1px 7px;border-radius:9px;box-shadow:0 1px 3px rgba(0,0,0,.5)}
-.seat.hero .eq{top:-32px;bottom:auto}
-.eqr{font-size:9px;font-weight:700;opacity:.65}
+.eqbox{position:absolute;left:50%;top:100%;transform:translateX(-50%);margin-top:3px;z-index:8;
+  display:flex;flex-direction:column;align-items:center;gap:2px}
+.seat.hero .eqbox{top:auto;bottom:100%;margin:0 0 5px}
+.eq{white-space:nowrap;font-size:12px;font-weight:800;color:#0b0f0d;background:var(--gold);
+  padding:1px 7px;border-radius:9px;box-shadow:0 1px 3px rgba(0,0,0,.5)}
+.eq.rng{background:#8fc8e8;color:#08161d}
+.eqr{font-size:9px;font-weight:700;opacity:.7;margin-left:2px}
+#eqNote{margin-top:5px;font-size:11px;color:#bcd8c6;line-height:1.35;text-shadow:0 1px 2px #000}
+#eqNote i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:3px;vertical-align:0}
+#eqNote .k1 i{background:var(--gold)} #eqNote .k2 i{background:#8fc8e8}
+#eqNote .k2{margin-left:8px}
 
 /* seats */
 .seat{position:absolute;transform:translate(-50%,-50%);width:92px;text-align:center;
@@ -197,6 +211,20 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
 .hflop{margin-top:8px;font-size:13px;color:#cfe8d6;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .hflop .eqs{color:var(--dim)}
 .hempty{color:var(--dim);text-align:center;margin-top:30px;font-size:15px}
+/* players' ranges */
+.prow{display:flex;align-items:center;gap:11px;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;padding:10px 11px;margin-bottom:9px}
+.prow.me{border-color:var(--gold)}
+.prow.out{opacity:.55}
+.prow .pinfo{flex:1;min-width:0}
+.prow .pseat{font-size:16px;font-weight:800;color:var(--gold)}
+.prow .pact{font-size:12px;font-weight:800;padding:1px 6px;border-radius:9px;margin-left:6px;vertical-align:1px}
+.prow .pmeta{font-size:12px;color:var(--dim);margin-top:3px;line-height:1.35}
+.prow .pnone{font-size:12px;color:var(--dim);margin-top:3px;font-style:italic}
+.mgrid{display:grid;grid-template-columns:repeat(13,1fr);gap:1px;width:78px;height:78px;flex:0 0 auto;
+  background:#0c1210;padding:1px;border-radius:3px}
+.mgrid i{display:block;border-radius:1px}
+.pchev{color:var(--dim);font-size:18px;flex:0 0 auto}
 /* chart-set library */
 .chartlist{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
 .csrow{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
@@ -235,6 +263,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
     <div class="stat"><b id="stStreak">0</b><span>Streak</span></div>
     <div class="grow"></div>
     <button class="iconbtn" id="histBtn" title="Hand history">🕘</button>
+    <button class="iconbtn" id="plBtn" title="Players' ranges">👥</button>
     <button class="iconbtn" id="chartBtn" title="Show chart">▦</button>
     <button class="iconbtn" id="setBtn" title="Settings">⚙</button>
   </div>
@@ -242,7 +271,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
   <div id="tableWrap">
     <div id="table">
       <div id="feltLabel">PREFLOP</div>
-      <div id="center"><div id="board"></div><div id="pot">Pot 1.5 bb</div><div id="story"></div></div>
+      <div id="center"><div id="board"></div><div id="pot">Pot 1.5 bb</div><div id="story"></div><div id="eqNote"></div></div>
       <div id="seats"></div>
       <div id="dealer" class="dealer hidden">D</div>
       <div id="heroCards"></div>
@@ -284,6 +313,15 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
   <div class="settingsScroll" id="histList"></div>
 </div>
 
+<!-- players' ranges overlay -->
+<div id="plOverlay" class="overlay hidden">
+  <div class="ohead">
+    <div class="grow"><h2>Players' Ranges</h2><div class="osub" id="plSub">What each player is repping</div></div>
+    <button class="closeX" id="plClose">✕</button>
+  </div>
+  <div class="settingsScroll" id="plList"></div>
+</div>
+
 <!-- settings overlay -->
 <div id="setOverlay" class="overlay hidden">
   <div class="ohead">
@@ -304,6 +342,11 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
       <h3>Hand Selection</h3>
       <div class="chips" id="modeChips"></div>
       <div class="hintline"><b>Difficult</b> biases toward borderline hands near the edges of the range (mixed / close decisions).</div>
+    </div>
+    <div class="setgrp">
+      <h3>Spots I Practice</h3>
+      <div class="chips" id="scenChips"></div>
+      <div class="hintline" id="scenHint">Every hand <b>starts</b> at one of the selected spots — pick just <b>vs 3-Bet</b> to drill only 3-bet defence. Greyed-out spots have no ranges in the loaded chart set for this table size and these seats. Once a hand is under way it still plays out naturally, so deeper decisions can follow.</div>
     </div>
     <div class="setgrp">
       <h3>Chart Set</h3>
@@ -615,7 +658,6 @@ DATA.charts.forEach(c=>{ CHARTS[`${c.scenario}|${c.hero}|${c.vs||""}`]=c; });
 function limpCountsFor(hero){ const out=[];
   Object.keys(CHARTS).forEach(k=>{ const p=k.split("|"); if(p[0]==="vs_limp"&&p[1]===hero){ const n=limpN(p[2]); if(!out.includes(n)) out.push(n); } });
   return out.sort((a,b)=>a-b); }
-const HAS_LIMP = Object.keys(CHARTS).some(k=>k.startsWith("vs_limp|"));
 
 /* Heads-up (2-max) uses purpose-built ranges generated in-app
    (SB = button/opener). */
@@ -658,13 +700,20 @@ const LS="preflopTrainer.v1";
 const defaults={
   size:6,
   seats:{},                 // seat -> bool (allowed)
-  scen:{rfi:true,vs_rfi:true,vs_3bet:true,vs_4bet:true,vs_5bet:false},
+  scen:{rfi:true,vs_limp:true,vs_rfi:true,vs_3bet:true,vs_4bet:true,vs_5bet:true},
+  scenV2:true,              // pre-v2 saves carry a dead `scen` value — reset it once
   mode:"random",
   stats:{hands:0,decisions:0,scoreSum:0,streak:0,best:0}
 };
 let S = load();
 function load(){
-  try{ const s=JSON.parse(localStorage.getItem(LS)); if(s&&s.stats) return Object.assign({},defaults,s);}catch(e){}
+  try{ const s=JSON.parse(localStorage.getItem(LS)); if(s&&s.stats){
+    const st=Object.assign({},defaults,s);
+    // pre-v2 saves carry a `scen` value that was never wired to anything — drop it
+    if(!s.scenV2){ st.scen=JSON.parse(JSON.stringify(defaults.scen)); st.scenV2=true; }
+    SCENARIOS.forEach(sc=>{ if(typeof st.scen[sc.id]!=="boolean") st.scen[sc.id]=true; });
+    return st;
+  }}catch(e){}
   const d=JSON.parse(JSON.stringify(defaults));
   SEATS.forEach(p=>d.seats[p]=true);
   return d;
@@ -739,7 +788,7 @@ const HIST_LS="preflopTrainer.hist.v1", MIST_LS="preflopTrainer.mist.v1";
 function makeRecord(h){ return {
   size:h.n, hero:h.hero, heroCards:h.heroCards.slice(),
   decisions:h.decisions.map(d=>({scenario:d.scenario,vs:d.vs,col:d.col,freqs:d.freqs,correct:d.correct})),
-  result:h.result, flop:h.flop||null, equity:h.equity||null, remaining:h.remaining||null }; }
+  result:h.result, flop:h.flop||null, equity:h.equity||null, eqRange:h.eqRange||null, remaining:h.remaining||null }; }
 function saveHistory(){ try{ localStorage.setItem(HIST_LS, JSON.stringify(H_HISTORY.slice(0,120))); }catch(e){} }
 function loadHistory(){ try{ H_HISTORY=JSON.parse(localStorage.getItem(HIST_LS))||[]; }catch(e){ H_HISTORY=[]; } }
 function saveMistakes(){ try{ localStorage.setItem(MIST_LS, JSON.stringify(MISTAKES)); }catch(e){} }
@@ -813,6 +862,11 @@ function handCombos(h){
   else { for(const a of su)for(const b of su) if(a!==b) out.push([h[0]+a,h[1]+b]); }
   return out;
 }
+/* the BB's option in a limped pot: they never had to fold, so their range is
+   every hand — a real range, not the single hand they happen to hold */
+const ANY_RANGE=(()=>{ const grid={};
+  for(let i=0;i<13;i++)for(let j=0;j<13;j++) grid[handName(i,j)]=[0,1,0];
+  return {hero:"BB", vs:null, scenario:"any", raise_label:"", grid}; })();
 /* weighted combo list for a villain's continuing range (chart + action index) */
 function rangeCombos(sig){
   if(!sig) return [];
@@ -821,103 +875,204 @@ function rangeCombos(sig){
     for(const cc of handCombos(h)) out.push({cards:cc,w}); }
   return out;
 }
-/* Monte-Carlo equity of hero's exact hand vs each villain's RANGE, on a flop */
-function rangeEquities(hero2, flop3, vseats){
+/* Monte-Carlo equity on a flop, hero first in the returned array.
+   heroSrc = {cards:[c,c]}  -> hero's exact hand vs each villain's RANGE
+   heroSrc = {sig:{chart,idx}} -> hero's whole RANGE vs each villain's RANGE */
+function mcEquities(heroSrc, flop3, vseats, SAMPLES){
   const toRS=c=>({r:RVAL[c[0]], s:"shdc".indexOf(c[1])});
-  const dead=new Set([...hero2, ...flop3]);
-  const vlists=vseats.map(v=>{
-    let items=rangeCombos(H.vrange[v]).filter(it=>!it.cards.some(c=>dead.has(c)));
-    if(!items.length) items=[{cards:H.cards[v]||dealTwo(),w:1}];   // fallback
+  // hero's exact cards are dead to the villains only when hero is holding them
+  const dead=new Set([...flop3, ...(heroSrc.cards||[])]);
+  const mkList=(sig,fallback)=>{
+    let items=rangeCombos(sig).filter(it=>!it.cards.some(c=>dead.has(c)));
+    if(!items.length) items=[{cards:fallback||dealTwo(),w:1}];   // no chart for this seat -> its dealt hand
     return {items, tot:items.reduce((a,b)=>a+b.w,0)};
-  });
-  const full=freshDeck(), heroRS=hero2.map(toRS), b3=flop3.map(toRS);
-  const N=vseats.length+1, eq=new Array(N).fill(0); let iters=0;
-  const SAMPLES=4000;
+  };
+  const lists=[ heroSrc.cards ? {items:[{cards:heroSrc.cards,w:1}],tot:1}
+                              : mkList(heroSrc.sig, H.cards[H.hero]),
+                ...vseats.map(v=>mkList(H.vrange[v], H.cards[v])) ];
+  const full=freshDeck(), b3=flop3.map(toRS);
+  const N=lists.length, eq=new Array(N).fill(0); let iters=0;
   for(let s=0;s<SAMPLES;s++){
-    const used=new Set(dead), vh=[]; let ok=true;
-    for(const vl of vlists){ let pk=null,t=0;
+    const used=new Set(flop3), hands=[]; let ok=true;   // hero draws first, so no self-collision
+    for(const vl of lists){ let pk=null,t=0;
       while(t++<60){ let x=Math.random()*vl.tot, ch=vl.items[vl.items.length-1];
         for(const it of vl.items){ x-=it.w; if(x<=0){ch=it;break;} }
         if(!ch.cards.some(c=>used.has(c))){ pk=ch; break; } }
-      if(!pk){ok=false;break;} pk.cards.forEach(c=>used.add(c)); vh.push(pk.cards.map(toRS)); }
+      if(!pk){ok=false;break;} pk.cards.forEach(c=>used.add(c)); hands.push(pk.cards.map(toRS)); }
     if(!ok) continue;
     const avail=full.filter(c=>!used.has(c));
     const i1=rnd(avail.length); let i2; do{ i2=rnd(avail.length); }while(i2===i1);
     const board=[b3[0],b3[1],b3[2],toRS(avail[i1]),toRS(avail[i2])];
-    const players=[heroRS,...vh]; let best=-1, win=[];
-    for(let p=0;p<players.length;p++){ const val=evaluate7(players[p].concat(board)); if(val>best){best=val;win=[p];} else if(val===best) win.push(p); }
+    let best=-1, win=[];
+    for(let p=0;p<N;p++){ const val=evaluate7(hands[p].concat(board)); if(val>best){best=val;win=[p];} else if(val===best) win.push(p); }
     const sh=1/win.length; for(const p of win) eq[p]+=sh; iters++;
   }
   return eq.map(e=> iters? e/iters : 0);
 }
+/* the range hero is repping on the flop = the chart of hero's last decision,
+   taken at the column hero actually chose */
+function heroRangeSig(){
+  const d=H.decisions && H.decisions[H.decisions.length-1];
+  return (d && d.chart) ? {chart:d.chart, idx:d.col} : null;
+}
 function setupFlop(){
-  H.flop=null; H.equity=null; H.remaining=null; H.showdown=false;
+  H.flop=null; H.equity=null; H.eqRange=null; H.remaining=null; H.showdown=false;
   const rem=H.play.filter(s=> !H.folded.has(s) && (H.committed[s]||0)>0 && H.cards[s]);
   if(rem.length<2 || !rem.includes(H.hero)) return;
   const flop=[H.deck.pop(),H.deck.pop(),H.deck.pop()];
+  if(flop.some(c=>!c)) return;                            // empty deck (drill state)
   const vseats=rem.filter(s=>s!==H.hero);
-  const eq=rangeEquities(H.cards[H.hero], flop, vseats);   // [hero, v1, v2, ...] vs ranges
-  H.flop=flop; H.remaining=rem; H.equity={};
-  H.equity[H.hero]=eq[0]; vseats.forEach((s,i)=>H.equity[s]=eq[i+1]);
+  H.flop=flop; H.remaining=rem;
+  const eq=mcEquities({cards:H.cards[H.hero]}, flop, vseats, 4000);
+  H.equity={}; H.equity[H.hero]=eq[0]; vseats.forEach((s,i)=>H.equity[s]=eq[i+1]);
+  const sig=heroRangeSig(); H.heroSig=sig;
+  if(sig){
+    const eq2=mcEquities({sig}, flop, vseats, 3000);
+    H.eqRange={}; H.eqRange[H.hero]=eq2[0]; vseats.forEach((s,i)=>H.eqRange[s]=eq2[i+1]);
+  }
 }
 
-function newHand(_try){
+/* ---------- which spots can be dealt ---------- */
+/* relative weights when several spot types are enabled (roughly the old mix,
+   with the deep nodes now reachable as starting spots too) */
+const SCEN_W={rfi:30, vs_limp:10, vs_rfi:24, vs_3bet:18, vs_4bet:12, vs_5bet:6};
+function scenOn(id){ return S.scen[id]!==false; }
+/* every (hero, villain) pair the loaded set can actually deal for a scenario.
+   Position order is enforced: the opener always acts before the 3-bettor, etc. */
+function startSpots(scen){
+  const play=inPlaySeats(), oi=s=>play.indexOf(s), out=[];
+  play.filter(s=>S.seats[s]).forEach(hero=>{
+    if(scen==="rfi"){ if(hero!=="BB" && getChart("rfi",hero,null)) out.push({hero,vs:null}); return; }
+    if(scen==="vs_limp"){
+      limpCountsFor(hero).forEach(k=>{ if(k<=oi(hero) && getChart("vs_limp",hero,limpTok(k))) out.push({hero,vs:limpTok(k)}); });
+      return;
+    }
+    play.forEach(vs=>{
+      if(vs===hero) return;
+      // vs_rfi / vs_4bet: villain acted first.  vs_3bet / vs_5bet: villain acts behind hero.
+      const villainFirst = (scen==="vs_rfi" || scen==="vs_4bet");
+      if(villainFirst !== (oi(vs)<oi(hero))) return;
+      if(getChart(scen,hero,vs)) out.push({hero,vs});
+    });
+  });
+  return out;
+}
+function availableScenarios(){
+  const set=new Set(); SCENARIOS.forEach(sc=>{ if(startSpots(sc.id).length) set.add(sc.id); }); return set;
+}
+function anyScenOn(){ const av=availableScenarios(); return SCENARIOS.some(sc=>av.has(sc.id)&&scenOn(sc.id)); }
+
+/* ---------- dealing helpers ---------- */
+function foldSeat(s, chart){                     // fold, and remember the range folded
+  H.act[s]={t:"fold",label:"Fold"}; H.folded.add(s);
+  if(chart) H.vrange[s]={chart, idx:2};
+}
+function sampleFromCol(chart,col){               // a hand class weighted by combos × that action's frequency
+  const hands=Object.keys(chart.grid), w=hands.map(h=>(chart.grid[h][col]||0)*combosOf(h));
+  const tot=w.reduce((a,b)=>a+b,0); if(tot<=0) return null;
+  let x=Math.random()*tot;
+  for(let i=0;i<hands.length;i++){ x-=w[i]; if(x<=0) return hands[i]; }
+  return hands[hands.length-1];
+}
+/* give a villain cards consistent with the action they just took, and record the range */
+function dealFromRange(seat, chart, col){
+  if(chart){
+    H.vrange[seat]={chart, idx:col};
+    const h=sampleFromCol(chart,col);
+    H.cards[seat]=(h && drawHandClass(H.deck,h)) || dealTwo();
+  } else H.cards[seat]=dealTwo();
+}
+/* hero's hand at a spot they already put money into must come from the line
+   they took: sample the node chart, keep it in proportion to the prior range */
+function sampleHeroHand(chart, priorSig){
+  const hard=S.mode==="difficult";
+  if(!priorSig) return sampleHand(chart,hard);
+  for(let t=0;t<80;t++){
+    const h=sampleHand(chart,hard);
+    if(Math.random() < ((priorSig.chart.grid[h]||[0,0,0])[priorSig.idx]||0)) return h;
+  }
+  return sampleFromCol(priorSig.chart, priorSig.idx) || sampleHand(chart,hard);
+}
+/* build the betting that already happened for a 3-bet / 4-bet / 5-bet spot */
+function setupDeepSpot(scen,hero,vs){
+  const play=H.play, oi=s=>play.indexOf(s);
+  const opener=(scen==="vs_4bet") ? vs : hero;   // who put in the first raise
+  play.forEach(s=>{ if(s===hero||s===vs) return;
+    foldSeat(s, oi(s)<oi(opener) ? getChart("rfi",s,null) : getChart("vs_rfi",s,opener)); });
+  const openSz=OPEN(opener);
+  const sz=(sc,h,v,dflt)=>{ const c=getChart(sc,h,v); return (c&&c.raise_size)||dflt; };
+  if(scen==="vs_3bet"){                          // hero opened, villain 3-bet
+    H.committed[hero]=openSz; H.act[hero]={t:"raise",label:`Opened ${fmt(openSz)}`};
+    H.raiser[1]=hero; H.opener=hero; H.heroRole="opener";
+    H.heroPrior={chart:getChart("rfi",hero,null), idx:0};
+    dealFromRange(vs, getChart("vs_rfi",vs,hero), 0);
+    const s3=sz("vs_rfi",vs,hero,11); doRaise(vs,2,s3,`3-Bets ${fmt(s3)}`);
+  } else if(scen==="vs_4bet"){                   // villain opened, hero 3-bet, villain 4-bet
+    const s3=sz("vs_rfi",hero,vs,11);
+    H.committed[vs]=openSz; H.act[vs]={t:"raise",label:`Opened ${fmt(openSz)}`};
+    H.committed[hero]=s3;   H.act[hero]={t:"raise",label:`3-Bets ${fmt(s3)}`};
+    H.raiser[1]=vs; H.raiser[2]=hero; H.opener=vs; H.heroRole="3bettor";
+    H.heroPrior={chart:getChart("vs_rfi",hero,vs), idx:0};
+    dealFromRange(vs, getChart("vs_3bet",vs,hero), 0);
+    const s4=sz("vs_3bet",vs,hero,24); doRaise(vs,3,s4,`4-Bets ${fmt(s4)}`);
+  } else {                                       // vs_5bet: hero opened, villain 3-bet, hero 4-bet, villain jams
+    const s3=sz("vs_rfi",vs,hero,11), s4=sz("vs_3bet",hero,vs,24);
+    H.committed[hero]=s4; H.act[hero]={t:"raise",label:`4-Bets ${fmt(s4)}`};
+    H.committed[vs]=s3;   H.act[vs]={t:"raise",label:`3-Bet ${fmt(s3)}`};
+    H.raiser[1]=hero; H.raiser[2]=vs; H.raiser[3]=hero; H.opener=hero; H.heroRole="opener";
+    H.heroPrior={chart:getChart("vs_3bet",hero,vs), idx:0};
+    dealFromRange(vs, getChart("vs_4bet",vs,hero), 0);
+    doRaise(vs,4,100,"5-Bet ALL-IN");
+  }
+  H.villain=vs; recalcPot();
+  return makeNode(scen,getChart(scen,hero,vs),vs);
+}
+
+function newHand(){
   if(H && !H.drill && H.decisions && H.decisions.length){ H_HISTORY.unshift(makeRecord(H)); if(H_HISTORY.length>120) H_HISTORY.pop(); saveHistory(); }
   H=null;
-  $("feedback").innerHTML=""; $("board").innerHTML="";
+  $("feedback").innerHTML=""; $("board").innerHTML=""; $("eqNote").innerHTML="";
   const play=inPlaySeats(), n=play.length, idx=s=>play.indexOf(s);
-  const allowed=play.filter(s=>S.seats[s]);
-  if(!allowed.length){ $("feedback").innerHTML="No seats selected.<span class='sub'>Open ⚙ Settings.</span>"; $("buttons").innerHTML=""; return; }
-  // pick a mode: RFI (folded to you), face one open, or (if the set defines ISO
-  // ranges) face one-or-more limpers. Distribution unchanged when no ISO charts.
-  const canLimp = HAS_LIMP && allowed.some(s=>idx(s)>0 && limpCountsFor(s).length);
-  const roll=Math.random();
-  let mode = canLimp ? (roll<0.14?"limp":(roll<0.42?"open":"rfi")) : (roll<0.30?"open":"rfi");
-  const poolFor=m=> m==="limp" ? allowed.filter(s=>idx(s)>0 && limpCountsFor(s).length)
-                  : m==="open" ? allowed.filter(s=>idx(s)>0)
-                  :              allowed.filter(s=>s!=="BB");
-  let pool=poolFor(mode);
-  if(!pool.length){ mode="rfi"; pool=poolFor("rfi"); }
-  if(!pool.length){ mode="open"; pool=poolFor("open"); }
-  if(!pool.length){ mode="rfi"; pool=allowed; }
-  const hero=pick(pool), sb=play[n-2], bb=play[n-1], hi=idx(hero);
+  if(!play.some(s=>S.seats[s])){ $("feedback").innerHTML="No seats selected.<span class='sub'>Open ⚙ Settings.</span>"; $("buttons").innerHTML=""; return; }
+  // pick the kind of spot to train, then a concrete (hero, villain) pair for it
+  const opts=[];
+  SCENARIOS.forEach(sc=>{ if(!scenOn(sc.id)) return;
+    const spots=startSpots(sc.id); if(spots.length) opts.push({id:sc.id, spots, w:SCEN_W[sc.id]||10}); });
+  if(!opts.length){
+    $("feedback").innerHTML="No trainable spot for this setup.<span class='sub'>Check <b>Spots I Practice</b> and seats in ⚙ Settings.</span>";
+    $("buttons").innerHTML=""; return;
+  }
+  let x=Math.random()*opts.reduce((a,o)=>a+o.w,0), choice=opts[opts.length-1];
+  for(const o of opts){ x-=o.w; if(x<=0){ choice=o; break; } }
+  const scen=choice.id, spot=pick(choice.spots), hero=spot.hero, vs=spot.vs;
+  const sb=play[n-2], bb=play[n-1], hi=idx(hero);
   H={play,n,hero,sb,bb,deck:shuffle(freshDeck()),committed:{},folded:new Set(),cards:{},act:{},
      level:0,aggressor:null,opener:null,heroRole:null,villain:null,raiser:{},pot:1.5,vrange:{},
-     limpers:null,limpVs:null,
+     limpers:null,limpVs:null,heroPrior:null,
      node:null,ended:false,result:"",heroHand:null,heroCards:null,reviewChart:null,reviewHand:null,decisions:[]};
   H.committed[sb]=0.5; H.committed[bb]=1;
   H.act[sb]={t:"post",label:"SB 0.5"}; H.act[bb]={t:"post",label:"BB 1"};
-  let opener=null, node=null;
-  if(mode==="limp"){
-    const before=play.slice(0,hi);
-    const counts=limpCountsFor(hero).filter(c=>c<=before.length);
-    if(!counts.length){ return newHand((_try||0)+1); }
-    const nl=pick(counts), tok=limpTok(nl), ch=getChart("vs_limp",hero,tok);
-    if(!ch){ return newHand((_try||0)+1); }
-    const limpers=shuffle(before.slice()).slice(0,nl);
-    before.forEach(s=>{ if(limpers.includes(s)){ H.committed[s]=1; H.act[s]={t:"call",label:"Limps"}; H.cards[s]=dealTwo(); }
-                        else { H.act[s]={t:"fold",label:"Fold"}; H.folded.add(s); } });
-    recalcPot(); H.limpers=limpers; H.limpVs=tok;
-    node=makeNode("vs_limp",ch,tok);
-  } else if(mode==="open" && hi>0){
-    const before=play.slice(0,hi);
-    opener=pick(before);
-    before.forEach(s=>{ if(s!==opener){ H.act[s]={t:"fold",label:"Fold"}; H.folded.add(s);} });
-    const orfi=getChart("rfi",opener,null);
-    H.cards[opener]= orfi ? (drawHandClass(H.deck,sampleHand(orfi,false))||dealTwo()) : dealTwo();
-    doRaise(opener,1,OPEN(opener),`Raises ${fmt(OPEN(opener))}`);
-    if(orfi) H.vrange[opener]={chart:orfi,idx:0};   // opener's opening range
-    H.opener=opener;
-    node=makeNode("vs_rfi",getChart("vs_rfi",hero,opener),opener);
-  } else {
-    for(let k=0;k<hi;k++){ const s=play[k]; H.act[s]={t:"fold",label:"Fold"}; H.folded.add(s); }
+  let node=null;
+  if(scen==="rfi"){
+    for(let k=0;k<hi;k++) foldSeat(play[k], getChart("rfi",play[k],null));
     node=makeNode("rfi",getChart("rfi",hero,null),null);
+  } else if(scen==="vs_limp"){
+    const before=play.slice(0,hi), limpers=shuffle(before.slice()).slice(0,limpN(vs));
+    before.forEach(s=>{ if(limpers.includes(s)){ H.committed[s]=1; H.act[s]={t:"call",label:"Limps"}; H.cards[s]=dealTwo(); }
+                        else foldSeat(s, getChart("rfi",s,null)); });
+    recalcPot(); H.limpers=limpers; H.limpVs=vs;
+    node=makeNode("vs_limp",getChart("vs_limp",hero,vs),vs);
+  } else if(scen==="vs_rfi"){
+    play.slice(0,hi).forEach(s=>{ if(s!==vs)
+      foldSeat(s, idx(s)<idx(vs) ? getChart("rfi",s,null) : getChart("vs_rfi",s,vs)); });
+    dealFromRange(vs, getChart("rfi",vs,null), 0);
+    doRaise(vs,1,OPEN(vs),`Raises ${fmt(OPEN(vs))}`);
+    H.opener=vs;
+    node=makeNode("vs_rfi",getChart("vs_rfi",hero,vs),vs);
+  } else {
+    node=setupDeepSpot(scen,hero,vs);
   }
-  if(!node.chart){
-    if((_try||0)>=10){ $("feedback").innerHTML="No trainable spot for this table/seat setup.<span class='sub'>Adjust seats in ⚙ Settings.</span>"; $("buttons").innerHTML=""; return; }
-    return newHand((_try||0)+1);
-  }
-  H.heroHand=sampleHand(node.chart, S.mode==="difficult");
+  H.heroHand=sampleHeroHand(node.chart, H.heroPrior && H.heroPrior.chart ? H.heroPrior : null);
   H.heroCards=drawHandClass(H.deck,H.heroHand)||drawHandClass(freshDeck(),H.heroHand);
   H.cards[hero]=H.heroCards; H.node=node;
   S.stats.hands++; save(); refreshStats();
@@ -942,14 +1097,22 @@ function heroCall(scen){
     H.play.forEach(s=>{ if(s===H.hero) return;
       const inHand=(H.limpers&&H.limpers.includes(s))||s===H.bb;   // limpers + BB see the flop
       if(!inHand && !H.folded.has(s)){ H.act[s]={t:"fold",label:"Fold"}; H.folded.add(s); } });
+    if(H.bb!==H.hero && !H.folded.has(H.bb)){   // BB checks its option and is live to the flop
+      H.act[H.bb]={t:"call",label:"Checks"}; H.cards[H.bb]=H.cards[H.bb]||dealTwo();
+      H.vrange[H.bb]={chart:ANY_RANGE, idx:1}; }
     endHand("You over-limp — see a flop."); return;
   }
   const amt=maxCommitted(); H.committed[H.hero]=amt; recalcPot();
   const limp=scen==="rfi";
   H.act[H.hero]={t:"call",label: scen==="vs_5bet"?"Call ALL-IN":(limp?"Limps":"Calls "+fmt(amt))};
-  // heads-up to the flop: everyone but hero and the last aggressor is out
-  H.play.forEach(s=>{ if(s!==H.hero && s!==H.aggressor && !H.folded.has(s)){ H.act[s]={t:"fold",label:"Fold"}; H.folded.add(s); } });
-  endHand(scen==="vs_5bet"||scen==="vs_4bet" ? "You call it off." : (limp?"You limp — see a flop.":"You call — see a flop."));
+  // heads-up to the flop: everyone but hero and the last aggressor is out.
+  // On a limp there is no aggressor — the BB is already in for 1bb and closes
+  // the action by checking for free, so it can never fold here.
+  const stays = limp ? H.bb : H.aggressor;
+  H.play.forEach(s=>{ if(s!==H.hero && s!==stays && !H.folded.has(s)){ H.act[s]={t:"fold",label:"Fold"}; H.folded.add(s); } });
+  if(limp && H.bb!==H.hero){ H.act[H.bb]={t:"call",label:"Checks"}; H.cards[H.bb]=H.cards[H.bb]||dealTwo();
+    H.vrange[H.bb]={chart:ANY_RANGE, idx:1}; }
+  endHand(scen==="vs_5bet"||scen==="vs_4bet" ? "You call it off." : (limp?"You limp — BB checks. See a flop.":"You call — see a flop."));
 }
 function heroRaise(scen){
   if(scen==="rfi"){ H.heroRole="opener"; doRaise(H.hero,1,OPEN(H.hero),`Raises ${fmt(OPEN(H.hero))}`); resolveOpen(); }
@@ -973,7 +1136,7 @@ function resolveOpen(){
     if(a==="raise"){ tb=s; const sz=(ch&&ch.raise_size)||11; doRaise(s,2,sz,`3-Bets ${fmt(sz)}`); H.vrange[s]={chart:ch,idx:0};
       for(let m=k+1;m<H.n;m++){ const s2=H.play[m]; if(!H.folded.has(s2)){H.act[s2]={t:"fold",label:"Fold"};H.folded.add(s2);} } break; }
     else if(a==="call"){ caller=true; H.committed[s]=H.committed[H.hero]; H.act[s]={t:"call",label:"Calls "+fmt(H.committed[H.hero])}; recalcPot(); H.vrange[s]={chart:ch,idx:1}; }
-    else { H.act[s]={t:"fold",label:"Fold"}; H.folded.add(s); }
+    else foldSeat(s,ch);
   }
   if(tb){ H.villain=tb; H.heroRole="opener"; H.node=makeNode("vs_3bet",getChart("vs_3bet",H.hero,tb),tb); }
   else endHand(caller ? "Called — you take a flop." : "It folds around — you win the blinds! 🎉");
@@ -988,7 +1151,7 @@ function resolveIso(){
     if(a==="raise"){ tb=s; const sz=(ch&&ch.raise_size)||11; doRaise(s,2,sz,`3-Bets ${fmt(sz)}`); H.vrange[s]={chart:ch,idx:0};
       for(let m=k+1;m<H.n;m++){ const s2=H.play[m]; if(!H.folded.has(s2)){H.act[s2]={t:"fold",label:"Fold"};H.folded.add(s2);} } break; }
     else if(a==="call"){ called=true; H.committed[s]=H.committed[H.hero]; H.act[s]={t:"call",label:"Calls "+fmt(H.committed[H.hero])}; recalcPot(); H.vrange[s]={chart:ch,idx:1}; }
-    else { H.act[s]={t:"fold",label:"Fold"}; H.folded.add(s); }
+    else foldSeat(s,ch);
   }
   (H.limpers||[]).forEach(lp=>{                     // limpers call or fold the raise (no 3-bet)
     if(H.folded.has(lp)) return;
@@ -996,8 +1159,8 @@ function resolveIso(){
     const ch=getChart("vs_rfi",lp,H.hero); let cont;
     if(ch){ const f=ch.grid[cardsToHand(H.cards[lp])]||[0,0,1]; cont=Math.random()<(f[0]+f[1]); }
     else cont=Math.random()<0.35;
-    if(cont){ H.committed[lp]=H.committed[H.hero]; H.act[lp]={t:"call",label:"Calls "+fmt(H.committed[H.hero])}; recalcPot(); called=true; }
-    else { H.act[lp]={t:"fold",label:"Fold"}; H.folded.add(lp); }
+    if(cont){ H.committed[lp]=H.committed[H.hero]; H.act[lp]={t:"call",label:"Calls "+fmt(H.committed[H.hero])}; recalcPot(); called=true; if(ch) H.vrange[lp]={chart:ch,idx:1}; }
+    else foldSeat(lp,ch);
   });
   if(tb){ H.villain=tb; H.heroRole="opener"; H.node=makeNode("vs_3bet",getChart("vs_3bet",H.hero,tb),tb); }
   else endHand(called ? "Called — you take a flop." : "Everyone folds — you win it! 🎉");
@@ -1016,7 +1179,7 @@ function resolveResponse(){
     H.villain=v; H.node=makeNode(nextScen,getChart(nextScen,H.hero,v),v); }
   else if(a==="call"){ H.committed[v]=maxCommitted(); H.act[v]={t:"call",label:H.level>=4?"Calls ALL-IN":"Calls "+fmt(maxCommitted())}; recalcPot(); if(ch) H.vrange[v]={chart:ch,idx:1};
     endHand("Villain calls — see a flop."); }
-  else { H.act[v]={t:"fold",label:"Fold"}; H.folded.add(v); endHand("Villain folds — you win! 🎉"); }
+  else { foldSeat(v,ch); endHand("Villain folds — you win! 🎉"); }
 }
 function endHand(msg){ H.ended=true; H.node=null; H.result=msg; setupFlop(); }
 
@@ -1046,6 +1209,7 @@ function gradeAndFeedback(node,col){
 function present(){ renderTable(); animateThenShow(); }
 function renderTable(){
   const seatsEl=$("seats"); seatsEl.innerHTML=""; $("heroCards").innerHTML=""; $("dealer").classList.add("hidden");
+  $("eqNote").innerHTML="";
   if(!H){ $("pot").textContent="Pot 1.5 bb"; $("story").textContent=""; return; }
   const {play,hero}=H, n=play.length, heroIdx=play.indexOf(hero);
   const showdown=H.showdown, inShow=s=> showdown && H.remaining && H.remaining.includes(s);
@@ -1060,10 +1224,15 @@ function renderTable(){
     let cards;
     if(isHero) cards=`<div class="cards"></div>`;
     else cards=`<div class="cards"><div class="mini back"></div><div class="mini back"></div></div>`;
-    const eq = (showdown && H.equity && H.equity[seat]!=null)
-      ? `<div class="eq">${Math.round(H.equity[seat]*100)}%${inShow(seat)&&!isHero?' <span class="eqr">range</span>':''}</div>` : "";
+    const chips=[];
+    if(showdown && H.equity && H.equity[seat]!=null)
+      chips.push(`<div class="eq" title="This exact hand vs the other players' ranges">${Math.round(H.equity[seat]*100)}%</div>`);
+    if(showdown && H.eqRange && H.eqRange[seat]!=null)
+      chips.push(`<div class="eq rng" title="Whole range vs whole range">${Math.round(H.eqRange[seat]*100)}%<span class="eqr">rng</span></div>`);
+    const eq = chips.length ? `<div class="eqbox">${chips.join("")}</div>` : "";
     const dchip = seat===btnSeat ? '<div class="dchip">D</div>' : '';
     el.innerHTML=`<span class="action-tag" data-tag></span><div class="pod">${dchip}<div class="pos">${SEAT_LABEL[seat]}</div><div class="stack">100 bb</div>${cards}</div>${eq}`;
+    el.onclick=()=>openPlayerRanges(seat);
     seatsEl.appendChild(el);
   }
   $("pot").textContent="Pot "+H.pot+" bb";
@@ -1094,8 +1263,17 @@ function showControls(){
     if(H.flop){ setTimeout(revealFlop,450); }
     else { $("nextBtn").classList.remove("hidden"); } }
 }
+/* hero's two equity readings on the flop: the hand actually held, and the whole
+   range that line reps — the gap between them is the point of the exercise */
+function eqNoteHTML(){
+  if(!H.equity || H.equity[H.hero]==null) return "";
+  const out=[`<span class="k1"><i></i>hand ${Math.round(H.equity[H.hero]*100)}%</span>`];
+  if(H.eqRange && H.eqRange[H.hero]!=null)
+    out.push(`<span class="k2"><i></i>range ${Math.round(H.eqRange[H.hero]*100)}%</span>`);
+  return "You — "+out.join("");
+}
 function revealFlop(){
-  H.showdown=true; renderTable(); $("story").textContent=H.result;
+  H.showdown=true; renderTable(); $("story").textContent=H.result; $("eqNote").innerHTML=eqNoteHTML();
   // keep the betting story visible alongside the equities
   const seatEls={}; document.querySelectorAll(".seat").forEach(e=>seatEls[e.dataset.seat]=e);
   H.play.forEach(s=>{ const t=H.act[s]; if(t&&t.t!=="post"&&seatEls[s]){ const tg=seatEls[s].querySelector("[data-tag]");
@@ -1112,6 +1290,7 @@ function resizeRefresh(){
   H.play.forEach(s=>{ const t=H.act[s]; if(t&&t.t!=="post"&&seatEls[s]){ const tg=seatEls[s].querySelector("[data-tag]");
     tg.textContent=t.label; tg.className="action-tag show "+({fold:"tag-fold",raise:"tag-raise",call:"tag-call"}[t.t]||"tag-post"); } });
   if(H.node){ const he=document.querySelector('.seat.hero'); if(he) he.classList.add("acting"); $("story").textContent=storyFor(H.node); }
+  else if(H.showdown){ $("story").textContent=H.result; $("eqNote").innerHTML=eqNoteHTML(); }
 }
 function storyFor(node){
   const P=SEAT_LABEL;
@@ -1188,18 +1367,104 @@ function renderGrid(chart,highlightHand){
 function legendRaiseWord(c){
   return {rfi:"Raise",vs_limp:"ISO raise",vs_rfi:"3-Bet",vs_3bet:"4-Bet",vs_4bet:"5-Bet",vs_5bet:"Raise"}[c.scenario]||"Raise";
 }
+/* share of all 1326 combos a chart column covers */
+function colCombos(chart,col){
+  let n=0; for(const h in chart.grid) n+=(chart.grid[h][col]||0)*combosOf(h);
+  return n;
+}
 function showChartOverlay(c,hand,missNote){
   $("rangeTitle").textContent=chartTitle(c);
   $("rangeSub").textContent=c.raise_label||"";
   $("lgRaise").textContent=legendRaiseWord(c);
   renderGrid(c,hand);
-  const f=c.grid[hand]||[0,0,1], names=["Raise","Call","Fold"];
-  const parts=[0,1,2].filter(i=>f[i]>0.005).map(i=>`${names[i]} ${Math.round(f[i]*100)}%`).join(" / ");
-  $("mixNote").innerHTML=`<b>${hand}</b> ${missNote?"should be":""}: ${parts}`;
+  if(hand){
+    const f=c.grid[hand]||[0,0,1], names=["Raise","Call","Fold"];
+    const parts=[0,1,2].filter(i=>f[i]>0.005).map(i=>`${names[i]} ${Math.round(f[i]*100)}%`).join(" / ");
+    $("mixNote").innerHTML=`<b>${hand}</b> ${missNote?"should be":""}: ${parts}`;
+  } else {
+    const pc=i=>Math.round(colCombos(c,i)/13.26)/10;
+    $("mixNote").innerHTML=`Of all hands: <b>${pc(0)}%</b> ${legendRaiseWord(c).toLowerCase()} · <b>${pc(1)}%</b> call · <b>${pc(2)}%</b> fold`;
+  }
   showOverlay("rangeOverlay");
+}
+
+/* ---------- players' ranges (who is repping what) ---------- */
+const ACT_WORD=["raising","calling","folding"];
+/* idx null = show the whole chart's raise/call/fold mix, as in the big grid */
+function miniGrid(chart,idx){
+  const el=document.createElement("div"); el.className="mgrid";
+  for(let i=0;i<13;i++)for(let j=0;j<13;j++){
+    const f=chart.grid[handName(i,j)]||[0,0,1], c=document.createElement("i");
+    if(idx==null){
+      let r=0,g=0,b=0; for(let k=0;k<3;k++){ r+=f[k]*COL_RGB[k][0]; g+=f[k]*COL_RGB[k][1]; b+=f[k]*COL_RGB[k][2]; }
+      c.style.background=`rgb(${r|0},${g|0},${b|0})`;
+    } else {
+      const w=f[idx]||0, rgb=COL_RGB[idx];
+      c.style.background = w>0.004 ? `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${(0.25+0.75*w).toFixed(2)})` : "#1a2420";
+    }
+    el.appendChild(c);
+  }
+  return el;
+}
+/* one row per player who has put an action in, hero included */
+function playerRows(){
+  const rows=[];
+  H.play.forEach(s=>{
+    if(s===H.hero){
+      const sig = H.node ? {chart:H.node.chart, idx:null} : heroRangeSig();
+      if(sig && sig.chart) rows.push({seat:s, me:true, act:H.act[s], sig, toAct:!!H.node});
+      return;
+    }
+    const a=H.act[s]; if(!a || a.t==="post") return;
+    rows.push({seat:s, me:false, act:a, sig:H.vrange[s]||null});
+  });
+  return rows;
+}
+function openPlayerRanges(focusSeat){
+  if(!H) return;
+  const list=$("plList"); list.innerHTML="";
+  const rows=playerRows();
+  if(!rows.length){
+    $("plSub").textContent="";
+    list.innerHTML=`<div class="hempty">No one has acted yet this hand.</div>`;
+    showOverlay("plOverlay"); return;
+  }
+  $("plSub").textContent="Tap a player to open their full chart";
+  rows.forEach(r=>{
+    const row=document.createElement("div");
+    row.className="prow"+(r.me?" me":"")+(H.folded.has(r.seat)?" out":"");
+    row.dataset.pseat=r.seat;
+    const info=document.createElement("div"); info.className="pinfo";
+    const tag=r.act && r.act.t!=="post"
+      ? `<span class="pact ${{fold:"tag-fold",raise:"tag-raise",call:"tag-call"}[r.act.t]||"tag-post"}">${r.act.label}</span>` : "";
+    const who=r.me?"You":SEAT_LABEL[r.seat];
+    let meta;
+    if(!r.sig) meta=`<div class="pnone">No chart in this set for that action — hand dealt at random.</div>`;
+    else if(r.sig.chart.scenario==="any") meta=`<div class="pmeta">checked the option — any two cards · 1326 combos</div>`;
+    else if(r.sig.idx==null) meta=`<div class="pmeta">${chartTitle(r.sig.chart)} — the full chart you're acting from.</div>`;
+    else {
+      const cb=colCombos(r.sig.chart,r.sig.idx);
+      meta=`<div class="pmeta">${ACT_WORD[r.sig.idx]} range · ${Math.round(cb)} combos · ${Math.round(cb/13.26)/10}% of all hands</div>`;
+    }
+    info.innerHTML=`<div><span class="pseat">${who}</span>${tag}</div>${meta}`;
+    if(r.sig) row.appendChild(miniGrid(r.sig.chart, r.sig.idx));
+    row.appendChild(info);
+    if(r.sig){
+      const chev=document.createElement("span"); chev.className="pchev"; chev.textContent="›";
+      row.appendChild(chev);
+      row.onclick=()=>showChartOverlay(r.sig.chart,null,false);
+    }
+    list.appendChild(row);
+  });
+  showOverlay("plOverlay");
+  if(focusSeat){
+    const el=list.querySelector(`[data-pseat="${focusSeat}"]`);
+    if(el) el.scrollIntoView({block:"center"});
+  }
 }
 function flashChart(chart,hand,chosenCol){ showChartOverlay(chart,hand,true); }
 function chartTitle(c){
+  if(c.scenario==="any") return `${SEAT_LABEL[c.hero]} — checks the option (any two)`;
   if(c.scenario==="rfi") return `${SEAT_LABEL[c.hero]} — RFI (open)`;
   if(c.scenario==="vs_limp") return `${SEAT_LABEL[c.hero]} — ISO vs ${vsLabel("vs_limp",c.vs)}`;
   const label={vs_rfi:"vs Open",vs_3bet:"vs 3-Bet",vs_4bet:"vs 4-Bet",vs_5bet:"vs 5-Bet"}[c.scenario];
@@ -1244,8 +1509,10 @@ function historyRow(rec){
   if(rec.flop){
     const fl=rec.flop.map(glyph).join(" ");
     const eqStr=(rec.remaining||[]).map(s=> (s===rec.hero?"You":P[s])+" "+Math.round(rec.equity[s]*100)+"%").join(" · ");
+    const rngStr=(rec.eqRange && rec.eqRange[rec.hero]!=null)
+      ? `<span class="eqs">range vs range: you ${Math.round(rec.eqRange[rec.hero]*100)}%</span>` : "";
     const div=document.createElement("div"); div.className="hflop";
-    div.innerHTML=`<span>Flop ${fl}</span><span class="eqs">${eqStr}</span>`;
+    div.innerHTML=`<span>Flop ${fl}</span><span class="eqs">${eqStr}</span>${rngStr}`;
     el.appendChild(div);
   }
   return el;
@@ -1289,8 +1556,12 @@ function drillSetup(m){
     committed[hero]=24; committed[vs]=100; act[hero]={t:"raise",label:`4-Bet`}; act[vs]={t:"raise",label:`5-Bet ALL-IN`}; }
   const chart=resolveChart(m.size,hero,m.scenario,vs);
   const isoM=m.scenario==="vs_limp";
+  // the range the villain is repping, so 👥 works inside a drill too
+  const vr={}, vch={vs_rfi:["rfi",vs,null], vs_3bet:["vs_rfi",vs,hero],
+                   vs_4bet:["vs_3bet",vs,hero], vs_5bet:["vs_4bet",vs,hero]}[m.scenario];
+  if(vch){ const c=resolveChart(m.size,vch[1],vch[0],vch[2]); if(c) vr[vs]={chart:c,idx:0}; }
   H={play,n,hero,sb,bb,deck:[],committed,folded,cards:{[hero]:m.cards},act,level:0,aggressor:isoM?bb:(vs||bb),
-     opener:(m.scenario==="vs_rfi"?vs:hero),heroRole:null,villain:isoM?null:vs,raiser:{},pot:1.5,vrange:{},
+     opener:(m.scenario==="vs_rfi"?vs:hero),heroRole:null,villain:isoM?null:vs,raiser:{},pot:1.5,vrange:vr,
      limpers:dLimpers,limpVs:isoM?vs:null,
      node:makeNode(m.scenario,chart,vs),ended:false,result:"",heroHand:m.hand,heroCards:m.cards,
      reviewChart:null,reviewHand:null,decisions:[],drill:true};
@@ -1329,6 +1600,7 @@ function refreshStats(){
 }
 
 /* ---------- settings UI ---------- */
+const SCEN_HINT=$("scenHint").innerHTML;
 function renderSettings(){
   // table sizes
   const sz=$("sizeChips"); sz.innerHTML="";
@@ -1356,6 +1628,20 @@ function renderSettings(){
     c.textContent=l;c.onclick=()=>{S.mode=id;save();renderSettings();};
     mc.appendChild(c);
   });
+  // spots to practise — only those the loaded set can actually deal
+  const avail=availableScenarios();
+  const pc=$("scenChips"); pc.innerHTML="";
+  SCENARIOS.forEach(sc=>{
+    const ok=avail.has(sc.id);
+    const c=document.createElement("div");
+    c.className="chip mini2"+((ok&&scenOn(sc.id))?" on":"");
+    c.textContent=sc.name; c.style.opacity=ok?"1":"0.3";
+    c.title=ok?"":"No ranges for this spot in the loaded chart set";
+    if(ok) c.onclick=()=>{ S.scen[sc.id]=!scenOn(sc.id); if(!anyScenOn()) S.scen[sc.id]=true; save(); renderSettings(); };
+    pc.appendChild(c);
+  });
+  $("scenHint").innerHTML = avail.size ? SCEN_HINT
+    : `<span style="color:var(--bad)">The loaded chart set has no spots for this table size and seat selection.</span>`;
   renderChartList();
   $("srcLine").textContent="";
   refreshStats();
@@ -1396,6 +1682,9 @@ $("setClose").onclick=()=>{hideOverlay("setOverlay"); newHand();};
 $("rangeClose").onclick=()=>hideOverlay("rangeOverlay");
 $("rangeOverlay").onclick=e=>{ if(e.target.id==="rangeOverlay") hideOverlay("rangeOverlay"); };
 $("chartBtn").onclick=showChartCurrent;
+$("plBtn").onclick=()=>openPlayerRanges(null);
+$("plClose").onclick=()=>hideOverlay("plOverlay");
+$("plOverlay").onclick=e=>{ if(e.target.id==="plOverlay") hideOverlay("plOverlay"); };
 $("histBtn").onclick=openHistory;
 $("histClose").onclick=()=>hideOverlay("histOverlay");
 $("histOverlay").onclick=e=>{ if(e.target.id==="histOverlay") hideOverlay("histOverlay"); };
