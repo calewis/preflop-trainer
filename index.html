@@ -137,6 +137,13 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
 #feedback{min-height:34px;text-align:center;font-size:16px;font-weight:600;
   margin-bottom:6px;line-height:1.25}
 #feedback .sub{display:block;font-size:14px;font-weight:500;color:var(--dim);margin-top:2px}
+#feedback .fbl{list-style:none;padding:0;margin:5px auto 0;text-align:left;max-width:520px}
+#feedback .fbl li{font-size:13px;font-weight:500;line-height:1.3;color:var(--dim);
+  display:flex;gap:6px;align-items:flex-start;margin-top:3px}
+#feedback .fbl li b{color:var(--txt);font-weight:800}
+#feedback .fbl .m{flex:0 0 auto;font-weight:900;width:11px}
+#feedback .fbl .ok{color:var(--good)} #feedback .fbl .no{color:var(--bad)} #feedback .fbl .nu{color:#6f8a7c}
+#feedback .fbl .note{font-style:italic;opacity:.8}
 #buttons{display:flex;gap:8px}
 .abtn{flex:1;border:none;border-radius:13px;padding:15px 4px;font-size:19px;font-weight:800;
   color:#fff;letter-spacing:.3px;position:relative;min-height:56px}
@@ -1437,8 +1444,9 @@ function gradeFlop(col, toCall){
   if(rq){ H.eqRange={}; H.eqRange[H.hero]=rq[0]; live.forEach((s,i)=>H.eqRange[s]=rq[i+1]); }
   H.revealEq=true;
   const heroEq=eq[0], drawShare=eq.drawShare||0, rangeEq=rq?rq[0]:null, n=live.length+1, fair=1/n;
-  const acts=toCall>0 ? ["raise","call","fold"] : ["bet","check"];
-  let correct, close=false, detail;
+  const acts=toCall>0 ? ["raised","called","folded"] : ["bet","checked"];
+  const B=[];                                   // {m:"ok"|"no"|"nu", t} — one line per thing judged
+  let correct, close=false;
 
   if(toCall>0){
     // three zones: clearly enough on raw odds / clearly not enough even with
@@ -1450,13 +1458,14 @@ function gradeFlop(col, toCall){
     if(heroEq>=needRaw-M){ correct=(col!==2); }
     else if(heroEq<needImp-M){ correct=(col===2); }
     else { correct=true; close=true; }
-    detail=`Pot odds: ${fmt(toCall)} to win ${fmt(H.pot)} — raw break-even <b>${pctS(needRaw)}</b>.`;
-    if(extra>0.05)
-      detail+=` ${pctS(drawShare)} of your equity comes from improving, so implied odds are worth about `
-            + `${fmt(extra)} more and the real break-even is <b>${pctS(needImp)}</b>.`;
-    else detail+=` Your equity is already made, so there are no implied odds to add.`;
-    detail+=` Your hand had <b>${pctS(heroEq)}</b> vs ${live.length>1?"their ranges":"their range"}.`;
-    if(close) detail+=` That lands between the two thresholds — a judgment call, not a mistake either way.`;
+    B.push({m:correct?"ok":"no",
+      t:`<b>Pot odds</b> — ${fmt(toCall)} to call into ${fmt(H.pot)}, so you needed <b>${pctS(needRaw)}</b>. `
+       +`Your hand had <b>${pctS(heroEq)}</b> against ${live.length>1?"their ranges":"their range"}.`});
+    B.push(extra>0.05
+      ? {m:"nu", t:`<b>Implied odds</b> — ${pctS(drawShare)} of your equity comes from improving, worth roughly `
+                  +`<b>${fmt(extra)}bb</b> more later, which drops the real break-even to <b>${pctS(needImp)}</b>.`}
+      : {m:"nu", t:`<b>Implied odds</b> — none to add: your equity is already made, not drawing.`});
+    if(close) B.push({m:"nu", t:`Your equity lands between the two break-evens, so this is a judgment call rather than a mistake either way.`});
   } else {
     // betting: value if you're well ahead of your fair share, or a profitable
     // semi-bluff if they fold often enough to beat the price you're laying
@@ -1468,27 +1477,30 @@ function gradeFlop(col, toCall){
     if(isValue){ correct=(col===0); }
     else if(isTrash){ correct = (col===0) ? bluffWorks : true; close=!bluffWorks; }
     else { correct=true; close=true; }
-    detail=`<b>${pctS(heroEq)}</b> equity against <b>${pctS(fair)}</b> fair share ${n}-way. `
-         + `Betting ${fmt(bet)} risks ${fmt(bet)} to win ${fmt(H.pot)}, so it needs them to fold `
-         + `<b>${pctS(breakEven)}</b> of the time — this lot folds <b>${pctS(fe)}</b>.`;
-    detail+= isValue    ? " Strong enough to bet for value."
-           : isTrash    ? (bluffWorks ? " Nothing to show down, but they fold often enough that a bluff pays."
-                                      : " Nothing to show down and they don't fold enough — checking is the cheap option.")
-                        : " Medium strength — bet or check are both defensible.";
-    if(!isValue) detail+=" <i>These bots overfold; don't read a winning bluff here as a licence to bluff humans.</i>";
+    B.push({m: isValue ? (col===0?"ok":"no") : "nu",
+      t:`<b>Hand strength</b> — <b>${pctS(heroEq)}</b> equity against a <b>${pctS(fair)}</b> fair share ${n}-way. `
+       +(isValue?"Strong enough to bet for value.":isTrash?"Nothing to show down.":"Medium strength — bet or check are both defensible.")});
+    B.push({m: isTrash ? (col===0?(bluffWorks?"ok":"no"):"nu") : "nu",
+      t:`<b>Fold equity</b> — betting ${fmt(bet)} risks ${fmt(bet)} to win ${fmt(H.pot)}, so a bluff needs them to fold `
+       +`<b>${pctS(breakEven)}</b> of the time. These opponents fold <b>${pctS(fe)}</b>.`});
+    if(!isValue) B.push({m:"nu", cls:"note",
+      t:`These bots fold more than real players do — a bluff that works here won't always work against humans.`});
   }
   if(rangeEq!=null){
     const edge=rangeEq-fair;
-    detail+=` Range vs range you're at <b>${pctS(rangeEq)}</b> — `
-          + (edge>0.04?"the board favours your range.":edge<-0.04?"the board favours theirs.":"neither range is ahead.");
+    B.push({m:"nu", t:`<b>Range vs range</b> — your whole range is at <b>${pctS(rangeEq)}</b> here, so `
+      +(edge>0.04?"this board favours your range.":edge<-0.04?"this board favours theirs.":"neither range is ahead.")});
   }
   S.stats.flopDecisions=(S.stats.flopDecisions||0)+1;
   if(correct) S.stats.flopCorrect=(S.stats.flopCorrect||0)+1;
   save(); refreshStats();
   const grade = correct ? `<span style="color:var(--good)">✓ ${close?"Fine":"Correct"}</span>`
                         : `<span style="color:var(--bad)">✗ Mistake</span>`;
-  $("feedback").innerHTML=`${grade} &nbsp; you ${acts[col]===undefined?"acted":acts[col]}`
-    + `<span class="sub">${detail}</span>`;
+  const MARK={ok:"✓",no:"✗",nu:"•"};
+  $("feedback").innerHTML=`${grade} &nbsp; you ${acts[col]||"acted"}`
+    + `<ul class="fbl">`
+    + B.map(b=>`<li class="${b.cls||""}"><span class="m ${b.m}">${MARK[b.m]}</span><span>${b.t}</span></li>`).join("")
+    + `</ul>`;
   H.flopGrade={col, toCall, heroEq, rangeEq, drawShare, correct, close};
 }
 function heroFlopAction(col){
