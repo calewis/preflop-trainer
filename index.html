@@ -386,6 +386,11 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
       <div class="hintline"><b>Difficult</b> biases toward borderline hands near the edges of the range (mixed / close decisions).</div>
     </div>
     <div class="setgrp">
+      <h3>Flop Play</h3>
+      <div class="chips" id="flopChips"></div>
+      <div class="hintline">Play a betting round on the flop, then the turn is dealt and the hand stops. You act <b>before</b> seeing any equity — ranges and numbers are locked until you commit — then you're graded on your equity against the live ranges, the pot odds, implied odds on your draws, and how often these opponents actually fold. Villains use simple heuristics; they're here to make the hand play out, not to model good postflop poker.</div>
+    </div>
+    <div class="setgrp">
       <h3>Spots I Practice</h3>
       <div class="chips" id="scenChips"></div>
       <div class="hintline" id="scenHint">Every hand <b>starts</b> at one of the selected spots — pick just <b>vs 3-Bet</b> to drill only 3-bet defence. Greyed-out spots have no ranges in the loaded chart set for this table size and these seats. Once a hand is under way it still plays out naturally, so deeper decisions can follow.</div>
@@ -745,7 +750,8 @@ const defaults={
   scen:{rfi:true,vs_limp:true,vs_rfi:true,vs_3bet:true,vs_4bet:true,vs_5bet:true},
   scenV2:true,              // pre-v2 saves carry a dead `scen` value — reset it once
   mode:"random",
-  stats:{hands:0,decisions:0,scoreSum:0,streak:0,best:0}
+  playFlop:false,           // play a betting round on the flop, then stop at the turn
+  stats:{hands:0,decisions:0,scoreSum:0,streak:0,best:0,flopDecisions:0,flopCorrect:0}
 };
 let S = load();
 function load(){
@@ -920,7 +926,11 @@ function rangeCombos(sig){
 /* Monte-Carlo equity on a flop, hero first in the returned array.
    heroSrc = {cards:[c,c]}  -> hero's exact hand vs each villain's RANGE
    heroSrc = {sig:{chart,idx}} -> hero's whole RANGE vs each villain's RANGE */
-function mcEquities(heroSrc, flop3, vseats, SAMPLES){
+/* wantDraw also reports what share of hero's equity came from *improving* —
+   i.e. runouts hero won after being behind on the flop. That share is what
+   implied odds attach to: a made hand has none, a draw has plenty.
+   Returned on the result array as `.drawShare`. */
+function mcEquities(heroSrc, flop3, vseats, SAMPLES, wantDraw){
   const toRS=c=>({r:RVAL[c[0]], s:"shdc".indexOf(c[1])});
   // hero's exact cards are dead to the villains only when hero is holding them
   const dead=new Set([...flop3, ...(heroSrc.cards||[])]);
@@ -933,7 +943,7 @@ function mcEquities(heroSrc, flop3, vseats, SAMPLES){
                               : mkList(heroSrc.sig, H.cards[H.hero]),
                 ...vseats.map(v=>mkList(H.vrange[v], H.cards[v])) ];
   const full=freshDeck(), b3=flop3.map(toRS);
-  const N=lists.length, eq=new Array(N).fill(0); let iters=0;
+  const N=lists.length, eq=new Array(N).fill(0); let iters=0, drawWin=0;
   for(let s=0;s<SAMPLES;s++){
     const used=new Set(flop3), hands=[]; let ok=true;   // hero draws first, so no self-collision
     for(const vl of lists){ let pk=null,t=0;
@@ -948,8 +958,15 @@ function mcEquities(heroSrc, flop3, vseats, SAMPLES){
     let best=-1, win=[];
     for(let p=0;p<N;p++){ const val=evaluate7(hands[p].concat(board)); if(val>best){best=val;win=[p];} else if(val===best) win.push(p); }
     const sh=1/win.length; for(const p of win) eq[p]+=sh; iters++;
+    if(wantDraw && win.includes(0)){
+      let fb=-1, fLead=-1;                                   // who was ahead on the flop alone
+      for(let p=0;p<N;p++){ const fv=evaluate7(hands[p].concat(b3)); if(fv>fb){ fb=fv; fLead=p; } }
+      if(fLead!==0) drawWin+=sh;                             // hero got there from behind
+    }
   }
-  return eq.map(e=> iters? e/iters : 0);
+  const out=eq.map(e=> iters? e/iters : 0);
+  out.drawShare = (wantDraw && iters && out[0]>0) ? (drawWin/iters)/out[0] : 0;
+  return out;
 }
 /* the range hero is repping on the flop = the chart of hero's last decision,
    taken at the column hero actually chose */
@@ -965,6 +982,12 @@ function setupFlop(){
   if(flop.some(c=>!c)) return;                            // empty deck (drill state)
   const vseats=rem.filter(s=>s!==H.hero);
   H.flop=flop; H.remaining=rem;
+  // in flop-play mode nothing is computed yet: you read the board first, and the
+  // equities are worked out against whoever is still live when you act
+  // no flop round if the preflop action already put people all-in
+  H.playingFlop = !!S.playFlop && !H.drill && rem.includes(H.hero) && rem.length>=2
+                  && stackLeft(H.hero)>=0.5 && rem.some(s=>s!==H.hero && stackLeft(s)>=0.5);
+  if(H.playingFlop) return;
   const eq=mcEquities({cards:H.cards[H.hero]}, flop, vseats, 4000);
   H.equity={}; H.equity[H.hero]=eq[0]; vseats.forEach((s,i)=>H.equity[s]=eq[i+1]);
   const sig=heroRangeSig(); H.heroSig=sig;
@@ -1091,6 +1114,7 @@ function newHand(){
   H={play,n,hero,sb,bb,deck:shuffle(freshDeck()),committed:{},folded:new Set(),cards:{},act:{},
      level:0,aggressor:null,opener:null,heroRole:null,villain:null,raiser:{},pot:1.5,vrange:{},
      limpers:null,limpVs:null,heroPrior:null,
+     turn:null,playingFlop:false,revealEq:false,flopGrade:null,fBet:0,fCommit:{},fOrder:[],
      node:null,ended:false,result:"",heroHand:null,heroCards:null,reviewChart:null,reviewHand:null,decisions:[]};
   H.committed[sb]=0.5; H.committed[bb]=1;
   H.act[sb]={t:"post",label:"SB 0.5"}; H.act[bb]={t:"post",label:"BB 1"};
@@ -1124,6 +1148,7 @@ function newHand(){
 /* ---------- hero acts ---------- */
 function answerHero(col){
   const node=H.node; if(!node) return; H.node=null;
+  if(node.scenario==="flop"){ heroFlopAction(col); return; }
   gradeAndFeedback(node,col); clearButtons(); setActingNone();
   if(H.drill){ $("nextBtn").textContent="Next ▸"; $("nextBtn").classList.remove("hidden"); return; }  // drill: one decision only
   const scen=node.scenario;
@@ -1247,6 +1272,248 @@ function gradeAndFeedback(node,col){
   if(!correct) flashChart(chart,H.heroHand,col);
 }
 
+/* ================= flop play (optional mode) =================
+   One betting round on the flop, then the turn is dealt and the hand stops.
+   You act before seeing any equity; the numbers and the grade land afterwards.
+   The villains here are crude heuristics — they exist so the hand plays out,
+   not to model good postflop poker. The training signal is your own equity
+   against their ranges and the price the pot is laying you. */
+const FLOP_BET=0.6;                       // bet / raise sizing as a share of the pot
+const pctS=x=>Math.round(x*100)+"%";
+/* postflop the blinds act first, then it runs round to the button */
+function postflopOrder(){ const p=H.play, n=p.length; return p.slice(n-2).concat(p.slice(0,n-2)); }
+function flopLive(){ return H.fOrder.filter(s=>!H.folded.has(s)); }
+function toRS5(cards){ return cards.map(c=>({r:RVAL[c[0]], s:"shdc".indexOf(c[1])})); }
+function madeTier(cards2){ return Math.floor(evaluate7(toRS5(cards2.concat(H.flop)))/1e12); }
+function hasFlushDraw(cards2){
+  const cnt={}; cards2.concat(H.flop).forEach(c=>cnt[c[1]]=(cnt[c[1]]||0)+1);
+  return Object.values(cnt).some(v=>v===4);
+}
+function isTopPairPlus(cards2){
+  const t=madeTier(cards2); if(t>=2) return true; if(t!==1) return false;
+  const br=H.flop.map(c=>RVAL[c[0]]), hi=Math.max(...br), hr=cards2.map(c=>RVAL[c[0]]);
+  if(hr[0]===hr[1]) return hr[0]>=hi;                      // overpair
+  return hr.some(r=>br.includes(r) && r>=hi);              // paired the top card
+}
+function villainFlopAct(seat, toCall){
+  const c=H.cards[seat], t=madeTier(c), strong=isTopPairPlus(c), draw=hasFlushDraw(c), r=Math.random();
+  if(toCall>0){
+    // defend on price, not on a flat frequency — otherwise fold equity barely
+    // moves with bet size and the app would teach you to over-bluff
+    const odds=toCall/(H.pot+toCall);
+    if(t>=2)    return r<0.35?"raise":"call";
+    if(strong)  return r<(odds<0.45?0.92:0.7)?"call":"fold";
+    if(draw)    return r<Math.max(0.15,0.95-odds*1.5)?"call":"fold";
+    if(t===1)   return r<Math.max(0.05,0.85-odds*1.6)?"call":"fold";
+    return r<Math.max(0,0.34-odds*0.6)?"call":"fold";       // air defends a little, less as the price rises
+  }
+  if(t>=2)   return r<0.8?"bet":"check";
+  if(strong) return r<0.6?"bet":"check";
+  if(draw)   return r<0.4?"bet":"check";
+  return r<0.15?"bet":"check";                              // some air, so they aren't face-up
+}
+/* everyone sits behind 100bb, so nothing on the flop can be bet that a player
+   hasn't got left after the preflop action */
+const STACK=100;
+function stackLeft(s){ return Math.max(0, STACK-(H.committed[s]||0)-((H.fCommit&&H.fCommit[s])||0)); }
+function flopPut(s,amt){
+  const a=Math.round(Math.min(amt, stackLeft(s))*10)/10;
+  H.fCommit[s]=Math.round(((H.fCommit[s]||0)+a)*10)/10;
+  H.pot=Math.round((H.pot+a)*10)/10;
+  return a;
+}
+/* effective stack: the most that can actually go in on this street */
+function flopCap(){ const live=flopLive(); return live.length?Math.min(...live.map(stackLeft)):0; }
+function flopBetSize(){
+  const cap=flopCap(); if(cap<0.5) return 0;
+  return Math.max(0.5, Math.min(Math.round(H.pot*FLOP_BET*2)/2, cap));
+}
+function flopRaiseTo(){
+  const live=flopLive();
+  const ceiling=live.length?Math.min(...live.map(s=>stackLeft(s)+(H.fCommit[s]||0))):H.fBet;
+  return Math.max(H.fBet, Math.min(Math.max(H.fBet*3, H.fBet+Math.max(flopBetSize(),0.5)), ceiling));
+}
+
+function startFlopPlay(){
+  H.ended=false; H.showdown=false;
+  H.fOrder=postflopOrder().filter(s=>H.remaining.includes(s));
+  H.fIdx=0; H.fBet=0; H.fCommit={}; H.fActed=new Set(); H.fRaises=0; H.fDone=false;
+  H.play.forEach(s=>{ if(H.remaining.includes(s)) H.act[s]=null; });   // clear preflop tags
+  renderTable(); applyTags(); renderBoard();
+  $("story").textContent="Flop. You're first to read it.";
+  setTimeout(flopStep,350);
+}
+/* a player is done for the street once they've acted and either matched the bet
+   or run out of chips */
+function flopDone(s){ return H.fActed.has(s) && ((H.fCommit[s]||0)===H.fBet || stackLeft(s)===0); }
+function flopSettled(){
+  const live=flopLive();
+  if(live.length<=1) return true;
+  return live.every(flopDone);
+}
+function flopStep(){
+  let guard=0;
+  while(guard++<40){
+    if(flopSettled()){ finishFlop(); return; }
+    const s=H.fOrder[H.fIdx % H.fOrder.length];
+    H.fIdx++;
+    if(H.folded.has(s) || flopDone(s)) continue;
+    if(s===H.hero){ presentFlopDecision(); return; }
+    villainFlopStep(s);
+  }
+  finishFlop();
+}
+function villainFlopStep(s){
+  const toCall=Math.min(H.fBet-(H.fCommit[s]||0), stackLeft(s));
+  let a=villainFlopAct(s,toCall);
+  if(a==="raise" && (H.fRaises>=1 || flopRaiseTo()<=H.fBet)) a="call";   // one raise per street
+  if((a==="bet") && flopBetSize()<0.5) a="check";                        // nobody left to bet into
+  H.fActed.add(s);
+  if(a==="fold"){ H.act[s]={t:"fold",label:"Folds"}; H.folded.add(s); return; }
+  if(a==="check"){ H.act[s]={t:"call",label:"Checks"}; return; }
+  if(a==="call"){ const p=flopPut(s,toCall);
+    H.act[s]={t:"call",label:p>0?(stackLeft(s)===0?"Calls ALL-IN":"Calls "+fmt(p)):"Checks"}; return; }
+  if(a==="bet"){ const b=flopBetSize(); flopPut(s,b); H.fBet=b; H.fRaises++;
+    H.act[s]={t:"raise",label:"Bets "+fmt(b)}; return; }
+  const to=flopRaiseTo(); flopPut(s,to-(H.fCommit[s]||0)); H.fBet=to; H.fRaises++;
+  H.act[s]={t:"raise",label:"Raises to "+fmt(to)};
+}
+/* Implied odds: extra money you expect to win on later streets when you get
+   there. It only attaches to the improving part of your equity, so a made hand
+   earns none. PAYOFF is the one genuine assumption in here — how much more goes
+   in when you hit — so it is stated, not hidden. */
+const PAYOFF=0.9;
+function impliedExtra(drawShare, heroEq, pot){
+  // scale by the ABSOLUTE chance of getting there and winning, not by the share
+  // of your equity — otherwise air, which wins only by improving, scores highest
+  const hitAndWin=drawShare*heroEq;
+  return Math.round(Math.min(hitAndWin*PAYOFF*pot, stackLeft(H.hero))*10)/10;
+}
+/* How often the villains fold to a bet of `size`. This one is exact rather than
+   assumed: they are a function we wrote, so we sample the range each of them
+   repped preflop and ask it. */
+function foldEquity(live, size){
+  if(!live.length) return 0;
+  const dead=new Set([...H.flop, ...H.cards[H.hero]]);
+  const potWas=H.pot; H.pot=Math.round((H.pot+size)*10)/10;   // what they'd be facing
+  let pAllFold=1;
+  live.forEach(s=>{
+    let items=rangeCombos(H.vrange[s]).filter(it=>!it.cards.some(c=>dead.has(c)));
+    if(!items.length) items=[{cards:H.cards[s],w:1}];
+    const tot=items.reduce((a,b)=>a+b.w,0), real=H.cards[s], TRIES=150;
+    let folds=0;
+    for(let i=0;i<TRIES;i++){
+      let x=Math.random()*tot, ch=items[items.length-1];
+      for(const it of items){ x-=it.w; if(x<=0){ ch=it; break; } }
+      H.cards[s]=ch.cards;
+      if(villainFlopAct(s,size)==="fold") folds++;
+    }
+    H.cards[s]=real;
+    pAllFold *= folds/TRIES;
+  });
+  H.pot=potWas;
+  return pAllFold;
+}
+function presentFlopDecision(){
+  H.node={scenario:"flop", chart:null, vs:null};
+  renderTable(); applyTags(); renderBoard(); showControls();
+}
+/* grade the flop decision on the two things that are objectively computable:
+   your equity against the live ranges, and the price the pot is laying you */
+function gradeFlop(col, toCall){
+  const live=flopLive().filter(s=>s!==H.hero);
+  const eq=mcEquities({cards:H.cards[H.hero]}, H.flop, live, 3000, true);
+  const sig=heroRangeSig();
+  const rq=sig ? mcEquities({sig}, H.flop, live, 2500) : null;
+  H.equity={}; H.equity[H.hero]=eq[0]; live.forEach((s,i)=>H.equity[s]=eq[i+1]);
+  if(rq){ H.eqRange={}; H.eqRange[H.hero]=rq[0]; live.forEach((s,i)=>H.eqRange[s]=rq[i+1]); }
+  H.revealEq=true;
+  const heroEq=eq[0], drawShare=eq.drawShare||0, rangeEq=rq?rq[0]:null, n=live.length+1, fair=1/n;
+  const acts=toCall>0 ? ["raise","call","fold"] : ["bet","check"];
+  let correct, close=false, detail;
+
+  if(toCall>0){
+    // three zones: clearly enough on raw odds / clearly not enough even with
+    // implied odds / a judgment band in between, where either way is defensible
+    const needRaw=toCall/(H.pot+toCall);
+    const extra=impliedExtra(drawShare,heroEq,H.pot);
+    const needImp=toCall/(H.pot+toCall+extra);
+    const M=0.02;
+    if(heroEq>=needRaw-M){ correct=(col!==2); }
+    else if(heroEq<needImp-M){ correct=(col===2); }
+    else { correct=true; close=true; }
+    detail=`Pot odds: ${fmt(toCall)} to win ${fmt(H.pot)} — raw break-even <b>${pctS(needRaw)}</b>.`;
+    if(extra>0.05)
+      detail+=` ${pctS(drawShare)} of your equity comes from improving, so implied odds are worth about `
+            + `${fmt(extra)} more and the real break-even is <b>${pctS(needImp)}</b>.`;
+    else detail+=` Your equity is already made, so there are no implied odds to add.`;
+    detail+=` Your hand had <b>${pctS(heroEq)}</b> vs ${live.length>1?"their ranges":"their range"}.`;
+    if(close) detail+=` That lands between the two thresholds — a judgment call, not a mistake either way.`;
+  } else {
+    // betting: value if you're well ahead of your fair share, or a profitable
+    // semi-bluff if they fold often enough to beat the price you're laying
+    const bet=flopBetSize(), fe=foldEquity(live,bet), breakEven=bet/(H.pot+bet);
+    const isValue=heroEq>=fair+0.12, isTrash=heroEq<=fair-0.10, bluffWorks=fe>=breakEven+0.02;
+    // checking is only ever a mistake when it passes up clear value: these bots
+    // overfold, and grading every profitable bluff as "correct" would train a
+    // habit that loses money against humans
+    if(isValue){ correct=(col===0); }
+    else if(isTrash){ correct = (col===0) ? bluffWorks : true; close=!bluffWorks; }
+    else { correct=true; close=true; }
+    detail=`<b>${pctS(heroEq)}</b> equity against <b>${pctS(fair)}</b> fair share ${n}-way. `
+         + `Betting ${fmt(bet)} risks ${fmt(bet)} to win ${fmt(H.pot)}, so it needs them to fold `
+         + `<b>${pctS(breakEven)}</b> of the time — this lot folds <b>${pctS(fe)}</b>.`;
+    detail+= isValue    ? " Strong enough to bet for value."
+           : isTrash    ? (bluffWorks ? " Nothing to show down, but they fold often enough that a bluff pays."
+                                      : " Nothing to show down and they don't fold enough — checking is the cheap option.")
+                        : " Medium strength — bet or check are both defensible.";
+    if(!isValue) detail+=" <i>These bots overfold; don't read a winning bluff here as a licence to bluff humans.</i>";
+  }
+  if(rangeEq!=null){
+    const edge=rangeEq-fair;
+    detail+=` Range vs range you're at <b>${pctS(rangeEq)}</b> — `
+          + (edge>0.04?"the board favours your range.":edge<-0.04?"the board favours theirs.":"neither range is ahead.");
+  }
+  S.stats.flopDecisions=(S.stats.flopDecisions||0)+1;
+  if(correct) S.stats.flopCorrect=(S.stats.flopCorrect||0)+1;
+  save(); refreshStats();
+  const grade = correct ? `<span style="color:var(--good)">✓ ${close?"Fine":"Correct"}</span>`
+                        : `<span style="color:var(--bad)">✗ Mistake</span>`;
+  $("feedback").innerHTML=`${grade} &nbsp; you ${acts[col]===undefined?"acted":acts[col]}`
+    + `<span class="sub">${detail}</span>`;
+  H.flopGrade={col, toCall, heroEq, rangeEq, drawShare, correct, close};
+}
+function heroFlopAction(col){
+  const toCall=Math.min(H.fBet-(H.fCommit[H.hero]||0), stackLeft(H.hero));
+  gradeFlop(col,toCall);
+  clearButtons(); setActingNone();
+  H.fActed.add(H.hero);
+  if(toCall>0){
+    if(col===2){ H.act[H.hero]={t:"fold",label:"Folds"}; H.folded.add(H.hero); }
+    else if(col===1){ const p=flopPut(H.hero,toCall);
+      H.act[H.hero]={t:"call",label:stackLeft(H.hero)===0?"Calls ALL-IN":"Calls "+fmt(p)}; }
+    else { const to=flopRaiseTo(); flopPut(H.hero,to-(H.fCommit[H.hero]||0)); H.fBet=to; H.fRaises++;
+      H.act[H.hero]={t:"raise",label:"Raises to "+fmt(to)}; }
+  } else {
+    if(col===1) H.act[H.hero]={t:"call",label:"Checks"};
+    else { const b=flopBetSize(); flopPut(H.hero,b); H.fBet=b; H.fRaises++;
+      H.act[H.hero]={t:"raise",label:"Bets "+fmt(b)}; }
+  }
+  renderTable(); applyTags(); renderBoard();
+  setTimeout(flopStep,420);
+}
+function finishFlop(){
+  const live=flopLive();
+  H.node=null; H.showdown=true; H.playingFlop=false;
+  if(!live.includes(H.hero))      H.result="You fold the flop.";
+  else if(live.length<=1)         H.result="Everyone folds — you take it! 🎉";
+  else { H.turn=H.deck.pop();     H.result="Turn dealt — the hand stops here."; }
+  H.ended=true;
+  renderTable(); applyTags(); renderBoard();
+  $("story").textContent=H.result;
+  $("nextBtn").classList.remove("hidden");
+}
+
 /* ---------- render / animate ---------- */
 function present(){ renderTable(); animateThenShow(); }
 function renderTable(){
@@ -1254,6 +1521,8 @@ function renderTable(){
   if(!H){ $("pot").textContent="Pot 1.5 bb"; $("story").textContent=""; return; }
   const {play,hero}=H, n=play.length, heroIdx=play.indexOf(hero);
   const showdown=H.showdown, inShow=s=> showdown && H.remaining && H.remaining.includes(s);
+  // in flop play the numbers stay hidden until you've committed to an action
+  const showEq = H.showdown || H.revealEq;
   const btnSeat = play.includes("BTN")?"BTN":play[n-3]||play[0];
   for(let k=0;k<n;k++){
     const seat=play[(heroIdx+k)%n], {x,y}=seatXY(k,n), isHero=seat===hero;
@@ -1268,9 +1537,9 @@ function renderTable(){
     // hand equity is yours alone (a villain's would leak the cards they hold);
     // range equity is public study information, so show it for everyone
     const chips=[];
-    if(isHero && showdown && H.equity && H.equity[seat]!=null)
+    if(isHero && showEq && H.equity && H.equity[seat]!=null)
       chips.push(`<div class="eq" title="Your exact hand vs the other players' ranges">${Math.round(H.equity[seat]*100)}%<span class="eqr">hand</span></div>`);
-    if(showdown && H.eqRange && H.eqRange[seat]!=null)
+    if(showEq && H.eqRange && H.eqRange[seat]!=null)
       chips.push(`<div class="eq rng" title="${isHero?"The whole range your line reps, vs theirs":"This player's range vs the others"}">${Math.round(H.eqRange[seat]*100)}%<span class="eqr">range</span></div>`);
     const eq = chips.length ? `<div class="eqbox">${chips.join("")}</div>` : "";
     const dchip = seat===btnSeat ? '<div class="dchip">D</div>' : '';
@@ -1301,28 +1570,33 @@ function animateThenShow(){
 function showControls(){
   if(H.node){ $("story").textContent=storyFor(H.node);
     const he=document.querySelector('.seat.hero'); if(he) he.classList.add("acting");
-    H.reviewChart=H.node.chart; H.reviewHand=H.heroHand; buildButtons(H.node); }
+    if(H.node.chart){ H.reviewChart=H.node.chart; H.reviewHand=H.heroHand; }
+    buildButtons(H.node); }
   else { $("story").textContent=H.result;
     if(H.flop){ setTimeout(revealFlop,450); }
     else { $("nextBtn").classList.remove("hidden"); } }
 }
-function revealFlop(){
-  H.showdown=true; renderTable(); $("story").textContent=H.result;
-  // keep the betting story visible alongside the equities
+/* paint every seat's current action tag without re-running the deal animation */
+function applyTags(){
   const seatEls={}; document.querySelectorAll(".seat").forEach(e=>seatEls[e.dataset.seat]=e);
   H.play.forEach(s=>{ const t=H.act[s]; if(t&&t.t!=="post"&&seatEls[s]){ const tg=seatEls[s].querySelector("[data-tag]");
     tg.textContent=t.label; tg.className="action-tag show "+({fold:"tag-fold",raise:"tag-raise",call:"tag-call"}[t.t]||"tag-post"); } });
+}
+function renderBoard(){
   const board=$("board"); board.innerHTML="";
-  H.flop.forEach((c,i)=>{ const p=cardParts(c);
+  const cards=(H.flop||[]).concat(H.turn?[H.turn]:[]);
+  cards.forEach((c,i)=>{ const p=cardParts(c);
     const el=document.createElement("div"); el.className="boardcard "+p.cls; el.style.animationDelay=(i*90)+"ms";
     el.innerHTML=`<div class="r">${p.r}</div><div class="s">${p.sym}</div>`; board.appendChild(el); });
+}
+function revealFlop(){
+  if(H.playingFlop){ startFlopPlay(); return; }     // the flop is played, not just shown
+  H.showdown=true; renderTable(); $("story").textContent=H.result;
+  applyTags(); renderBoard();                        // keep the betting story beside the equities
   $("nextBtn").classList.remove("hidden");
 }
 function resizeRefresh(){
-  if(!H||!H.heroCards) return; renderTable();
-  const seatEls={}; document.querySelectorAll(".seat").forEach(e=>seatEls[e.dataset.seat]=e);
-  H.play.forEach(s=>{ const t=H.act[s]; if(t&&t.t!=="post"&&seatEls[s]){ const tg=seatEls[s].querySelector("[data-tag]");
-    tg.textContent=t.label; tg.className="action-tag show "+({fold:"tag-fold",raise:"tag-raise",call:"tag-call"}[t.t]||"tag-post"); } });
+  if(!H||!H.heroCards) return; renderTable(); applyTags(); renderBoard();
   if(H.node){ const he=document.querySelector('.seat.hero'); if(he) he.classList.add("acting"); $("story").textContent=storyFor(H.node); }
   else if(H.showdown) $("story").textContent=H.result;
 }
@@ -1337,10 +1611,25 @@ function storyFor(node){
     case "vs_3bet":return `You opened, ${P[node.vs]} 3-bets. Your move.`;
     case "vs_4bet":return `You 3-bet, ${P[node.vs]} 4-bets. Your move.`;
     case "vs_5bet":return `${P[node.vs]} jams all-in over your 4-bet.`;
+    case "flop": { const toCall=H.fBet-(H.fCommit[H.hero]||0);
+      return toCall>0 ? `${fmt(toCall)} to call into a pot of ${fmt(H.pot)}. Read the board.`
+                      : `Checked to you on the flop. Pot ${fmt(H.pot)}.`; }
   }
   return "";
 }
 function buttonSpec(scen,chart){
+  if(scen==="flop"){
+    const toCall=Math.min(H.fBet-(H.fCommit[H.hero]||0), stackLeft(H.hero));
+    const bet=flopBetSize();
+    // no fold button when checking is free — folding there is never right
+    if(toCall>0){
+      const spec=[{l:"Fold",col:2,cls:"fold"},{l:"Call",col:1,cls:"call"}];
+      if(flopRaiseTo()>H.fBet && H.fRaises<1) spec.push({l:"Raise",col:0,cls:"raise"});
+      return spec;
+    }
+    return bet>=0.5 ? [{l:"Check",col:1,cls:"call"},{l:`Bet ${fmt(bet)}`,col:0,cls:"raise"}]
+                    : [{l:"Check",col:1,cls:"call"}];
+  }
   const rl=chart.raise_label||"Raise";
   // some open charts (notably the SB) have a limp/complete range -> offer Limp
   const hasLimp = Object.values(chart.grid).filter(f=>f[1]>0.15).length>=4;
@@ -1359,7 +1648,9 @@ function buttonSpec(scen,chart){
 function buildButtons(node){
   const wrap=$("buttons"); wrap.innerHTML="";
   const specs=buttonSpec(node.scenario,node.chart);
-  const toCall=Math.round((maxCommitted()-(H.committed[H.hero]||0))*10)/10;
+  const toCall = node.scenario==="flop"
+    ? Math.round((H.fBet-(H.fCommit[H.hero]||0))*10)/10
+    : Math.round((maxCommitted()-(H.committed[H.hero]||0))*10)/10;
   specs.forEach(sp=>{
     const b=document.createElement("button"); b.className="abtn "+sp.cls;
     b.innerHTML=sp.l+(sp.cls==="call"?`<small>${fmt(toCall)} bb</small>`:"");
@@ -1457,6 +1748,12 @@ function playerRows(){
 function openPlayerRanges(focusSeat){
   if(!H) return;
   const list=$("plList"); list.innerHTML="";
+  // the whole point of flop play is reading the board before you see the ranges
+  if(H.node && H.node.scenario==="flop" && !H.revealEq){
+    $("plSub").textContent="";
+    list.innerHTML=`<div class="hempty">Ranges are hidden until you act.<br><br>Read the board first — everything unlocks the moment you commit.</div>`;
+    showOverlay("plOverlay"); return;
+  }
   const rows=playerRows();
   if(!rows.length){
     $("plSub").textContent="";
@@ -1633,7 +1930,9 @@ function refreshStats(){
   $("stHands").textContent=S.stats.hands;
   $("stStreak").textContent=S.stats.streak;
   $("stAcc").textContent = S.stats.decisions? Math.round(100*S.stats.scoreSum/S.stats.decisions)+"%" : "–";
-  $("statsLine").innerHTML=`Hands ${S.stats.hands} · Weighted accuracy ${S.stats.decisions?Math.round(100*S.stats.scoreSum/S.stats.decisions):0}% · Best streak ${S.stats.best}`;
+  const fd=S.stats.flopDecisions||0;
+  $("statsLine").innerHTML=`Hands ${S.stats.hands} · Preflop accuracy ${S.stats.decisions?Math.round(100*S.stats.scoreSum/S.stats.decisions):0}% · Best streak ${S.stats.best}`
+    + (fd?` · Flop reads ${Math.round(100*(S.stats.flopCorrect||0)/fd)}% of ${fd}`:"");
 }
 
 /* ---------- settings UI ---------- */
@@ -1664,6 +1963,13 @@ function renderSettings(){
     const c=document.createElement("div");c.className="chip mini2"+(S.mode===id?" on":"");
     c.textContent=l;c.onclick=()=>{S.mode=id;save();renderSettings();};
     mc.appendChild(c);
+  });
+  // flop play
+  const fc=$("flopChips"); fc.innerHTML="";
+  [[false,"Preflop only"],[true,"Play the flop"]].forEach(([v,l])=>{
+    const c=document.createElement("div");c.className="chip mini2"+((!!S.playFlop===v)?" on":"");
+    c.textContent=l;c.onclick=()=>{S.playFlop=v;save();renderSettings();};
+    fc.appendChild(c);
   });
   // spots to practise — only those the loaded set can actually deal
   const avail=availableScenarios();
@@ -1727,7 +2033,7 @@ $("histClose").onclick=()=>hideOverlay("histOverlay");
 $("histOverlay").onclick=e=>{ if(e.target.id==="histOverlay") hideOverlay("histOverlay"); };
 $("retrainBtn").onclick=startRetrain;
 $("nextBtn").onclick=()=>{ if(H&&H.drill) nextDrill(); else { $("nextBtn").textContent="Deal Next Hand ▸"; newHand(); } };
-$("resetStats").onclick=()=>{S.stats={hands:0,decisions:0,scoreSum:0,streak:0,best:0};save();renderSettings();};
+$("resetStats").onclick=()=>{S.stats={hands:0,decisions:0,scoreSum:0,streak:0,best:0,flopDecisions:0,flopCorrect:0};save();renderSettings();};
 $("clearHistBtn").onclick=()=>{ H_HISTORY=[]; MISTAKES={}; saveHistory(); saveMistakes(); openHistory(); };
 $("loadChartsBtn").onclick=()=>$("chartFile").click();
 $("chartFile").onchange=e=>{ const f=e.target.files&&e.target.files[0]; if(!f) return;
