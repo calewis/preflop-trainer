@@ -1106,8 +1106,10 @@ summary .m{font-size:calc(11px * var(--u))}
     </div>
   </div>
 
-  <div id="equity" hidden></div>
+  <!-- The grade sits **above** the equity: it is the answer to the question you
+       just answered, and the equity is context for the flop that followed. -->
   <div id="grade" role="status" aria-live="polite" hidden></div>
+  <div id="equity" hidden></div>
 
   <div id="hero">
     <div id="heroCards"></div>
@@ -2063,30 +2065,34 @@ function showEquity(){
   /* **A row only appears when there is a measurement behind it.** The engine
      returns `null` for the range figure when hero's spot has no chart node, and
      it used to substitute the hand figure instead — two labels, one number, and
-     a footnote underneath calling both of them exact. */
+     a footnote underneath calling both of them exact.
+
+     The qualifications that used to sit under this row in visible text — that
+     villain is `any_two`, and that the range is a 24-combo strided sample —
+     are still true and now live in the row's `title`. They were three lines of
+     apology under two numbers, which is a lot of column for a caveat that does
+     not change what you do next. **They are not removed, they are demoted**;
+     do not delete them, because the number is not what an unqualified "range
+     equity" would mean. */
   if(Number.isFinite(e.range)){
-    rows.push('<div class="erow"><span class="elab">Your range<sup>†</sup></span><b>'+
-              pct(e.range)+'</b></div>');
-    note.push('<sup>†</sup>Your range against a <i>random</i> hand: nothing here '+
-      'tracks what they have represented. Sampled across 24 combos of your range, '+
-      'not all of them.');
+    rows.push('<div class="erow" title="Your range against a random hand: '+
+      'nothing here tracks what the opponents have represented. Sampled across '+
+      '24 combos of your range, not all of them."><span class="elab">Your range'+
+      '</span><b>'+pct(e.range)+'</b></div>');
   } else {
     note.push('No chart covers this spot, so there is no range figure to show — '+
       'the hand figure above is unaffected.');
   }
-  /* Hero is hard-wired to the button (`HERO = table::BUTTON`), so hero is
-     always in position and the position adjustment is always `x1.0`. That
-     makes this row identical to the first one every single time, and a number
-     that is always a copy should say so rather than imply a second estimate. */
-  const same = e.realised===e.hand;
-  rows.push('<div class="erow"><span class="elab">Realised<sup>*</sup></span>'+
-            '<b class="soft">'+pct(e.realised)+'</b></div>');
-  note.push('<sup>*</sup>A placeholder until the bot is strong enough to measure '+
-    'against — it only adjusts for position'+
-    (same ? ', and you are in position here, so it is your hand equity unchanged.'
-          : '.'));
+  /* **Realised equity is gone from the readout.** It was `hand * 1.0` in
+     position and `hand * 0.90` out of it — a placeholder whose only input was
+     position, sitting under a label that implied a third estimate. While hero
+     was pinned to the button it was *always* a copy of the row above it.
+     `Game::equity_now` still returns it, deliberately: the day there is a bot
+     worth measuring realisation against, the number has somewhere to go. It is
+     simply not shown until it means something. */
   el.hidden = false;
-  el.innerHTML = rows.join("")+'<p class="enote">'+note.join(" ")+'</p>';
+  el.innerHTML = rows.join("") +
+    (note.length ? '<p class="enote">'+note.join(" ")+'</p>' : "");
 }
 
 function showGrade(){
@@ -2559,13 +2565,20 @@ function drawLog(h){
  * the decision point
  * ==================================================================== */
 async function finish(){
-  // Trainer mode: the spot ends when the flop lands. Show the board, then ask
-  // whether to play it on — **before** any range information, because the grade
-  // answers the question you are about to be asked.
+  /* Trainer mode: the spot ends when the flop lands.
+     **The grade is shown here, with the flop.** It used to be withheld until
+     you had chosen "play it out" or "next spot", on the reasoning that range
+     information would answer the question you were about to be asked. That
+     reasoning does not survive contact: the question at this point is only
+     whether to keep playing the hand, and the grade is a verdict on a preflop
+     decision that has already happened and cannot be taken back. Withholding it
+     bought nothing and cost the feedback its moment — you read the flop, then
+     had to click before finding out whether you should have been there. */
   if(training && !playOut && ST.phase!=="complete" && ST.street>0){
     frame((ST.history||[]).length);
     const say=$("say"); say.className="";
     say.innerHTML='Flop is out <span class="pill">preflop spot done</span>';
+    showGrade();
     showEquity();
     const bt=$("btns"); bt.innerHTML=""; $("sizer").hidden=true;
     const mk=(txt,cls,fn)=>{const b=document.createElement("button");
