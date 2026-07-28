@@ -2127,9 +2127,21 @@ function showEquity(){
       '24 combos of your range, not all of them."><span class="elab">Your range'+
       '</span><b>'+pct(e.range)+'</b></div>');
   } else {
-    note.push('No chart covers this spot, so there is no range figure to show — '+
+    note.push('No chart covers your spot, so there is no range figure to show — '+
       'the hand figure above is unaffected.');
   }
+  /* **Say how much of the field was guessed.** Chart sets routinely omit the
+     blind-versus-late 3-bet and 4-bet nodes, so in exactly the spot worth
+     studying an opponent may have no charted range at all. They are taken as
+     any two cards, which is a real assumption and has to be visible: a
+     range-versus-range figure quietly computed against random hands is the
+     failure this readout was corrected for once already. */
+  if(e.assumed>0)
+    note.push(e.assumed===1
+      ? "<b>One opponent's range is not in this chart file; it was taken as "+
+        "any two cards."
+      : "<b>"+e.assumed+" opponents' ranges are not in this chart file; they "+
+        "were taken as any two cards.");
   /* **Realised equity is gone from the readout.** It was `hand * 1.0` in
      position and `hand * 0.90` out of it — a placeholder whose only input was
      position, sitting under a label that implied a third estimate. While hero
@@ -2700,7 +2712,18 @@ async function finish(){
     await revealRunout();
   }
   frame((ST.history||[]).length);
-  ST.phase==="complete" ? showDone() : showTurn();
+  if(ST.phase==="complete"){ showDone(); return; }   // `showDone` grades too
+  /* **Feedback lands with the decision, not at the end of the street.**
+     `showGrade` used to run only at the flop or when the hand finished, so a
+     preflop sequence that came back round — you 3-bet the button from the small
+     blind, the big blind 4-bets, you are asked again — showed you nothing about
+     the 3-bet you had just made. It had been graded; it simply was not drawn
+     until the spot was over, by which point you were two decisions past it.
+
+     Showing the earlier verdicts beside a live decision does not give the
+     answer away: they are verdicts on different nodes, already committed. */
+  if(training) showGrade();
+  showTurn();
 }
 
 function showTurn(){
