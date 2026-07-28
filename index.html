@@ -1157,9 +1157,10 @@ summary .m{font-size:calc(11px * var(--u))}
     </div>
     <div class="grp"><h3>Starting stacks</h3><div class="chips" id="cDepth"></div></div>
     <div class="grp"><h3>Where you sit</h3><div class="chips" id="cSeat"></div>
-      <p class="note">Position is most of preflop and the ranges you are marked
-        against are per-position, so <b>Rotate</b> moves you one seat every hand
-        and deals you the whole table over time. Pick a position to drill it.</p>
+      <p class="note" id="seatNote">Position is most of preflop and the ranges you
+        are marked against are per-position, so <b>Rotate</b> moves you one seat
+        every hand and deals you the whole table over time. Pick a position to
+        drill it. Applies to <b>both</b> Play and Train.</p>
     </div>
     <div class="grp"><h3>Preflop ranges</h3>
       <p class="note" id="chartNow"></p>
@@ -2831,6 +2832,20 @@ function buildSettings(){
     seatOpts.push([(ST&&ST.labels&&ST.labels[s])||("Seat "+s), String(s)]);
   chipRow("cSeat", seatOpts, ()=>String(cfg.seat),
     v=>{ cfg.seat=v; saveCfg(); redraw(); newTable(); });
+  /* **A feature the engine cannot do must say so, not just not happen.**
+     `wasm_play_set_hero` is new, and the `.wasm` is cached, so the first load
+     after a deploy runs a fresh page against the previous engine. Without this
+     the seat chips look live, respond to clicks, save the setting — and you
+     still get dealt the button every hand with nothing anywhere saying why.
+     That is the silent-degradation trap this file guards against everywhere
+     else, and it caught its own author. */
+  if(!hasHero){
+    [...$("cSeat").children].forEach(b=>{ b.disabled=true; b.classList.remove("on"); });
+    const n=$("seatNote"); n.className="note err";
+    n.innerHTML="Your browser is still running a cached older engine, which "+
+      "cannot move your seat — you will be dealt the button every hand. "+
+      "Reload the page to pick up the current one.";
+  }
   chipRow("cUnits",[["Big blinds",'bb'],["Chips",'chips']],
     ()=>cfg.units,v=>{ cfg.units=v; saveCfg(); redraw(); footNote();
                        potShown=-1; if(ST) frame((ST.history||[]).length); });
