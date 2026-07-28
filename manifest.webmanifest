@@ -1,0 +1,20 @@
+{
+  "name": "Poker Trainer",
+  "short_name": "Poker",
+  "description": "Play poker against a bot that explains itself, and drill your preflop ranges. Free, offline, no account.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0705",
+  "theme_color": "#0a0705",
+  "categories": ["games", "education"],
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
