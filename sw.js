@@ -30,7 +30,7 @@
    worker down with it. Each file is added independently and a miss is
    tolerated. */
 
-const CACHE = 'preflop-v16';
+const CACHE = 'preflop-v17';
 
 /* Everything either app needs offline. `./` is the directory index, which is
    what a bookmark to the site root asks for. */
@@ -50,7 +50,25 @@ const SHELL = [
 self.addEventListener('install', e => e.waitUntil((async () => {
   const c = await caches.open(CACHE);
   // Independently, so a file that is not deployed here cannot fail the install.
-  await Promise.all(SHELL.map(u => c.add(u).catch(() => {})));
+  //
+  // **`cache: 'no-cache'`, not a plain `c.add(u)`.** `add` fetches with default
+  // cache mode, which goes through the browser's own HTTP cache — so bumping
+  // `CACHE` would faithfully populate the *new* cache with the *old* bytes and
+  // the release still would not ship. That is the same one-layer-down staleness
+  // the document handler below already guards against, and it bites hardest on
+  // `preflop_wasm.wasm`: the page tests for new exports and degrades when they
+  // are missing, so a stale engine costs a feature silently rather than
+  // failing. Observed exactly that on 2026-07-28 — a freshly built export was
+  // absent from the instantiated module while present in the file on disk.
+  //
+  // A conditional request costs headers and a 304 when nothing changed, not a
+  // megabyte.
+  await Promise.all(SHELL.map(async u => {
+    try {
+      const res = await fetch(u, { cache: 'no-cache', credentials: 'same-origin' });
+      if (res && res.ok) await c.put(u, res);
+    } catch (_) { /* not deployed here; the others still install */ }
+  }));
   self.skipWaiting();
 })()));
 

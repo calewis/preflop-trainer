@@ -122,9 +122,22 @@
   --glow-soft:rgba(255,178,36,.14);
 
   /* the needle */
-  --needle:#ff6127;
+  /* The unlit end of the action ramp. It was only ever written as a literal
+     fallback inside `var(--fold-bar,#4a3922)`, so the fold bar stayed this
+     dark brown in the light theme too — a token that is never defined is not
+     a token. Defined here and overridden below, it is now the third member of
+     the ramp alongside `--needle` (raise) and `--amber` (call), and the grade
+     bars and the range grid both draw from it. */
+  --fold-bar:#4a3922;
+  /* The needle is red-orange, and it had drifted toward plain orange: at hue
+     16 deg it sat only ~23 deg from the amber lamp at 39 deg, which is not much
+     separation for the two colours that have to mean "raise" and "call" side
+     by side in a range grid. Pulled to ~11 deg — clearly red-orange, still not
+     red, and still bright enough to carry dark ink (5.7:1 against
+     `--needle-ink`). */
+  --needle:#ff4a22;
   --needle-ink:#1c0900;
-  --needle-glow:rgba(255,97,39,.45);
+  --needle-glow:rgba(255,74,34,.45);
 
   /* the cool fill — shadows and edges only, never text */
   --cool:rgba(64,180,200,.055);
@@ -168,7 +181,8 @@
   --amber:#95500a; --amber-hi:#2f1d08; --amber-mid:#7d450a;
   --amber-dim:#6a5024; --amber-faint:#8f7a58; --amber-ink:#fffbf2;
   --glow:rgba(149,80,10,.2); --glow-soft:rgba(149,80,10,.08);
-  --needle:#b53306; --needle-ink:#fffbf2; --needle-glow:rgba(181,51,6,.22);
+  --needle:#b62408; --needle-ink:#fffbf2; --needle-glow:rgba(182,36,8,.22);
+  --fold-bar:#ddcaa6;     /* unlit, but on paper: the light theme's "off" */
   --cool:rgba(40,90,110,.05);
   --felt1:#cdae7d; --felt2:#b0916a; --felt3:#8a7050;
   --rail:#6a5539;
@@ -383,16 +397,61 @@ body::before{
 .pc.d,.mini.d{color:var(--card-blue)}
 .pc.c,.mini.c{color:var(--card-green)}
 
-/* A face-down card is a *card*: white stock with the same warm balance as a
-   face, woven so it still reads as face down at 17px. It used to be a dark
-   brown lozenge, which read as a hole in the table rather than as a card
-   somebody is holding. */
+/* ---- the back ----
+   A face-down card is a *card*, and on this table it is a lit one: the back is
+   the only surface in the deck that belongs to the interface rather than to the
+   paper, so it is the one place the amber can come through.
+   It used to be pale stock with a brown weave, which read as a blank rather
+   than as something switched on.
+
+   Four layers, and each is doing a job at 17px, which is the size that decides
+   whether this works at all:
+
+   1. a **fine diagonal circuit hatch** in amber, the etched-trace look, kept
+      under 22% so it reads as texture and not as stripes;
+   2. a **second hatch at the opposite angle**, much fainter, so the two cross
+      into a weave instead of a corduroy — one direction alone looks like a
+      barcode when six of these sit side by side;
+   3. a **centre bloom**, the lamp behind the card;
+   4. a **dark amber ground** so the glow has something to sit in.
+
+   The inset ring is the card's edge catching the light, and the outer glow is
+   deliberately tiny — six backs at a six-handed table, each with a big halo,
+   turns the felt into a smear. */
 .mini.back{
   background:
-    repeating-linear-gradient(45deg,transparent 0 3px, rgba(120,90,40,.20) 3px 6px),
-    linear-gradient(150deg,var(--card-back),var(--card-back2));
-  border:1px solid rgba(120,90,40,.35);color:transparent;
-  box-shadow:0 1px 3px rgba(0,0,0,.5)}
+    repeating-linear-gradient(45deg,
+      transparent 0 2px, rgba(255,178,36,.20) 2px 3px),
+    repeating-linear-gradient(-45deg,
+      transparent 0 4px, rgba(255,178,36,.07) 4px 5px),
+    radial-gradient(120% 90% at 50% 40%,
+      rgba(255,178,36,.30), rgba(255,97,39,.10) 55%, transparent 72%),
+    linear-gradient(155deg,#3a2a12,#241906 60%,#1a1206);
+  border:1px solid rgba(255,178,36,.42);
+  color:transparent;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,178,36,.13),
+    inset 0 1px 0 rgba(255,214,140,.20),
+    0 1px 3px rgba(0,0,0,.6),
+    0 0 7px -2px var(--glow);
+}
+/* On paper the same card is printed, not lit: the amber becomes ink on a warm
+   stock rather than a lamp behind it, or the backs turn into six dark holes in
+   a light table. */
+:root[data-theme="light"] .mini.back{
+  background:
+    repeating-linear-gradient(45deg,
+      transparent 0 2px, rgba(149,80,10,.20) 2px 3px),
+    repeating-linear-gradient(-45deg,
+      transparent 0 4px, rgba(149,80,10,.09) 4px 5px),
+    radial-gradient(120% 90% at 50% 40%,
+      rgba(200,120,30,.20), transparent 70%),
+    linear-gradient(155deg,#f0e2c6,#e3d0aa);
+  border:1px solid rgba(149,80,10,.34);
+  box-shadow:
+    inset 0 0 0 1px rgba(149,80,10,.10),
+    0 1px 3px rgba(0,0,0,.18);
+}
 
 
 /* sizes are this page's; the recipe above is shared with the trainer */
@@ -445,7 +504,12 @@ body::before{
 .seat.hero .pos{color:var(--amber);text-shadow:0 0 14px var(--glow)}
 .stk{font-size:10.5px;color:var(--dim);letter-spacing:-.2px}
 .stk .ai{color:var(--needle);font-weight:700;letter-spacing:.4px}
-.cards{display:flex;gap:2px;justify-content:center;margin-top:3px;height:25px}
+/* Bigger than they were. The back is now a designed surface rather than a
+   blank, and at 17x24 it was too small to show a weave — the hatch collapsed
+   into mush. 21x30 keeps two cards plus the gap at 44px inside an 88px pod,
+   so nothing moved sideways, and the scaled block below grows them further
+   on a large window where there is room to spare. */
+.cards{display:flex;gap:3px;justify-content:center;margin-top:3px;height:30px}
 /* The made hand in words, under the cards at a showdown. It is the line that
    turns "they won" into something you can learn from, and the engine has been
    sending one per seat all along. A muck is dimmed for the same reason its
@@ -456,23 +520,19 @@ body::before{
   text-overflow:ellipsis;max-width:100%}
 .made.muck{color:var(--faint);font-weight:600;font-style:italic}
 .seat.won .made{color:var(--amber);text-shadow:0 0 12px var(--glow)}
-.mini{width:17px;height:24px;border-radius:2.5px;
+.mini{width:21px;height:30px;border-radius:3px;
   background:linear-gradient(160deg,var(--card),var(--card2));color:var(--card-blk);
-  font-size:11.5px;font-weight:800;display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center;
   box-shadow:0 1px 3px rgba(0,0,0,.65);line-height:1;letter-spacing:-.5px}
 .mini.s{color:var(--card-blk)} .mini.h{color:var(--card-red)}
 .mini.d{color:var(--card-blue)} .mini.c{color:var(--card-green)}
-/* A face-down card is a *card*: white stock, same warm balance as a face, with
-   a woven pattern so it still reads as face down at 17px. It used to be a dark
-   brown lozenge, which read as a hole in the table rather than as a card
-   somebody is holding. */
-.mini.back{
-  background:
-    repeating-linear-gradient(45deg,
-      transparent 0 3px, rgba(120,90,40,.20) 3px 6px),
-    linear-gradient(150deg,var(--card-back),var(--card-back2));
-  border:1px solid rgba(120,90,40,.35);color:transparent;
-  box-shadow:0 1px 3px rgba(0,0,0,.5)}
+/* **The card back lives in `shared/cards.css` and nowhere else.** A duplicate
+   of it used to sit right here, *after* the shared file is inlined, so this
+   copy silently won every cascade — which meant editing the shared deck
+   changed the trainer and left this page exactly as it was. That is the
+   duplication the shared file was created to delete, still present in the one
+   place it was hardest to notice. Do not reintroduce it: if a back needs
+   changing, change it once, there. */
 .mini.muck{opacity:.5;filter:saturate(.5)}
 .dchip{position:absolute;top:-7px;left:-7px;width:18px;height:18px;border-radius:50%;
   background:radial-gradient(circle at 35% 30%,#ffd074,var(--amber) 70%);
@@ -708,6 +768,7 @@ summary .m{color:var(--faint);font-weight:600;text-transform:none;letter-spacing
 .foot code{background:var(--panel);padding:1.5px 5px;border-radius:4px;color:var(--amber-dim);
   font-family:var(--mono);font-size:9.5px}
 .err{color:var(--needle)}
+.note.ok{color:var(--amber-mid)}
 #banner{background:rgba(255,178,36,.09);border:1px solid var(--amber-dim);color:var(--amber);
   border-radius:10px;padding:9px 12px;font-size:12px;text-align:center;font-weight:600;
   box-shadow:0 0 26px -10px var(--glow)}
@@ -823,13 +884,48 @@ summary .m{color:var(--faint);font-weight:600;text-transform:none;letter-spacing
   border:1px solid var(--line2);border-radius:8px;overflow:hidden}
 #rgrid i{font-style:normal;display:flex;align-items:center;justify-content:center;
   aspect-ratio:1;font-size:8.5px;font-weight:800;font-family:var(--mono);
-  letter-spacing:-.4px;line-height:1;overflow:hidden}
+  letter-spacing:-.4px;line-height:1;overflow:hidden;position:relative;
+  background:var(--fold-bar);cursor:default}
+/* The label sits across up to three different bar colours — bright orange,
+   bright amber, dark brown — so no single ink is readable on all of them and
+   the luminance test the blended version used has nothing to test any more.
+   A light label with a dark halo is legible over every one of them. */
+#rgrid i span{position:relative;z-index:1;color:#fff6e6;
+  text-shadow:0 0 2px rgba(0,0,0,.95),0 1px 1px rgba(0,0,0,.85)}
+:root[data-theme="light"] #rgrid i span{color:#1a1003;
+  text-shadow:0 0 2px rgba(255,255,255,.95),0 1px 1px rgba(255,255,255,.85)}
+/* A class the chart has no row for. Not the same as a hand it always folds. */
+#rgrid i.gap{background:repeating-linear-gradient(45deg,
+  var(--panel2) 0 3px, var(--panel) 3px 6px)}
+#rgrid i.gap span{opacity:.45}
+#rkey .hint{margin-left:auto;color:var(--faint)}
 /* Your own hand, when you are looking at your own seat and holding one. */
 #rgrid i.you{box-shadow:inset 0 0 0 2px var(--txt);position:relative;z-index:2}
+/* The same cell when the app opened this to tell you the line was off chart:
+   it has to be findable in a 169-cell grid at a glance. */
+#rgrid i.dev{box-shadow:inset 0 0 0 2px var(--needle),0 0 0 2px var(--needle),
+  0 0 18px var(--needle-glow);z-index:3;animation:devpulse 1.1s ease-out 3}
+@keyframes devpulse{0%,100%{transform:scale(1)}45%{transform:scale(1.14)}}
+#rwarn .hand{font-family:var(--mono);text-transform:none}
 #rkey{display:flex;gap:13px;margin-top:9px;font-size:11px;color:var(--dim);flex-wrap:wrap}
 #rkey span{display:inline-flex;align-items:center;gap:5px}
 #rkey i{width:10px;height:10px;border-radius:3px;font-style:normal}
 #rnone{font-size:12px;color:var(--faint);padding:22px 4px;text-align:center;line-height:1.6}
+/* Exact frequencies on hover. `pointer-events:none` matters: the tooltip
+   follows the cursor, so a tooltip that could be hovered would sit under the
+   pointer and flicker the cell out from beneath it. */
+#rtip{position:fixed;z-index:400;pointer-events:none;background:var(--panel2);
+  border:1px solid var(--amber-dim,var(--line2));border-radius:8px;
+  padding:7px 9px;font-size:11.5px;font-weight:700;color:var(--txt);
+  box-shadow:0 6px 20px rgba(0,0,0,.6);white-space:nowrap;max-width:90vw}
+#rtip[hidden]{display:none}
+#rtip .th{font-family:var(--mono);color:var(--amber);margin-bottom:4px;
+  font-size:12.5px}
+#rtip .tr{display:flex;align-items:center;gap:6px;justify-content:space-between}
+#rtip .tr i{width:9px;height:9px;border-radius:2px;font-style:normal;flex:0 0 auto}
+#rtip .tr b{font-family:var(--mono);margin-left:10px}
+#rtip .tn{color:var(--dim);font-weight:600}
+#rtip .tgap{color:var(--faint);font-weight:600}
 /* The peek warning, in trainer mode only. */
 #rwarn{font-size:11px;color:var(--needle);margin:0 0 10px;line-height:1.55;
   border:1px solid var(--needle);border-radius:9px;padding:8px 10px;
@@ -884,11 +980,14 @@ summary .m{color:var(--faint);font-weight:600;text-transform:none;letter-spacing
  * the table up on a short landscape laptop and push the action buttons
  * off the bottom, which is the one thing that must never happen.
  * ==================================================================== */
-:root{--u:1;--us:1}
-@media (min-width:700px)  and (min-height:720px){ :root{--u:1.15;--us:1.12} }
-@media (min-width:900px)  and (min-height:860px){ :root{--u:1.3; --us:1.18} }
-@media (min-width:1150px) and (min-height:1000px){ :root{--u:1.45;--us:1.22} }
-@media (min-width:1500px) and (min-height:1200px){ :root{--u:1.6; --us:1.25} }
+/* `--ucard` runs ahead of `--u`: the seat pods have slack that the rest of
+   the layout does not, and the card back is the one element that gets better
+   the more pixels it has. */
+:root{--u:1;--us:1;--ucard:1}
+@media (min-width:700px)  and (min-height:720px){ :root{--u:1.15;--us:1.12;--ucard:1.25} }
+@media (min-width:900px)  and (min-height:860px){ :root{--u:1.3; --us:1.18;--ucard:1.5} }
+@media (min-width:1150px) and (min-height:1000px){ :root{--u:1.45;--us:1.22;--ucard:1.75} }
+@media (min-width:1500px) and (min-height:1200px){ :root{--u:1.6; --us:1.25;--ucard:2} }
 
 .app{max-width:calc(580px * var(--u));gap:calc(9px * var(--u))}
 #sheetBox{max-width:calc(580px * var(--u))}
@@ -924,8 +1023,9 @@ summary .m{color:var(--faint);font-weight:600;text-transform:none;letter-spacing
 .seat{width:calc(88px * var(--u))}
 .pos{font-size:calc(12.5px * var(--u))}
 .stk{font-size:calc(10.5px * var(--u))}
-.cards{height:calc(25px * var(--u));gap:calc(2px * var(--u))}
-.mini{width:calc(17px * var(--u));height:calc(24px * var(--u));font-size:calc(11.5px * var(--u))}
+.cards{height:calc(30px * var(--ucard)); gap:calc(3px * var(--ucard))}
+.mini{width:calc(21px * var(--ucard));height:calc(30px * var(--ucard));
+  font-size:calc(13px * var(--ucard))}
 .dchip{width:calc(18px * var(--u));height:calc(18px * var(--u));font-size:calc(11px * var(--u))}
 .bet{font-size:calc(10.5px * var(--u))}
 .tag{font-size:calc(9px * var(--u));padding:calc(2.5px * var(--u)) calc(9px * var(--u))}
@@ -1056,6 +1156,11 @@ summary .m{font-size:calc(11px * var(--u))}
         what those are is the exercise.</p>
     </div>
     <div class="grp"><h3>Starting stacks</h3><div class="chips" id="cDepth"></div></div>
+    <div class="grp"><h3>Where you sit</h3><div class="chips" id="cSeat"></div>
+      <p class="note">Position is most of preflop and the ranges you are marked
+        against are per-position, so <b>Rotate</b> moves you one seat every hand
+        and deals you the whole table over time. Pick a position to drill it.</p>
+    </div>
     <div class="grp"><h3>Preflop ranges</h3>
       <p class="note" id="chartNow"></p>
       <div class="chips">
@@ -1085,6 +1190,9 @@ summary .m{font-size:calc(11px * var(--u))}
       <div class="rowt"><div class="lab">Show mucked cards
         <small>What they had when nobody had to show. Not table-legal — it is here to learn from.</small></div>
         <div class="sw" id="tMuck"></div></div>
+      <div class="rowt"><div class="lab">Warn me off chart
+        <small>Playing (not drilling): if you take a preflop line the chart plays under 5% of the time, show the range and where you were.</small></div>
+        <div class="sw" id="tNudge"></div></div>
     </div>
     <div class="grp"><h3>This session</h3>
       <div class="chips"><button id="resetBtn">Start a fresh session</button></div>
@@ -1110,6 +1218,7 @@ summary .m{font-size:calc(11px * var(--u))}
     <div id="rkey"></div>
     <p id="rnone" hidden></p>
   </div>
+  <div id="rtip" hidden role="tooltip"></div>
 </div>
 
 <script>
@@ -1135,7 +1244,7 @@ const IMPORTS = {
     __wbindgen_externref_table_grow:()=>{throw new Error("externref_table_grow called")},
   },
 };
-let W=null, PTR=0, CAP=8192, hasProfiles=false, hasCharts=false;
+let W=null, PTR=0, CAP=8192, hasProfiles=false, hasCharts=false, hasHero=false;
 const enc=new TextEncoder();
 let chartsJson=null, chartEntries=0, chartName="";
 const dec=new TextDecoder();
@@ -1280,17 +1389,38 @@ function heroChart(){
 const SCENARIOS=[["Open",0],["vs Open",1],["vs 3-Bet",2],["vs 4-Bet",3],["vs 5-Bet",4]];
 const SCEN_IDX={rfi:0,vs_rfi:1,vs_3bet:2,vs_4bet:3,vs_5bet:4};
 const RANKS13=["A","K","Q","J","T","9","8","7","6","5","4","3","2"];
-/* The ramp, as RGB so cells can be mixed. **These must stay in step with the
-   grade bars**, or a range reads one way in the grid and another in the
-   verdict directly above it. */
-const RAMP={r:[255,97,39], c:[255,178,36], f:[74,57,34]};
-/* Rec. 601 luminance, threshold 150 — the trainer's rule, kept identical so a
-   cell of the same weight gets the same ink in both places. The ramp spans
-   unlit brown to bright amber, so a constant label colour is unreadable at one
-   end or the other whichever constant you pick. */
-const cellInk=(R,G,B)=>(0.299*R+0.587*G+0.114*B)>150?"#1a1003":"#e8d4b0";
+const ACTS=["Raise","Call","Fold"];
+/* **A cell is three bars, not one blended colour.**
+   The blend put a 50/50 raise/fold hand at the same visual point as a hand the
+   chart always calls, because mixing the two ends of the ramp lands you in the
+   middle of it — the encoding could not tell "half the time I jam" from "every
+   time I flat". Three hard-stopped segments show the actual split, and the
+   width *is* the frequency, so a 15% raise is a 15%-wide bar you can compare
+   across the grid by eye.
+
+   Built as one `linear-gradient` rather than three child nodes: 169 cells x 3
+   would be 507 extra elements repainted on every scenario change, and a
+   gradient with hard stops draws exactly the same thing.
+
+   The colours are `var()`, not literals, so the grid, the grade bars and the
+   legend cannot drift apart and the light theme works — which is what the old
+   hardcoded `RAMP` table could not promise. */
+function cellBars(pc){
+  const a=pc[0], b=pc[0]+pc[1];
+  return "linear-gradient(90deg,"+
+    "var(--needle) 0 "+a.toFixed(3)+"%,"+
+    "var(--amber) "+a.toFixed(3)+"% "+b.toFixed(3)+"%,"+
+    "var(--fold-bar) "+b.toFixed(3)+"% 100%)";
+}
+/* One decimal, but only when it earns one: "100%" reads better than "100.0%",
+   and a chart weight of 0.0725 is a real 7.3% that must not round to 7%. */
+const freq=x=>(Math.abs(x-Math.round(x))<0.05?x.toFixed(0):x.toFixed(1))+"%";
 
 let rSeat=0, rScen=0, rVs=null;   // whose range, at which node, against whom
+/* Play mode: the preflop action you just took was one the chart barely plays.
+   `{row, idx}` — the chart row you were on, and which of raise/call/fold you
+   chose. Null the rest of the time. */
+let deviation=null;
 
 /* Ask the engine for a seat's grid. `-1` is "no particular opponent", which is
    what a browser asking "what does the cutoff open?" means. */
@@ -1315,14 +1445,39 @@ function classAt(i,j){
   return i===j ? a+a : (i<j ? a+b+"s" : b+a+"o");
 }
 
-function openRange(seat){
+/* Play mode's off-chart nudge. Trainer mode grades every spot and shows the
+   verdict afterwards; play mode is a game, not a drill, so it stays quiet —
+   **except** when you take a line the chart hardly ever takes. That is the
+   moment the information is worth interrupting for, and it is the one case
+   where "you are not being graded" and "nobody told me" are the same
+   complaint.
+
+   The threshold is `GRADE_MIN`, the same 5% trainer mode marks against, so the
+   two modes cannot disagree about what "off chart" means. */
+function offChartCheck(code){
+  const row=heroChart();
+  if(!row) return null;                 // no chart here: nothing to be off
+  const i=RCF[code], w=row.w||[0,0,0];
+  return (w[i]||0) >= GRADE_MIN ? null : {row, idx:i};
+}
+function showOffChart(dev){
+  deviation=dev;
+  // Open on the node the decision was actually made at, not the one the hand
+  // has since moved to.
+  openRange(ST.hero_seat, {scen: SCEN_IDX[dev.row.scenario]||0, auto:true});
+}
+
+function openRange(seat, opts){
   if(!chartEntries) return;
+  opts=opts||{};
   /* **Peeking in a drill is allowed and is recorded.** Hiding the study
      material would be the wrong trade — you learn a range by looking at it —
      but a spot you looked up before acting is not evidence that you knew it,
      so it must not count towards the accuracy figure. It is marked here, at
      the moment of looking, and only while a decision is still outstanding. */
-  if(training && !peeked && ST && ST.phase!=="complete" && ST.street===0){
+  // `opts.auto` means the app opened this, not you — the off-chart nudge. It
+  // must not be charged as a peek: you did not look anything up, you were told.
+  if(training && !opts.auto && !peeked && ST && ST.phase!=="complete" && ST.street===0){
     peeked=true; drill.peeks++;
   }
   /* Open on the node hero is actually at, so the first thing you see is the
@@ -1330,13 +1485,26 @@ function openRange(seat){
      The node comes from the engine's own detection (`hero_chart_row`), not
      from counting raises in the event log here. */
   const hr = (ST && ST.street===0) ? heroChart() : null;
-  rSeat=seat; rScen = hr ? (SCEN_IDX[hr.scenario]||0) : 0; rVs=null;
+  rSeat=seat;
+  rScen = opts.scen!=null ? opts.scen : (hr ? (SCEN_IDX[hr.scenario]||0) : 0);
+  /* **The big blind has no open.** It is never first in, so no chart set has a
+     `BB` `rfi` row — the only unraised-pot node it has is facing a limp, which
+     needs a limper named. Landing there by default means the first thing you
+     see on the BB is a tab that cannot answer until you pick someone. Asking
+     the engine whether this seat has a plain open, rather than hard-coding
+     "seat 2 is the big blind", keeps the rule in one place and gets heads-up
+     right for free. */
+  if(opts.scen==null && rScen===0 && !seatChart(seat, 0, null)) rScen=1;
+  rVs=null;
   $("rsheet").hidden=false;
   document.body.style.overflow="hidden";
   drawRange();
   $("rClose").focus({preventScroll:true});
 }
 function closeRange(){
+  // The nudge describes one decision. It must not still be on screen the next
+  // time you open a range for your own reasons.
+  deviation=null;
   $("rsheet").hidden=true;
   document.body.style.overflow="";
 }
@@ -1362,47 +1530,84 @@ function drawRange(){
     scen.appendChild(b);
   }
 
-  /* **Facing aggression, the chart is keyed by who put the money in**, and
-     `resolve_node` refuses to answer without one — "falling back to *some*
-     `vs` would be inventing an opponent", which is the right call and not
-     something to work around here. So when the node is not an open, the
-     opponent is a choice you make, shown as a second row. */
+  /* **Which nodes need a named opponent is the engine's rule, so ask it.**
+     `resolve_node` keys any node facing aggression by who put the money in and
+     refuses to answer without one — "falling back to *some* `vs` would be
+     inventing an opponent", which is right. But it is not only the non-open
+     scenarios: the **big blind in an unraised pot is facing a limp**, so `Rfi`
+     at the BB is also keyed by whoever entered. Deciding here that "Open needs
+     no opponent" reimplemented that rule and got it wrong, and the symptom was
+     a flat "no chart for this seat" on the big blind with a perfectly good
+     range file loaded.
+
+     So: try without an opponent, and if the engine declines, that is the node
+     telling us it needs one. No rule about which nodes those are lives here. */
+  let c = seatChart(rSeat, rScen, null);
+  const needsVs = !c;
   const vsRow=$("rvs");
-  if(rScen===0){ vsRow.hidden=true; rVs=null; }
+  if(!needsVs){ vsRow.hidden=true; rVs=null; }
   else{
-    // Default to the first opponent the file actually has a chart against,
-    // so opening "vs Open" lands on something rather than on an error you
-    // then have to click your way out of.
     const others=[];
     for(let s=0;s<ST.seats;s++) if(s!==rSeat) others.push(s);
+    // Land on an opponent the file actually covers, rather than on an error you
+    // then have to click your way out of.
     if(rVs===null || rVs===rSeat)
       rVs = others.find(s=>seatChart(rSeat,rScen,s)) ?? (others[0] ?? null);
+    c = rVs===null ? null : seatChart(rSeat, rScen, rVs);
     vsRow.hidden=false; vsRow.innerHTML="";
     const lab=document.createElement("span");
-    lab.className="vlab"; lab.textContent="vs"; vsRow.appendChild(lab);
+    lab.className="vlab";
+    lab.textContent = rScen===0 ? "limp from" : "vs";
+    vsRow.appendChild(lab);
     for(const s of others){
       const b=document.createElement("button");
       b.textContent=(ST.labels&&ST.labels[s])||("seat "+s);
       if(s===rVs) b.className="on";
+      // Grey out an opponent this file has nothing for, rather than letting
+      // you click into an empty grid and wonder which choice was wrong.
+      if(!seatChart(rSeat,rScen,s)) b.disabled=true;
       b.onclick=()=>{ rVs=s; drawRange(); };
       vsRow.appendChild(b);
     }
   }
 
-  warn.hidden = !(training && peeked);
-  if(!warn.hidden)
-    warn.textContent="You looked this spot up before acting, so it will not "+
-      "count towards your in-range score.";
+  /* Two things can want this slot, and only one of them is ever true at a
+     time: you looked a spot up in a drill, or the app is telling you the line
+     you just took is off the chart. */
+  if(deviation){
+    const {row, idx} = deviation;
+    const w=row.w.map(x=>Math.max(0,+x||0));
+    const tot=w.reduce((a,b)=>a+b,0)||1;
+    const pcs=w.map(x=>x/tot*100);
+    const mine=pcs[idx];
+    // What it does instead: the heaviest action that is not the one you took.
+    let alt=0; for(let k=0;k<3;k++) if(k!==idx && pcs[k]>pcs[alt]) alt=k;
+    if(alt===idx) alt=(idx+1)%3;
+    warn.hidden=false;
+    warn.innerHTML='<b>Off chart — you '+ACTS[idx].toLowerCase()+'ed '+
+      '<span class="hand">'+esc(row.hand)+'</span>.</b> '+
+      'This chart '+ACTS[idx].toLowerCase()+'s it '+freq(mine)+' of the time here'+
+      (pcs[alt]>0 ? '; it '+ACTS[alt].toLowerCase()+'s '+freq(pcs[alt])+'.'
+                  : '.')+
+      ' Your hand is outlined below.';
+  } else {
+    warn.hidden = !(training && peeked);
+    if(!warn.hidden)
+      warn.textContent="You looked this spot up before acting, so it will not "+
+        "count towards your in-range score.";
+  }
 
-  const c=seatChart(rSeat, rScen, rVs);
+  // `c` was resolved above, together with whether this node needs an opponent.
   // `seatName` already returns "You" for hero, so do not label it twice.
   const nm=seatName(rSeat)||("Seat "+rSeat);
   $("rtitle").textContent=nm+(rSeat===ST.hero_seat&&nm!=="You"?" (you)":"");
   if(!c){
     grid.innerHTML=""; key.innerHTML=""; none.hidden=false;
     $("rsub").textContent="";
-    none.textContent="The range file has no chart for this seat at this node. "+
-      "That is a gap in the file, not a range that folds everything.";
+    none.textContent = needsVs
+      ? "This file has no chart for "+nm+" here against any of the other seats."
+      : "This file has no chart for "+nm+" at this node. That is a gap in the "+
+        "file, not a range that folds everything.";
     return;
   }
   none.hidden=true;
@@ -1412,29 +1617,43 @@ function drawRange(){
 
   // Your own hand, so you can find it without hunting — only on your own seat,
   // and only from your own two cards, which are yours to look at.
-  const mine = (rSeat===ST.hero_seat && ST.hero && ST.hero.length===2)
+  // On a deviation, outline the class that was actually graded rather than
+  // re-deriving it from the cards — the hand has moved on by the time this
+  // opens, and the two must not be able to disagree about which cell is yours.
+  const mine = deviation ? deviation.row.hand
+             : (rSeat===ST.hero_seat && ST.hero && ST.hero.length===2)
              ? handClass(ST.hero[0], ST.hero[1]) : null;
 
   let out="";
   for(let i=0;i<13;i++) for(let j=0;j<13;j++){
     const cls=classAt(i,j), w=c.grid[cls];
-    let R=0,G=0,B=0;
-    if(w){
-      const sum=(w[0]||0)+(w[1]||0)+(w[2]||0) || 1;
-      const wr=(w[0]||0)/sum, wc=(w[1]||0)/sum, wf=(w[2]||0)/sum;
-      R=Math.round(RAMP.r[0]*wr+RAMP.c[0]*wc+RAMP.f[0]*wf);
-      G=Math.round(RAMP.r[1]*wr+RAMP.c[1]*wc+RAMP.f[1]*wf);
-      B=Math.round(RAMP.r[2]*wr+RAMP.c[2]*wc+RAMP.f[2]*wf);
-    } else { R=RAMP.f[0]; G=RAMP.f[1]; B=RAMP.f[2]; }
-    out+='<i class="'+(cls===mine?"you":"")+'" style="background:rgb('+R+','+G+','+B+
-         ');color:'+cellInk(R,G,B)+'">'+cls+'</i>';
+    const raw=[(w&&+w[0])||0, (w&&+w[1])||0, (w&&+w[2])||0];
+    const sum=raw[0]+raw[1]+raw[2];
+    /* **A class the file does not cover is absent, not "folds 100%".** The
+       blend drew both as the same unlit brown, so a hole in a chart was
+       indistinguishable from a hand it genuinely never plays. An uncovered
+       cell gets no bars and says so on hover. */
+    const have = !!w && sum>0;
+    const pc = have ? raw.map(x=>x/sum*100) : null;
+    const cl = (cls===mine ? (deviation?"you dev":"you") : "") + (have?"":" gap");
+    // `aria-label` carries the same sentence the tooltip shows, so the exact
+    // frequencies are available without a pointer at all.
+    const lab = have
+      ? cls+" — "+ACTS.map((n,k)=>n+" "+freq(pc[k])).join(", ")
+      : cls+" — not in this chart";
+    out+='<i class="'+cl.trim()+'" data-cls="'+cls+'"'+
+         (have?' data-w="'+pc.map(x=>x.toFixed(2)).join(",")+'"':"")+
+         ' aria-label="'+esc(lab)+'"'+
+         (have?' style="background:'+cellBars(pc)+'"':"")+
+         '><span>'+cls+'</span></i>';
   }
   grid.innerHTML=out;
   key.innerHTML=
-    '<span><i style="background:rgb(255,97,39)"></i>Raise</span>'+
-    '<span><i style="background:rgb(255,178,36)"></i>Call</span>'+
-    '<span><i style="background:rgb(74,57,34)"></i>Fold</span>'+
-    (mine?'<span style="margin-left:auto">your hand is outlined</span>':"");
+    '<span><i style="background:var(--needle)"></i>Raise</span>'+
+    '<span><i style="background:var(--amber)"></i>Call</span>'+
+    '<span><i style="background:var(--fold-bar)"></i>Fold</span>'+
+    '<span class="hint">'+(mine?"your hand is outlined · ":"")+
+      'hover a hand for exact frequencies</span>';
 }
 
 /* The class name for two card ids, the way `core::range::combo_class` writes
@@ -1445,8 +1664,50 @@ function handClass(a,b){
   return hi===lo ? R[hi]+R[hi] : R[hi]+R[lo]+(suited?"s":"o");
 }
 
-$("rClose").onclick=closeRange;
-$("rsheet").onclick=e=>{ if(e.target.id==="rsheet") closeRange(); };
+/* ---- exact frequencies, on hover ----
+   The bars answer "roughly how often"; this answers "how often exactly", which
+   is the number you are actually trying to memorise. Delegated, because the
+   grid is rebuilt whole on every seat, scenario and opponent change. */
+function showTip(el, x, y){
+  const tip=$("rtip");
+  const cls=el.dataset.cls, w=el.dataset.w;
+  if(!w){
+    tip.innerHTML='<div class="th">'+esc(cls)+'</div>'+
+      '<div class="tgap">not in this chart</div>';
+  } else {
+    const pc=w.split(",").map(Number);
+    tip.innerHTML='<div class="th">'+esc(cls)+'</div>'+
+      ACTS.map((n,k)=>'<div class="tr"><span class="tn"><i style="background:'+
+        ["var(--needle)","var(--amber)","var(--fold-bar)"][k]+'"></i>'+n+
+        '</span><b>'+freq(pc[k])+'</b></div>').join("");
+  }
+  tip.hidden=false;
+  // Place it clear of the cursor, then pull it back inside the window rather
+  // than letting it run off the right or bottom edge.
+  const r=tip.getBoundingClientRect(), pad=10;
+  let left=x+14, top=y+16;
+  if(left+r.width+pad>innerWidth)  left=x-r.width-14;
+  if(top+r.height+pad>innerHeight) top=y-r.height-14;
+  tip.style.left=Math.max(pad,left)+"px";
+  tip.style.top=Math.max(pad,top)+"px";
+}
+const hideTip=()=>{ $("rtip").hidden=true; };
+
+$("rgrid").addEventListener("pointermove", e=>{
+  // Touch has no hover, so a drag across the grid reads frequencies instead.
+  const el=e.target.closest("i[data-cls]");
+  if(el) showTip(el, e.clientX, e.clientY); else hideTip();
+});
+$("rgrid").addEventListener("pointerleave", hideTip);
+$("rgrid").addEventListener("pointerdown", e=>{
+  const el=e.target.closest("i[data-cls]");
+  if(el) showTip(el, e.clientX, e.clientY);
+});
+// Scrolling the panel would leave the tooltip behind, pointing at nothing.
+$("rbox").addEventListener("scroll", hideTip, {passive:true});
+
+$("rClose").onclick=()=>{ hideTip(); closeRange(); };
+$("rsheet").onclick=e=>{ if(e.target.id==="rsheet"){ hideTip(); closeRange(); } };
 /* Delegated, because `#seats` is rebuilt on every replayed action — a listener
    attached to a pod would be discarded a frame later. */
 $("seats").addEventListener("click",e=>{
@@ -1539,7 +1800,9 @@ const seatName = seat =>
  * settings
  * ==================================================================== */
 const DEF={seats:6,depth:100,units:"bb",speed:"normal",theme:"dark",
-           muck:true,odds:true,read:true,
+           muck:true,odds:true,read:true,nudge:true,
+           /* which seat you sit in; "rotate" moves you round every hand */
+           seat:"rotate",
            /* one slot per bot seat; "" means "surprise me" */
            villains:["","","","",""]};
 let cfg=Object.assign({},DEF);
@@ -1583,9 +1846,20 @@ const m2=chips=>{const s=money(chips),u=unit();return u?s+" "+u:s;};
  * ==================================================================== */
 async function boot(){
   let mod;
-  try{ mod=await WebAssembly.instantiateStreaming(fetch(WASM_URL),IMPORTS); }
+  /* `cache:'no-cache'` for the same reason `sw.js` uses it on documents: a
+     plain `fetch` goes through the browser's HTTP cache, so a rebuilt engine
+     can sit on the server while the page keeps instantiating last week's. It
+     is invisible when it happens — the page tests for new exports and degrades
+     by dropping a feature, so a stale engine looks like a feature that was
+     never built. That is exactly what it looked like on 2026-07-28.
+
+     With the service worker installed this costs nothing: the worker answers
+     from its own cache and never reaches the network. Without it, it is a
+     conditional request — headers and a 304, not 890 KB. */
+  const wreq = () => fetch(WASM_URL, {cache:'no-cache', credentials:'same-origin'});
+  try{ mod=await WebAssembly.instantiateStreaming(wreq(),IMPORTS); }
   catch(e){
-    try{ mod=await WebAssembly.instantiate(await (await fetch(WASM_URL)).arrayBuffer(),IMPORTS); }
+    try{ mod=await WebAssembly.instantiate(await (await wreq()).arrayBuffer(),IMPORTS); }
     catch(e2){ fail("could not load "+WASM_URL+" — "+e2.message); return; }
   }
   W=mod.instance.exports;
@@ -1603,6 +1877,7 @@ async function boot(){
   PTR=W.wasm_alloc(CAP);
   if(!PTR){ fail("wasm_alloc returned null"); return; }
   hasCharts = ("wasm_play_set_charts" in W) && ("wasm_play_hero_chart" in W);
+  hasHero = "wasm_play_set_hero" in W;
   await loadCharts();
   buildSettings();
   newTable();
@@ -1611,10 +1886,19 @@ function fail(m){
   const f=$("foot"); f.className="foot err"; f.textContent="engine error: "+m;
   $("btns").innerHTML=""; $("sizer").hidden=true;
 }
+/* The standing facts about this table, including **which ranges are in play**.
+   That last one used to be visible only inside the settings sheet, so loading
+   your own file looked like nothing had happened — the one place it showed was
+   the place you had just closed. It belongs on the permanent line, because
+   "which ranges am I playing and being marked against" is a fact about the
+   session, not a transient confirmation. */
 function footNote(){
+  const src = chartEntries
+    ? " · ranges: <code>"+esc(chartName)+"</code> ("+chartEntries+")"
+    : " · <b>no ranges</b> — bots use the built-in pricer";
   $("foot").innerHTML =
     (SB/BB)+"/1 blinds · "+cfg.depth+"bb stacks · rules from <code>core::table</code>"+
-    " · bots are <code>core::policy::decide</code>";
+    " · bots are <code>core::policy::decide</code>"+src;
 }
 
 /* Grow the shared scratch buffer to at least `n` bytes. One place, because
@@ -1859,6 +2143,7 @@ function newTable(){
   }
   applyLineup(lineup(cfg.seats-1));
   reapplyCharts();
+  orbit=0;
   sess={hands:0,net:0};
   $("sTable").textContent=cfg.seats;
   // See `#tableWrap`: the felt needs more vertical room the more seats have to
@@ -1868,13 +2153,29 @@ function newTable(){
   newHand();
 }
 
+/* Seat the human for the hand about to be dealt.
+   **Rotation is by one seat per hand**, which is exactly what moving round a
+   real table does: the button passes, so over a full orbit you play every
+   position once. Applied before `wasm_play_deal`, because the engine deals on
+   the seating it has — moving after the deal would hand you somebody else's
+   cards. Optional on the JS side: an older cached `.wasm` has no such export,
+   and the honest degradation is that you stay on the button, which is what the
+   table did before this existed. */
+let orbit=0;
+function seatHero(){
+  if(!hasHero) return;
+  const n=cfg.seats;
+  const s = cfg.seat==="rotate" ? (orbit++ % n) : Math.min(n-1, Number(cfg.seat)||0);
+  W.wasm_play_set_hero(s);
+}
+
 async function newHand(){
   if(busy) return;
   busy=true;
   // `finally`, not a trailing assignment — see `act()`.
   try{
     settled=false; shown=0; potShown=-1; lastBet=[];
-    graded=null; playOut=false; peeked=false;
+    graded=null; playOut=false; peeked=false; deviation=null;
     $("grade").hidden=true; $("equity").hidden=true;
     $("heroCards").dataset.key="";      // a new hand really is new cards
     // **A drill is a series of independent spots, not a session.** Carrying
@@ -1894,6 +2195,7 @@ async function newHand(){
       applyLineup(seated.length?seated:lineup(cfg.seats-1));
       reapplyCharts();
     }
+    seatHero();                         // before the deal, never after
     $("say").textContent="";            // last hand's result is not this hand's
     $("btns").innerHTML="";
     $("heroRead").textContent="";
@@ -2336,10 +2638,10 @@ function showTurn(){
        total-to size in big blinds, and it is `Option<f32>`: `vs_4bet` and
        `vs_5bet` name no size, so the slider comes back there rather than a
        size being invented. */
-    const crow = (training && ST.street===0) ? heroChart() : null;
+    const crow = ST.street===0 ? heroChart() : null;
     const wants = crow && Number.isFinite(crow.size) && crow.size>0
                 ? Math.round(crow.size*BB) : 0;
-    if(wants>0){
+    if(training && wants>0){
       sz.hidden=true;
       // The engine's window still wins — it is the authority on legality and
       // this page never argues with it. But a size that had to be moved is
@@ -2352,7 +2654,14 @@ function showTurn(){
     }
     sz.hidden=false;
     sl.min=lo; sl.max=hi; sl.step=1;
-    sl.value=Math.max(lo,Math.min(hi,Math.round(potRaise(ST.to_call>0?0.75:0.6))));
+    /* **Preflop, start on the size the chart names.** The pot-fraction default
+       below is a reasonable guess for a street with a board; preflop there is
+       a table that says what this open or 3-bet is supposed to be, and opening
+       on some other number invites you to drift off it by accident. The slider
+       still moves — this is only where it starts — and `wants` is 0 at
+       `vs_4bet`/`vs_5bet`, which name no size, so the guess is used there. */
+    sl.value=Math.max(lo,Math.min(hi, wants>0 ? wants
+             : Math.round(potRaise(ST.to_call>0?0.75:0.6))));
     const paintAmt=()=>{
       $("amt").textContent=m2(sl.value);
       // The slider's value is chips; everything a player reads is blinds. A
@@ -2472,6 +2781,11 @@ async function act(code,amt){
     // Graded **before** the action is applied: `wasm_play_hero_chart` describes
     // the spot hero is looking at, and once the action lands that spot is gone.
     if(training && ST && ST.street===0) gradePreflop(code);
+    // Play mode's off-chart nudge. Captured **before** the action for the same
+    // reason trainer mode grades before it: `wasm_play_hero_chart` describes
+    // the spot hero is looking at, and once the action lands that spot is gone.
+    let dev=null;
+    if(!training && cfg.nudge && ST && ST.street===0) dev=offChartCheck(code);
     if(W.wasm_play_act(code,BigInt(Math.round(amt)))!==1){
       const s=$("say"); s.className="bug";
       s.textContent="the engine refused that action";
@@ -2485,6 +2799,9 @@ async function act(code,amt){
     $("say").textContent="";
     await revealTo((ST.history||[]).length);
     await finish();
+    // After the hand has settled, not before: popping a modal over a running
+    // replay hides the thing the replay is showing you.
+    if(dev) showOffChart(dev);
   } finally { busy=false; }
 }
 
@@ -2507,6 +2824,13 @@ function buildSettings(){
     ()=>cfg.seats,v=>{ cfg.seats=v; saveCfg(); redraw(); newTable(); });
   chipRow("cDepth",[["20bb",20,"push/fold"],["50bb",50],["100bb",100,"cash"],["200bb",200,"deep"]],
     ()=>cfg.depth,v=>{ cfg.depth=v; saveCfg(); redraw(); newTable(); });
+  /* Seats are named by position, not by index, because "HJ" is the thing you
+     are choosing and the index that produces it changes with the table size. */
+  const seatOpts=[["Rotate","rotate"]];
+  for(let s=0;s<cfg.seats;s++)
+    seatOpts.push([(ST&&ST.labels&&ST.labels[s])||("Seat "+s), String(s)]);
+  chipRow("cSeat", seatOpts, ()=>String(cfg.seat),
+    v=>{ cfg.seat=v; saveCfg(); redraw(); newTable(); });
   chipRow("cUnits",[["Big blinds",'bb'],["Chips",'chips']],
     ()=>cfg.units,v=>{ cfg.units=v; saveCfg(); redraw(); footNote();
                        potShown=-1; if(ST) frame((ST.history||[]).length); });
@@ -2526,7 +2850,7 @@ function buildSettings(){
     ? drill.n+(drill.n===1?" spot":" spots")+" so far"
     : sess.hands+(sess.hands===1?" hand":" hands")+" so far, "+
       (sess.net>=0?"+":"−")+m2(Math.abs(sess.net));
-  tog("tRead","read"); tog("tOdds","odds"); tog("tMuck","muck");
+  tog("tRead","read"); tog("tOdds","odds"); tog("tMuck","muck"); tog("tNudge","nudge");
   $("setFoot").textContent="Everything here is stored on this device only.";
 }
 
@@ -2646,12 +2970,22 @@ $("chartFile").onchange=async ev=>{
                     "your previous ranges are still in use";
     buildCharts(); return;
   }
-  msg.className="note";
-  msg.textContent = saveCharts(text,f.name) ? ""
-    : "loaded, but too big to remember — it will go back to the built-in set "+
-      "when you reload";
+  // **Say that it worked.** Success used to clear this line, so a good load and
+  // a load that never happened looked identical and the only confirmation was
+  // buried in a panel you had to go and open.
+  msg.className="note ok";
+  msg.textContent = "Loaded "+f.name+" — "+chartEntries+
+    (chartEntries===1?" chart":" charts")+" in play." +
+    (saveCharts(text,f.name) ? " Remembered for next time."
+      : " Too big to remember, so it resets when you reload.");
   buildCharts();
   newTable();                        // the ranges changed, so the table does
+  // The banner is on the main screen and is a live region, so the confirmation
+  // survives closing the sheet and is announced.
+  const b=$("banner");
+  b.textContent="Preflop ranges: "+f.name+" ("+chartEntries+" charts)";
+  b.hidden=false;
+  setTimeout(()=>{ if(b.textContent.startsWith("Preflop ranges:")) b.hidden=true; }, 6000);
 };
 $("chartReset").onclick=async ()=>{
   try{ localStorage.removeItem(CHART_KEY); localStorage.removeItem(CHART_NAME_KEY); }catch(e){}
