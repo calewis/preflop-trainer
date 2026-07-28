@@ -631,6 +631,11 @@ body::before{
 #grade .key b{color:var(--txt);font-family:var(--mono)}
 #grade .yours{margin-left:auto;color:var(--amber-mid);font-weight:700}
 #grade .note{margin-top:8px;font-size:11px;color:var(--faint);line-height:1.5}
+/* One block per decision in the spot. The rule separates them without adding
+   another panel — three verdicts in three boxes would out-shout the flop. */
+#grade .gblk + .gblk{margin-top:11px;padding-top:11px;border-top:1px solid var(--line)}
+#grade .gcount{font-size:10px;letter-spacing:1.2px;text-transform:uppercase;
+  color:var(--faint);font-weight:700;margin-bottom:8px}
 
 /* ---- prompt ---- */
 /* Warmer than the body text on purpose: this is the line that tells you it is
@@ -1587,7 +1592,7 @@ function drawRange(){
     let alt=0; for(let k=0;k<3;k++) if(k!==idx && pcs[k]>pcs[alt]) alt=k;
     if(alt===idx) alt=(idx+1)%3;
     warn.hidden=false;
-    warn.innerHTML='<b>Off chart — you '+ACTS[idx].toLowerCase()+'ed '+
+    warn.innerHTML='<b>Off chart — you '+ACT_PAST[idx]+' '+
       '<span class="hand">'+esc(row.hand)+'</span>.</b> '+
       'This chart '+ACTS[idx].toLowerCase()+'s it '+freq(mine)+' of the time here'+
       (pcs[alt]>0 ? '; it '+ACTS[alt].toLowerCase()+'s '+freq(pcs[alt])+'.'
@@ -1601,9 +1606,9 @@ function drawRange(){
   }
 
   // `c` was resolved above, together with whether this node needs an opponent.
-  // `seatName` already returns "You" for hero, so do not label it twice.
+  // `seatName` already returns "Hero" for the human, so do not label it twice.
   const nm=seatName(rSeat)||("Seat "+rSeat);
-  $("rtitle").textContent=nm+(rSeat===ST.hero_seat&&nm!=="You"?" (you)":"");
+  $("rtitle").textContent=nm;
   if(!c){
     grid.innerHTML=""; key.innerHTML=""; none.hidden=false;
     $("rsub").textContent="";
@@ -1784,7 +1789,13 @@ function lineup(nBots){
 function applyLineup(ids){
   seated = ids.slice();
   if(!hasProfiles) return 0;      // older engine: everyone plays the default
-  const json = JSON.stringify({doc:PROFILE_DOC, seats:[""].concat(ids)});
+  // The engine indexes profiles by **seat**, and `seated` is indexed by chair,
+  // so this is where the two meet. It used to be `[""].concat(ids)` — the human
+  // hard-coded into slot 0 — which put the blank on whichever bot happened to
+  // be on the button and dropped one bot's profile entirely.
+  const bySeat = new Array(cfg.seats).fill("");
+  for(let c=1;c<cfg.seats;c++) bySeat[seatOfChair(c)] = ids[c-1] || "";
+  const json = JSON.stringify({doc:PROFILE_DOC, seats:bySeat});
   const bytes = enc.encode(json);
   const p = W.wasm_alloc(bytes.length);
   if(!p) return 0;
@@ -1796,8 +1807,37 @@ function applyLineup(ids){
     console.warn("seated "+matched+" of "+ids.length+" named profiles");
   return matched;
 }
-const seatName = seat =>
-  seat===0 ? "You" : (BY_ID[seated[seat-1]] ? BY_ID[seated[seat-1]].name : "");
+/* ==================================================================== *
+ * chairs, and why a name is not bound to a seat
+ *
+ * The engine numbers seats by **position**: seat 0 is the button, always.
+ * So once the human can sit anywhere, binding a name to a seat index means
+ * every name changes position when the human moves — Sally is the cutoff this
+ * hand and the big blind the next, and the table you spent an orbit reading
+ * dissolves.
+ *
+ * A real table is the other way round. The *people* sit still and the *button*
+ * moves, so a player's position changes hand to hand while the player on your
+ * left stays the player on your left. That is the thing worth modelling,
+ * because reading an opponent is the skill this app exists to build and it is
+ * worthless if the opponent is a different person every hand.
+ *
+ * So names are bound to a **chair**: the clockwise offset from the human.
+ * Chair 0 is you, chair 1 is the seat to your left, and they never move —
+ * on screen or in the roster. `ST.labels[seat]` still gives the position,
+ * which is what changes.
+ *
+ * The felt already worked this way: `frame()` draws chair `i` at `seatXY(i,n)`
+ * with the human at bottom centre. Only the naming disagreed.
+ * ==================================================================== */
+const chairOf = seat => ((seat - heroSeat) % cfg.seats + cfg.seats) % cfg.seats;
+const seatOfChair = chair => (heroSeat + chair) % cfg.seats;
+const seatName = seat => {
+  const c = chairOf(seat);
+  if(c === 0) return "Hero";
+  const id = seated[c-1];
+  return BY_ID[id] ? BY_ID[id].name : "";
+};
 
 /* ==================================================================== *
  * settings
@@ -1993,7 +2033,8 @@ let busy=false;       // an action or a replay is in flight
 let settled=false;
 let sess={hands:0,net:0};
 let potShown=-1;      // for the count-up; -1 means "no previous value"
-let seated=[];        // profile id per bot seat, index 0 = seat 1
+let seated=[];        // profile id per CHAIR, index 0 = chair 1 (your left)
+let heroSeat=0;       // the engine seat the human is in this hand
 
 /* ==================================================================== *
  * trainer mode
@@ -2008,7 +2049,13 @@ let seated=[];        // profile id per bot seat, index 0 = seat 1
  * the theme. What is genuinely different is the four lines below.
  * ==================================================================== */
 let training=false;   // trainer mode on
-let graded=null;      // {row, action, ok} for the preflop decision just made
+/* **Every preflop decision in the spot, in order.** It was a single verdict,
+   overwritten each time you acted — so in an open / 3-bet / your-response
+   sequence the only thing you were ever shown was the last one, and facing a
+   3-bet was the decision you got no feedback on at all. That is the decision
+   most worth feedback: opening ranges are memorised long before 3-bet
+   defence is. */
+let grades=[];
 /* **You chose to play this spot out, so stop asking.** This used to be
    `atFlop`, meaning "the play-on choice is on screen", and the two are not the
    same question: `Play it out` cleared it, so the very next `finish()` — the
@@ -2039,11 +2086,11 @@ function gradePreflop(code){
      scenario at all so it is not a rare case. It stays out of the accuracy
      figure, because a gap in the file is not a mistake by the player, but it
      is counted and said out loud. */
-  if(!row){ graded = {none:true}; drill.skipped++; return; }
+  if(!row){ grades.push({none:true}); drill.skipped++; return; }
   const i = RCF[code];
   const w = row.w || [0,0,0];
   const ok = (w[i]||0) >= GRADE_MIN;
-  graded = {row, idx:i, ok, peeked};
+  grades.push({row, idx:i, ok, peeked});
   // You still get the feedback — that is the part worth having — but a spot you
   // looked up is not evidence that you knew it, so it stays out of the score.
   if(peeked) return;
@@ -2095,44 +2142,58 @@ function showEquity(){
     (note.length ? '<p class="enote">'+note.join(" ")+'</p>' : "");
 }
 
-function showGrade(){
-  const el=$("grade");
-  if(!training || !graded){ el.hidden=true; return; }
-  if(graded.none){
-    el.hidden=false;
-    el.innerHTML='<div class="gh"><span class="verdict none">— Not graded</span>'+
+const SPOT_NAME = {rfi:"Open", vs_rfi:"vs Open", vs_3bet:"vs 3-Bet",
+                   vs_4bet:"vs 4-Bet", vs_5bet:"vs 5-Bet"};
+const ACT_NAME = ["Raise","Call","Fold"];
+/* Past tense spelled out. It was `ACT_NAME[idx].toLowerCase() + "ed"`, which
+   gets "called" and "folded" right and produces **"you raiseed"** — English
+   drops the silent e. A rule that is correct for two thirds of a three-element
+   list is a table pretending to be a rule. */
+const ACT_PAST = ["raised","called","folded"];
+
+/* One block per decision. A spot with three of them is a spot where you were
+   asked three questions, and each deserves its own answer. */
+function gradeBlock(g, many){
+  if(g.none)
+    return '<div class="gblk"><div class="gh">'+
+      '<span class="verdict none">— Not graded</span>'+
       '<span class="gspot">no chart for this spot</span></div>'+
       '<p class="note">The range file has no row for this node, so there is '+
-      'nothing to mark you against. It does not count either way.</p>';
-    return;
-  }
-  const {row, idx, ok} = graded;
+      'nothing to mark you against. It does not count either way.</p></div>';
+  const {row, idx, ok} = g;
   const w = row.w.map(x=>Math.max(0,x));
   const sum = w.reduce((a,b)=>a+b,0) || 1;
   const pc = w.map(x=>x/sum*100);
-  const names = ["Raise","Call","Fold"];
-  const SPOT = {rfi:"Open", vs_rfi:"vs Open", vs_3bet:"vs 3-Bet",
-                vs_4bet:"vs 4-Bet", vs_5bet:"vs 5-Bet"};
-  el.hidden=false;
-  el.innerHTML =
-    '<div class="gh"><span class="verdict '+(ok?"ok":"no")+'">'+
-      (ok?"✓ In range":"✗ Not in range")+'</span>'+
+  return '<div class="gblk"><div class="gh">'+
+      '<span class="verdict '+(ok?"ok":"no")+'">'+
+        (ok?"✓ In range":"✗ Not in range")+'</span>'+
       '<span class="gspot"><span class="hand">'+row.hand+'</span> · '+
-        (SPOT[row.scenario]||row.scenario)+'</span></div>'+
+        (SPOT_NAME[row.scenario]||row.scenario)+'</span></div>'+
     '<div class="bars">'+
       ['r','c','f'].map((c,i)=>'<i class="'+c+'" style="width:'+pc[i].toFixed(2)+'%"></i>').join("")+
     '</div>'+
     '<div class="key">'+
-      names.map((n,i)=>'<span><i style="background:'+
-        ['var(--needle)','var(--amber)','var(--fold-bar,#4a3922)'][i]+'"></i>'+
+      ACT_NAME.map((n,i)=>'<span><i style="background:'+
+        ['var(--needle)','var(--amber)','var(--fold-bar)'][i]+'"></i>'+
         n+' <b>'+pc[i].toFixed(pc[i]%1?1:0)+'%</b></span>').join("")+
-      '<span class="yours">you '+names[idx].toLowerCase()+'ed</span>'+
+      '<span class="yours">you '+ACT_PAST[idx]+'</span>'+
     '</div>'+
-    (graded.peeked?'<p class="note">You looked this one up, so it is not '+
-           'counted either way.</p>':"")+
+    (g.peeked?'<p class="note">You looked this one up, so it is not counted '+
+           'either way.</p>':"")+
     (ok?"":'<p class="note">The chart plays this hand a different way here. '+
            'That does not make your line unplayable — it means it is not in '+
-           'the range you are drilling.</p>');
+           'the range you are drilling.</p>')+
+    '</div>';
+}
+
+function showGrade(){
+  const el=$("grade");
+  if(!training || !grades.length){ el.hidden=true; return; }
+  el.hidden=false;
+  const many = grades.length>1;
+  el.innerHTML =
+    (many?'<div class="gcount">'+grades.length+' decisions this spot</div>':"")+
+    grades.map(g=>gradeBlock(g, many)).join("");
 }
 let lastBet=[];       // per-seat street bet as last drawn, so only new chips pop
 /* Hands before a bb/100 figure is shown at all. Even this is a small sample
@@ -2148,9 +2209,11 @@ function newTable(){
   if(W.wasm_play_new(seed,cfg.seats,BigInt(SB),BigInt(BB),BigInt(stackChips()))!==1){
     fail("engine refused "+cfg.seats+" seats at "+cfg.depth+"bb"); return;
   }
-  applyLineup(lineup(cfg.seats-1));
+  // Who is at the table. The engine mapping is (re)sent per hand by `newHand`,
+  // because it depends on where the human is sitting and that moves.
+  seated = lineup(cfg.seats-1);
   reapplyCharts();
-  orbit=0;
+  orbit=0; heroSeat=0;
   sess={hands:0,net:0};
   $("sTable").textContent=cfg.seats;
   // See `#tableWrap`: the felt needs more vertical room the more seats have to
@@ -2169,11 +2232,23 @@ function newTable(){
    and the honest degradation is that you stay on the button, which is what the
    table did before this existed. */
 let orbit=0;
-function seatHero(){
-  if(!hasHero) return;
+/* Where the human sits for the hand about to be dealt.
+   **The button moves clockwise, so your position runs backwards through the
+   seat indices.** Seat 0 is the button and the indices ascend with the order of
+   play, so incrementing would take you BTN, SB, BB — i.e. straight from the
+   button into posting the small blind, which is not what happens at a table.
+   The button passes to your left, leaving you one seat further from it:
+   BTN, CO, HJ, LJ, BB, SB, BTN. Counting down is what produces that. */
+function heroSeatFor(){
   const n=cfg.seats;
-  const s = cfg.seat==="rotate" ? (orbit++ % n) : Math.min(n-1, Number(cfg.seat)||0);
-  W.wasm_play_set_hero(s);
+  if(cfg.seat!=="rotate") return Math.min(n-1, Number(cfg.seat)||0);
+  return (n - (orbit % n)) % n;
+}
+function seatHero(){
+  heroSeat = heroSeatFor();
+  if(cfg.seat==="rotate") orbit++;
+  if(hasHero) W.wasm_play_set_hero(heroSeat);
+  else heroSeat = 0;             // an older engine cannot move it; do not pretend
 }
 
 async function newHand(){
@@ -2182,7 +2257,7 @@ async function newHand(){
   // `finally`, not a trailing assignment — see `act()`.
   try{
     settled=false; shown=0; potShown=-1; lastBet=[];
-    graded=null; playOut=false; peeked=false; deviation=null;
+    grades=[]; playOut=false; peeked=false; deviation=null;
     $("grade").hidden=true; $("equity").hidden=true;
     $("heroCards").dataset.key="";      // a new hand really is new cards
     // **A drill is a series of independent spots, not a session.** Carrying
@@ -2199,10 +2274,19 @@ async function newHand(){
                          cfg.seats,BigInt(SB),BigInt(BB),BigInt(stackChips()))!==1){
         fail("engine refused "+cfg.seats+" seats at "+cfg.depth+"bb"); return;
       }
-      applyLineup(seated.length?seated:lineup(cfg.seats-1));
-      reapplyCharts();
+      if(!seated.length) seated = lineup(cfg.seats-1);
+      reapplyCharts();      // `wasm_play_new` cleared them; nothing else does
     }
-    seatHero();                         // before the deal, never after
+    /* **Seat the human first, then map the profiles onto seats.** Both must
+       happen before the deal and in this order: `seated` is indexed by chair,
+       and turning a chair into a seat needs to know where the human is. Sending
+       the profiles first — which is what `newTable` used to do — mapped every
+       name one chair out for the whole hand.
+
+       Re-sent every hand, not just after a fresh session: the human moves each
+       hand, so the seat a given name occupies moves with them. */
+    seatHero();
+    applyLineup(seated);
     $("say").textContent="";            // last hand's result is not this hand's
     $("btns").innerHTML="";
     $("heroRead").textContent="";
@@ -2287,7 +2371,22 @@ function frame(k,streetOverride){
   const n=ST.seats, hs=ST.hero_seat;
   const done=ST.phase==="complete";
   const live=(k>=(ST.history||[]).length) && streetOverride===undefined;
+  /* **The live street is the engine's, not the last action's.**
+     Deriving it from `h[h.length-1].street` is a second model of "what street
+     is it", and it disagrees in exactly one case: when the new street has no
+     actions on it yet. That happens whenever *hero* is first to act on a
+     street — the flop is out, the snapshot says `street: 1`, and the newest
+     event is still a preflop one, so the board was drawn with `BOARD_AT[0]`
+     and no flop appeared at all.
+
+     It used to be nearly unreachable because hero was pinned to the button and
+     therefore acted last on every postflop street. Letting hero into the blinds
+     made a latent bug a frequent one: the small blind is first to act postflop.
+
+     The replay still derives its street from the events, which is correct —
+     those frames are deliberately showing a moment in the past. */
   const street = streetOverride!==undefined ? streetOverride
+               : (live && ST.street!=null) ? ST.street
                : (h.length ? h[h.length-1].street : 0);
 
   // --- chips: what each seat has in front of it now, and in total ---
@@ -2496,14 +2595,14 @@ function drawLog(h){
     if(e.street!==cur){cur=e.street;rows.push('<div class="lr brk">'+STREETS[cur]+'</div>');}
     const me=e.seat===hs;
     const opened = e.in>0 || e.amount>BB;   // a raise over a blind, vs a first bet
-    // "You calls" is wrong. English agrees the verb with the subject, and the
-    // subject here is "You" on hero's own rows and a position name on everyone
-    // else's, so the two need different forms of the same verb.
-    const verb = e.act==="call"  ? (me?"call ":"calls ")+m2(e.amount)
-               : e.act==="raise" ? (opened ? (me?"raise to ":"raises to ")
-                                           : (me?"bet ":"bets "))+m2(e.amount)
-               : e.act==="check" ? (me?"check":"checks")
-               : (me?"fold":"folds");
+    // Third person throughout, now that hero's rows are headed "Hero" rather
+    // than "You". This used to carry two forms of every verb because "You
+    // calls" is wrong — changing the subject to a name removed the need for the
+    // special case rather than hiding it.
+    const verb = e.act==="call"  ? "calls "+m2(e.amount)
+               : e.act==="raise" ? (opened ? "raises to " : "bets ")+m2(e.amount)
+               : e.act==="check" ? "checks"
+               : "folds";
     // The pot after the action. The street column this replaced repeated what
     // the break row above already said; the pot is the number you actually
     // want beside a bet when you are reading a hand back.
