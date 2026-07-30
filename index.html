@@ -596,6 +596,24 @@ body::before{
   color:var(--amber);text-shadow:0 0 14px var(--glow)}
 #equity b.soft{color:var(--amber-dim);text-shadow:none}
 #equity sup{color:var(--needle);font-weight:800}
+/* Opponents sit under hero's row and read as a breakdown of it, not as three
+   competing headlines: indented, smaller, unlit. Their shares plus hero's are
+   the whole pot. */
+#equity .erow.opp{padding:1px 0 1px 12px}
+#equity .erow.opp .elab{font-size:10.5px;color:var(--faint);text-transform:none;
+  letter-spacing:.2px}
+#equity .erow.opp .elab i{font-style:normal;font-family:var(--mono);
+  color:var(--amber-dim);font-size:9.5px;margin-left:4px}
+#equity .erow.opp b{font-size:12.5px;color:var(--dim);text-shadow:none}
+/* Hero's range is a reference, not a fourth player: ruled off above. */
+#equity .erow.ref{margin-top:6px;padding-top:7px;border-top:1px solid var(--line)}
+/* The price. Green when your hand clears it, needle when it does not — this is
+   the one row where the comparison, not the number, is the point. */
+#equity .erow.odds{margin-top:4px}
+#equity .erow.odds .elab i{font-style:normal;text-transform:none;letter-spacing:0;
+  color:var(--faint);font-weight:600;font-size:10px;margin-left:5px}
+#equity b.good{color:var(--amber)}
+#equity b.bad{color:var(--needle);text-shadow:0 0 14px var(--needle-glow)}
 #equity .enote{margin:7px 0 0;font-size:10.5px;color:var(--faint);line-height:1.5}
 
 /* ---- trainer mode: the grade for your preflop decision ---- */
@@ -1087,8 +1105,8 @@ summary .m{font-size:calc(11px * var(--u))}
 <div class="app">
   <div id="top">
     <nav class="swap" id="modes">
-      <button id="mPlay" class="on"><span class="g">♠</span>Play</button>
-      <button id="mTrain"><span class="g">▦</span>Train preflop</button>
+      <button id="mPlay"><span class="g">♠</span>Play</button>
+      <button id="mTrain" class="on"><span class="g">▦</span>Train preflop</button>
     </nav>
     <button class="iconbtn" id="setBtn" title="Settings" aria-label="Settings">⚙</button>
   </div>
@@ -1929,6 +1947,18 @@ async function boot(){
   hasHero = "wasm_play_set_hero" in W;
   await loadCharts();
   buildSettings();
+  /* Trainer mode cannot grade without ranges, and `loadCharts` is allowed to
+     fail — an offline first visit, a 404, a corrupt saved file. Falling back to
+     Play is the honest degradation: the table still deals, and the mode switch
+     still says why when you press it. `chartEntries` is 0 until the first
+     `reapplyCharts`, which happens inside `newTable`, so the check is on
+     whether the text arrived rather than on the engine's count. */
+  if(training && !chartsJson){
+    training=false;
+    $("mTrain").classList.remove("on");
+    $("mPlay").classList.add("on");
+  }
+  document.body.classList.toggle("training", training);
   newTable();
 }
 function fail(m){
@@ -2054,7 +2084,14 @@ let heroSeat=0;       // the engine seat the human is in this hand
  * two tables that drifted out of size, two card renderers, two copies of
  * the theme. What is genuinely different is the four lines below.
  * ==================================================================== */
-let training=false;   // trainer mode on
+/* **The app opens in trainer mode.** Drilling preflop is what it is for; the
+   cash table is the place you go to try what you drilled. Starting in Play
+   put the secondary thing first.
+
+   `setMode` is the only writer, and it early-returns when the mode already
+   matches — so this is initialised to the mode the markup shows as lit, and
+   the two must not be allowed to disagree. `boot()` asserts they agree. */
+let training=true;    // trainer mode on
 /* **Every preflop decision in the spot, in order.** It was a single verdict,
    overwritten each time you acted — so in an open / 3-bet / your-response
    sequence the only thing you were ever shown was the last one, and facing a
@@ -2113,48 +2150,68 @@ function showEquity(){
   const pct = x => (x*100).toFixed(1) + "%";
   const rows = [];
   const note = [];
+
+  /* **Hero's hand and every opponent's share, from one showdown, so they sum to
+     100%.** They are not independent estimates that happen to be shown
+     together: a single sampled runout scores everybody, which is the only way a
+     multiway breakdown can be read as a division of one pot. If these ever stop
+     summing to 100 the calculation is wrong, and that is worth being able to see
+     at a glance. */
   rows.push('<div class="erow"><span class="elab">Your hand</span><b>'+
             pct(e.hand)+'</b></div>');
-  /* **A row only appears when there is a measurement behind it.** The engine
-     returns `null` for the range figure when hero's spot has no chart node, and
-     it used to substitute the hand figure instead — two labels, one number, and
-     a footnote underneath calling both of them exact.
+  const opp = Array.isArray(e.opp) ? e.opp : [];
+  for(const o of opp){
+    const nm = seatName(o.seat) || ("Seat "+o.seat);
+    const pos = (ST.labels && ST.labels[o.seat]) || "";
+    rows.push('<div class="erow opp"><span class="elab">'+esc(nm)+
+      (pos?' <i>'+esc(pos)+'</i>':"")+'</span><b>'+pct(o.eq)+'</b></div>');
+  }
 
-     The qualifications that used to sit under this row in visible text — that
-     villain is `any_two`, and that the range is a 24-combo strided sample —
-     are still true and now live in the row's `title`. They were three lines of
-     apology under two numbers, which is a lot of column for a caveat that does
-     not change what you do next. **They are not removed, they are demoted**;
-     do not delete them, because the number is not what an unqualified "range
-     equity" would mean. */
+  /* Hero's whole range, as a reference beside the hand: it answers "is this a
+     good hand for the way I got here", which is a different question from "am I
+     ahead". Absent when hero's own spot has no chart node — `null`, never the
+     hand figure wearing a second label. */
   if(Number.isFinite(e.range)){
-    rows.push('<div class="erow" title="Your range against a random hand: '+
-      'nothing here tracks what the opponents have represented. Sampled across '+
-      '24 combos of your range, not all of them."><span class="elab">Your range'+
-      '</span><b>'+pct(e.range)+'</b></div>');
+    rows.push('<div class="erow ref" title="The range your line reps, against '+
+      'the same opponents. Their ranges come from their PREFLOP chart node and '+
+      'nothing narrows them for how they have played since."><span class="elab">'+
+      'Your range</span><b>'+pct(e.range)+'</b></div>');
   } else {
     note.push('No chart covers your spot, so there is no range figure to show — '+
       'the hand figure above is unaffected.');
   }
+
+  /* **The price, next to the equity that has to beat it.** Pot odds were only
+     ever a pill in the action line, which is the wrong place to compare them
+     with a number in a different panel. Arithmetic on the engine's own `pot`
+     and `to_call`, not a model of anything. */
+  if(ST && ST.to_call>0){
+    const need = ST.to_call/(ST.pot+ST.to_call);
+    const ok = e.hand>=need;
+    rows.push('<div class="erow odds"><span class="elab">Pot odds '+
+      '<i>'+m2(ST.to_call)+' to call into '+m2(ST.pot)+'</i></span>'+
+      '<b class="'+(ok?"good":"bad")+'">'+pct(need)+'</b></div>');
+    note.push(ok
+      ? 'Your hand beats the price by '+((e.hand-need)*100).toFixed(1)+' points.'
+      : 'Your hand is '+((need-e.hand)*100).toFixed(1)+' points short of the '+
+        'price — a call needs implied odds or a read to make up the difference.');
+  }
+
   /* **Say how much of the field was guessed.** Chart sets routinely omit the
      blind-versus-late 3-bet and 4-bet nodes, so in exactly the spot worth
      studying an opponent may have no charted range at all. They are taken as
-     any two cards, which is a real assumption and has to be visible: a
-     range-versus-range figure quietly computed against random hands is the
-     failure this readout was corrected for once already. */
+     any two cards, which is a real assumption and has to be visible. */
   if(e.assumed>0)
     note.push(e.assumed===1
       ? "<b>One opponent's range is not in this chart file; it was taken as "+
         "any two cards."
       : "<b>"+e.assumed+" opponents' ranges are not in this chart file; they "+
         "were taken as any two cards.");
-  /* **Realised equity is gone from the readout.** It was `hand * 1.0` in
-     position and `hand * 0.90` out of it — a placeholder whose only input was
-     position, sitting under a label that implied a third estimate. While hero
-     was pinned to the button it was *always* a copy of the row above it.
-     `Game::equity_now` still returns it, deliberately: the day there is a bot
-     worth measuring realisation against, the number has somewhere to go. It is
-     simply not shown until it means something. */
+
+  /* Realised equity is still returned by `Game::equity_now` and still not shown.
+     Its only input was position, so it was `hand` unchanged in position — a
+     third label over a copy of the first number. The day there is a bot worth
+     measuring realisation against it has somewhere to go. */
   el.hidden = false;
   el.innerHTML = rows.join("") +
     (note.length ? '<p class="enote">'+note.join(" ")+'</p>' : "");
@@ -2171,7 +2228,7 @@ const ACT_PAST = ["raised","called","folded"];
 
 /* One block per decision. A spot with three of them is a spot where you were
    asked three questions, and each deserves its own answer. */
-function gradeBlock(g, many){
+function gradeBlock(g){
   if(g.none)
     return '<div class="gblk"><div class="gh">'+
       '<span class="verdict none">— Not graded</span>'+
@@ -2703,8 +2760,7 @@ async function finish(){
     // The equity panel described the flop as it stood when you were asked. Once
     // you play on it is a snapshot of a decision already taken, and leaving it
     // above a live turn reads as a live number.
-    mk("Play it out","b-call",()=>{ playOut=true; $("equity").hidden=true;
-                                    showGrade(); showTurn(); });
+    mk("Play it out","b-call",()=>{ playOut=true; showGrade(); showTurn(); });
     const nx=mk("Next spot","b-next",()=>{ showGrade(); setTimeout(()=>newHand(),0); });
     nx.focus({preventScroll:true});
     return;
@@ -2733,6 +2789,16 @@ async function finish(){
 }
 
 function showTurn(){
+  /* **Recomputed at every postflop decision, so the price and the equity are
+     the same age.** It used to be drawn once when the flop landed and then
+     hidden the moment you played on, because a flop-time number sitting above a
+     live turn reads as a live number. Hiding it was the wrong half of that
+     problem to fix: the pot-odds row has to be compared against equity *now*,
+     so the answer is to keep it current rather than to take it away.
+
+     `showEquity` self-hides when there is no board, which is what makes this
+     safe to call unconditionally — preflop it draws nothing. */
+  if(ST && ST.street>0) showEquity(); else $("equity").hidden=true;
   const say=$("say"); say.className="";
   const bits=['Your move'];
   if(ST.to_call>0){
