@@ -803,6 +803,10 @@ summary .m{color:var(--faint);font-weight:600;text-transform:none;letter-spacing
   font-family:var(--mono);font-size:9.5px}
 .err{color:var(--needle)}
 .note.ok{color:var(--amber-mid)}
+/* The banner doubles as the failure line — see `fail()`. It has to read as an
+   error there and as information otherwise. */
+#banner.err{border-color:var(--needle);color:var(--needle);
+  background:rgba(255,74,34,.07)}
 #banner{background:rgba(255,178,36,.09);border:1px solid var(--amber-dim);color:var(--amber);
   border-radius:10px;padding:9px 12px;font-size:12px;text-align:center;font-weight:600;
   box-shadow:0 0 26px -10px var(--glow)}
@@ -1115,10 +1119,11 @@ summary .m{font-size:calc(11px * var(--u))}
 
 <div class="app">
   <div id="top">
-    <nav class="swap" id="modes">
-      <button id="mPlay"><span class="g">♠</span>Play</button>
-      <button id="mTrain" class="on"><span class="g">▦</span>Train preflop</button>
-    </nav>
+    <!-- Not a <nav>: these switch a mode, they do not navigate. -->
+    <div class="swap" id="modes" role="group" aria-label="Mode">
+      <button id="mPlay" aria-pressed="false"><span class="g">♠</span>Play</button>
+      <button id="mTrain" class="on" aria-pressed="true"><span class="g">▦</span>Train preflop</button>
+    </div>
     <button class="iconbtn" id="setBtn" title="Settings" aria-label="Settings">⚙</button>
   </div>
 
@@ -1454,6 +1459,7 @@ function cellBars(pc){
 const freq=x=>(Math.abs(x-Math.round(x))<0.05?x.toFixed(0):x.toFixed(1))+"%";
 
 let rSeat=0, rScen=0, rVs=null;   // whose range, at which node, against whom
+let rVsOpen=null;     // the opponent the engine says hero is facing, if any
 /* Play mode: the preflop action you just took was one the chart barely plays.
    `{row, idx}` — the chart row you were on, and which of raise/call/fold you
    chose. Null the rest of the time. */
@@ -1501,7 +1507,8 @@ function showOffChart(dev){
   deviation=dev;
   // Open on the node the decision was actually made at, not the one the hand
   // has since moved to.
-  openRange(ST.hero_seat, {scen: SCEN_IDX[dev.row.scenario]||0, auto:true});
+  openRange(ST.hero_seat, {scen: SCEN_IDX[dev.row.scenario]||0,
+                           vs: Number.isFinite(dev.row.vs)?dev.row.vs:null, auto:true});
 }
 
 function openRange(seat, opts){
@@ -1524,6 +1531,14 @@ function openRange(seat, opts){
   const hr = (ST && ST.street===0) ? heroChart() : null;
   rSeat=seat;
   rScen = opts.scen!=null ? opts.scen : (hr ? (SCEN_IDX[hr.scenario]||0) : 0);
+  /* **Open on the opponent hero is actually facing.** `hero_chart_row` now sends
+     `vs`, so this no longer has to guess — and `drawRange`'s guess was the
+     lowest-numbered seat with any chart, i.e. almost always the small blind. On
+     the button facing a big-blind 3-bet that drew the SB's grid, asserted "vs SB"
+     in the chip row, and showed KQs raising 16% where the node hero was graded on
+     says 7.5%. The nudge was worse: it quoted the correct node's numbers and
+     outlined a cell from a different one. */
+  rVsOpen = opts.vs!=null ? opts.vs : (hr && Number.isFinite(hr.vs) ? hr.vs : null);
   /* **The big blind has no open.** It is never first in, so no chart set has a
      `BB` `rfi` row — the only unraised-pot node it has is facing a limp, which
      needs a limper named. Landing there by default means the first thing you
@@ -1532,18 +1547,36 @@ function openRange(seat, opts){
      "seat 2 is the big blind", keeps the rule in one place and gets heads-up
      right for free. */
   if(opts.scen==null && rScen===0 && !seatChart(seat, 0, null)) rScen=1;
-  rVs=null;
+  rVs=rVsOpen;
+  rOpener=document.activeElement;
   $("rsheet").hidden=false;
   document.body.style.overflow="hidden";
   drawRange();
   $("rClose").focus({preventScroll:true});
 }
+let rOpener=null;     // what had focus before the viewer opened
 function closeRange(){
   // The nudge describes one decision. It must not still be on screen the next
   // time you open a range for your own reasons.
   deviation=null;
   $("rsheet").hidden=true;
   document.body.style.overflow="";
+  // Focus goes back where it came from. `sheet(false)` already did this; the
+  // range viewer left it on a button inside a now-hidden dialog, which loses the
+  // keyboard user's place on the felt entirely.
+  /* Focus goes back to whatever opened this, and **if that cannot take focus,
+     it is taken away from the dialog anyway**. `body.focus()` is a no-op, so
+     when the viewer was opened from something unfocusable the ring stayed on
+     `#rClose` — inside an element that is now `hidden`, which is a worse place
+     to leave a keyboard user than nowhere. */
+  const back = rOpener;
+  rOpener=null;
+  if(back && document.body.contains(back)){
+    try{ back.focus({preventScroll:true}); }catch(e){}
+  }
+  if($("rsheet").contains(document.activeElement)) {
+    try{ document.activeElement.blur(); }catch(e){}
+  }
 }
 
 function drawRange(){
@@ -1588,7 +1621,9 @@ function drawRange(){
     for(let s=0;s<ST.seats;s++) if(s!==rSeat) others.push(s);
     // Land on an opponent the file actually covers, rather than on an error you
     // then have to click your way out of.
-    if(rVs===null || rVs===rSeat)
+    // Only guess when the engine had no opinion — browsing a seat that is not
+    // hero, or a node hero never faced.
+    if(rVs===null || rVs===rSeat || !seatChart(rSeat,rScen,rVs))
       rVs = others.find(s=>seatChart(rSeat,rScen,s)) ?? (others[0] ?? null);
     c = rVs===null ? null : seatChart(rSeat, rScen, rVs);
     vsRow.hidden=false; vsRow.innerHTML="";
@@ -1972,7 +2007,18 @@ async function boot(){
   document.body.classList.toggle("training", training);
   newTable();
 }
+/* The one visible failure line.
+   **It goes in the banner, not the footer.** `.foot` is `display:none` under
+   `@media (max-height:740px)`, which a 375x667 phone matches — so on the device
+   this app is mainly for, a wasm that failed to load cleared every button and
+   wrote the explanation into a hidden element. The whole "route it to the visible
+   failure line" argument in `APP.md` §4.1 did not hold on the primary target.
+   `#banner` is always visible and is already a live region, so the message is
+   announced as well as shown. The footer keeps a copy for a desktop reader. */
 function fail(m){
+  const b=$("banner");
+  if(b){ b.className="err"; b.textContent="Engine error: "+m+
+           " — reloading the page usually clears it."; b.hidden=false; }
   const f=$("foot"); f.className="foot err"; f.textContent="engine error: "+m;
   $("btns").innerHTML=""; $("sizer").hidden=true;
 }
@@ -1983,7 +2029,7 @@ function fail(m){
    "which ranges am I playing and being marked against" is a fact about the
    session, not a transient confirmation. */
 /* Injected by `build.py`. See there for why this is worth a line of screen. */
-const BUILD_ID = "2026-07-29 22:06 a7d6ca9+";
+const BUILD_ID = "2026-07-29 22:52 fd50917+";
 function footNote(){
   const src = chartEntries
     ? " · ranges: <code>"+esc(chartName)+"</code> ("+chartEntries+")"
@@ -2082,6 +2128,11 @@ const A={fold:0,check:1,call:2,raise:3};
 let ST=null;          // latest snapshot
 let shown=0;          // history entries already replayed on screen
 let busy=false;       // an action or a replay is in flight
+/* Bumped by `newTable`. Anything that awaits across a possible reset captures
+   this at entry and abandons the rest of its work if it has moved — otherwise a
+   half-finished `act()` keeps drawing the session it started in, over the top of
+   the one that replaced it. */
+let gen=0;
 let settled=false;
 let sess={hands:0,net:0};
 let potShown=-1;      // for the count-up; -1 means "no previous value"
@@ -2226,7 +2277,11 @@ function showEquity(){
     rows.push('<div class="erow odds"><span class="elab">Pot odds '+
       '<i>'+m2(ST.to_call)+' to call into '+m2(ST.pot)+'</i></span>'+
       '<b class="'+(ok?"good":"bad")+'">'+pct(need)+'</b></div>');
-    const gap = Math.round(Math.abs(e.hand-need)*100);
+    // **From the rounded figures, not the raw ones.** The panel showed 50% and
+    // 40% and the note said "beats the price by about 11 points", because the gap
+    // was computed from 0.5046 and 0.39773. A footnote that visibly disagrees
+    // with the two numbers above it is worse than no footnote.
+    const gap = Math.abs(Math.round(e.hand*100) - Math.round(need*100));
     note.push(ok
       ? 'Your hand beats the price by about '+gap+' point'+(gap===1?'':'s')+'.'
       : 'Your hand is about '+gap+' point'+(gap===1?'':'s')+' short of the price '+
@@ -2253,9 +2308,9 @@ function showEquity(){
   if(e.assumed>0)
     note.push(e.assumed===1
       ? "<b>One opponent's range is not in this chart file; it was taken as "+
-        "any two cards."
+        "any two cards.</b>"
       : "<b>"+e.assumed+" opponents' ranges are not in this chart file; they "+
-        "were taken as any two cards.");
+        "were taken as any two cards.</b>");
 
   /* Realised equity is still returned by `Game::equity_now` and still not shown.
      Its only input was position, so it was `hand` unchanged in position — a
@@ -2332,7 +2387,28 @@ const RATE_MIN=15;
 /* ==================================================================== *
  * session
  * ==================================================================== */
+/* Start a session.
+   **Refuses while an action is in flight.** It used to replace the engine's
+   session unconditionally and then delegate the deal to `newHand()`, which
+   early-returns on `busy` — so any control that lands mid-replay swapped the
+   session out and never dealt into it, leaving "Your move" above no buttons at
+   all, with a clean console and no way back but a reload. Every chip in the
+   settings sheet, the mode switch, Shuffle and the session reset all come
+   through here, and none of them are disabled during a replay.
+
+   Returning false rather than queueing: the caller has to know it did not
+   happen, or it will redraw its own controls as though it had. */
 function newTable(){
+  /* **A reset supersedes whatever was in flight.** `gen` is bumped and `busy`
+     released, so the in-flight `act()`/`newHand()` abandons its remaining
+     renders instead of painting a session that no longer exists.
+
+     Refusing while busy was the other candidate and it is wrong: every caller
+     has *already* changed `cfg` — the seat, the depth, the table size — so a
+     refusal leaves the settings panel and the engine describing different
+     tables. Waiting was the third, and it turns a click into a lockup for the
+     length of a replay. */
+  gen++; busy=false;
   const seed=BigInt((Date.now()^0x9e3779b9)>>>0);
   if(W.wasm_play_new(seed,cfg.seats,BigInt(SB),BigInt(BB),BigInt(stackChips()))!==1){
     fail("engine refused "+cfg.seats+" seats at "+cfg.depth+"bb"); return;
@@ -2342,7 +2418,12 @@ function newTable(){
   seated = lineup(cfg.seats-1);
   reapplyCharts();
   orbit=0; heroSeat=0;
+  // **The drill counters reset too.** Settings says "changing the table or the
+  // stacks starts a fresh session" and only `setMode` was honouring it, so
+  // switching from 100bb to 20bb pooled the old spots into the new sample —
+  // two stack depths averaged under one accuracy figure.
   sess={hands:0,net:0};
+  drill={n:0,ok:0,skipped:0,peeks:0};
   $("sTable").textContent=cfg.seats;
   // See `#tableWrap`: the felt needs more vertical room the more seats have to
   // fit above and below the board.
@@ -2367,6 +2448,25 @@ let orbit=0;
    button into posting the small blind, which is not what happens at a table.
    The button passes to your left, leaving you one seat further from it:
    BTN, CO, HJ, LJ, BB, SB, BTN. Counting down is what produces that. */
+/* The position name for a seat, derived the way the engine derives it.
+   Mirrors `wasm::game::seat_label`; kept here rather than read off `ST.labels`
+   so the settings panel can label a table that does not exist yet. The two are
+   pinned to each other by `the_two_position_tables_agree_at_every_seat_count`
+   on the Rust side and by the seat picker matching the felt in use. */
+function seatPos(seats, seat){
+  if(seats<=2) return seat===0 ? "BTN/SB" : "BB";
+  if(seat===0) return "BTN";
+  if(seat===1) return "SB";
+  if(seat===2) return "BB";
+  return {1:"CO",2:"HJ",3:"LJ",4:"UTG+1",5:"UTG"}[seats-seat] || ("Seat "+seat);
+}
+/* What the seat setting *effectively* is, after clamping to the current table.
+   The picker highlights this rather than the raw stored value, so a pin left over
+   from a bigger table shows the seat you are actually in. */
+function heroSeatSetting(){
+  if(cfg.seat==="rotate") return "rotate";
+  return String(Math.min(cfg.seats-1, Number(cfg.seat)||0));
+}
 function heroSeatFor(){
   const n=cfg.seats;
   if(cfg.seat!=="rotate") return Math.min(n-1, Number(cfg.seat)||0);
@@ -2382,6 +2482,7 @@ function seatHero(){
 async function newHand(){
   if(busy) return;
   busy=true;
+  const myGen=gen;
   // `finally`, not a trailing assignment — see `act()`.
   try{
     settled=false; shown=0; potShown=-1; lastBet=[];
@@ -2430,8 +2531,9 @@ async function newHand(){
       b.hidden=false;
     } else b.hidden=true;
     await revealTo((ST.history||[]).length);
+    if(myGen!==gen) return;
     await finish();
-  } finally { busy=false; }
+  } finally { if(myGen===gen) busy=false; }
 }
 
 /* ==================================================================== *
@@ -2722,7 +2824,13 @@ function heroRead(){
 
 function tagFor(e){
   const cls = e.act==="fold" ? "t-fold" : (e.act==="raise" ? "t-raise" : "");
-  const opened = e.in>0 || e.amount>BB;      // a raise over a blind, vs a first bet
+  // **A first bet postflop is a bet.** This read `e.in>0 || e.amount>BB`, where
+  // the second clause existed to catch a preflop open (`e.in` is 0 there because
+  // the opener has posted nothing). Postflop the minimum bet *is* one big blind,
+  // so every opening bet above exactly 1bb tripped it and the log read
+  // "Bo raises to 11 bb" for the first bet on a flop. The street is what
+  // distinguishes the two cases, so ask the street.
+  const opened = e.street===0 || e.in>0;
   const txt = e.act==="raise" ? (opened?"raise "+money(e.amount):"bet "+money(e.amount))
             : e.act==="call"  ? "call "+money(e.amount)
             : e.act==="check" ? "check" : "fold";
@@ -2735,7 +2843,7 @@ function drawLog(h){
   for(const e of h){
     if(e.street!==cur){cur=e.street;rows.push('<div class="lr brk">'+STREETS[cur]+'</div>');}
     const me=e.seat===hs;
-    const opened = e.in>0 || e.amount>BB;   // a raise over a blind, vs a first bet
+    const opened = e.street===0 || e.in>0;   // see `tagFor`
     // Third person throughout, now that hero's rows are headed "Hero" rather
     // than "You". This used to carry two forms of every verb because "You
     // calls" is wrong — changing the subject to a name removed the need for the
@@ -2757,20 +2865,34 @@ function drawLog(h){
   if(training){
     // A drill has no bankroll worth reporting — every spot starts level — so
     // the strip reports what a drill is actually about.
+    /* **These are decisions, not spots.** `gradePreflop` runs once per preflop
+       decision, so one hand where you open, get 3-bet and respond contributes
+       three — and the strip called that "3 spots", two inches below a grade panel
+       already reading "3 decisions this spot".
+
+       The third tile is also gone. It showed `drill.ok` labelled "correct", which
+       is fully determined by the two tiles beside it *and* an overclaim:
+       `GRADE_MIN` asks whether the chart plays your action at all, which is
+       coverage, not correctness — take the aggressive branch of every mixed node
+       and you score 100% while playing a materially wrong strategy. It now
+       reports what is genuinely missing from the sample instead. */
     $("sHands").textContent=drill.n;
-    $("sHandsU").textContent=drill.n===1?"spot":"spots";
+    $("sHandsU").textContent=drill.n===1?"decision":"decisions";
     const acc=drill.n?Math.round(drill.ok/drill.n*100):null;
     const nb=$("sNet"); nb.textContent=acc===null?"–":acc+"%"; nb.className="";
     $("sNetU").textContent="in range";
-    const rt=$("sRate"); rt.textContent=drill.n?String(drill.ok):"–"; rt.className="";
-    $("sRateU").textContent="correct";
+    const rt=$("sRate");
+    rt.textContent=drill.skipped?String(drill.skipped):"–"; rt.className="";
+    rt.title=drill.skipped?"Decisions the chart file has no row for. They are not "+
+      "counted either way.":"";
+    $("sRateU").textContent="uncovered";
     // **The two kinds of spot that are not in the score have to be visible**,
     // or the count silently stops matching the number of hands you played and
     // the difference looks like a bug rather than a rule.
     const aside=[];
     if(drill.peeks)   aside.push(drill.peeks+" looked up");
     if(drill.skipped) aside.push(drill.skipped+" not covered");
-    $("logMeta").textContent=drill.n+(drill.n===1?" spot":" spots")+
+    $("logMeta").textContent=drill.n+(drill.n===1?" decision":" decisions")+
       (acc===null?"":" · "+acc+"% in range")+
       (aside.length?" · "+aside.join(" · "):"");
     return;
@@ -2788,6 +2910,7 @@ function drawLog(h){
   // whole project is built around not presenting noise as a measurement, so it
   // stays a dash until there is at least something to average over.
   const rt=$("sRate");
+  $("sRateU").textContent="bb / 100";
   if(sess.hands>=RATE_MIN){
     const r=(net/BB)/sess.hands*100;
     rt.textContent=(r>=0?"+":"−")+Math.abs(r).toFixed(Math.abs(r)>=100?0:1);
@@ -3018,6 +3141,14 @@ function fracOf(v){
 
 function showDone(){
   $("sizer").hidden=true;
+  /* **The equity readout does not outlive the hand.** `equity_now` reads the last
+     captured hero decision, so once the hand is complete those figures are as old
+     as that decision — and they were left on screen next to a finished board. A
+     turn-time "54%" sat beside a hand that had just won, a pot-odds row priced a
+     call that no longer existed, and a "25% rng" chip sat under a face-up two
+     pair that lost. Stale sampled numbers under live labels, at the one moment
+     the truth is fully known and visible. */
+  $("equity").hidden=true; seatEq=null;
   const net=ST.net?ST.net[ST.hero_seat]:0, say=$("say");
   let msg,cls="";
   if(net>0){msg="You win "+m2(net);cls="win";}
@@ -3068,6 +3199,11 @@ function showDone(){
 async function act(code,amt){
   if(busy) return;
   busy=true;
+  // Captured before the first `await`. Every resumption below checks it, and the
+  // `finally` only releases the latch if this call still owns it — otherwise a
+  // late-finishing action would clear the latch belonging to the session that
+  // replaced it.
+  const myGen=gen;
   // `finally`, not a trailing assignment. Every path out of here must clear
   // the latch: an exception between here and the end would leave `busy` true
   // for ever, and the symptom is the page sitting on "thinking" with every
@@ -3078,6 +3214,7 @@ async function act(code,amt){
     [...$("btns").children].forEach(b=>b.disabled=true);
     $("say").innerHTML='<span class="think">thinking<i></i><i></i><i></i></span>';
     await paint();                    // let the thinking state reach the screen
+    if(myGen!==gen) return;           // a reset landed; this hand is gone
     // Graded **before** the action is applied: `wasm_play_hero_chart` describes
     // the spot hero is looking at, and once the action lands that spot is gone.
     if(training && ST && ST.street===0) gradePreflop(code);
@@ -3087,9 +3224,14 @@ async function act(code,amt){
     let dev=null;
     if(!training && cfg.nudge && ST && ST.street===0) dev=offChartCheck(code);
     if(W.wasm_play_act(code,BigInt(Math.round(amt)))!==1){
+      /* **Redraw first, then say it.** This used to set `#say` and then call
+         `showTurn()`, which opens with `say.className=""` and ends by rewriting
+         `say.innerHTML` — so the only report that invariant 4 had fired was
+         erased in the same tick that produced it. The rejection happened and was
+         unobservable. */
+      ST=snap()||ST; frame((ST.history||[]).length); showTurn();
       const s=$("say"); s.className="bug";
       s.textContent="the engine refused that action";
-      ST=snap()||ST; frame((ST.history||[]).length); showTurn();
       return;
     }
     ST=snap();
@@ -3107,6 +3249,7 @@ async function act(code,amt){
 
        `finish()` still calls this, which is what adds the *next* decision's block
        to the list. Calling it twice is idempotent — it rebuilds from `grades`. */
+    if(myGen!==gen) return;
     if(training) showGrade();
     /* **In a drill, folding ends the spot.** The engine plays the whole hand
        inside one `play()` call whatever you do, so without this you fold and
@@ -3118,11 +3261,13 @@ async function act(code,amt){
        settles. What is skipped is the replay, the runout and the showdown. */
     if(training && code===A.fold){ endFoldedSpot(); return; }
     await revealTo((ST.history||[]).length);
+    if(myGen!==gen) return;
     await finish();
+    if(myGen!==gen) return;
     // After the hand has settled, not before: popping a modal over a running
     // replay hides the thing the replay is showing you.
     if(dev) showOffChart(dev);
-  } finally { busy=false; }
+  } finally { if(myGen===gen) busy=false; }
 }
 
 /* ==================================================================== *
@@ -3130,10 +3275,14 @@ async function act(code,amt){
  * ==================================================================== */
 function chipRow(host,opts,cur,onPick){
   const el=$(host); el.innerHTML="";
+  // `aria-pressed` as well as the class: selection was conveyed by colour alone,
+  // so a screen reader could not tell which table size or theme was active.
   for(const o of opts){
     const b=document.createElement("button");
     b.innerHTML=o[0]+(o[2]?" <small>"+o[2]+"</small>":"");
-    if(String(o[1])===String(cur())) b.classList.add("on");
+    const on = String(o[1])===String(cur());
+    if(on) b.classList.add("on");
+    b.setAttribute("aria-pressed", on?"true":"false");
     b.onclick=()=>onPick(o[1]);
     el.appendChild(b);
   }
@@ -3146,10 +3295,20 @@ function buildSettings(){
     ()=>cfg.depth,v=>{ cfg.depth=v; saveCfg(); redraw(); newTable(); });
   /* Seats are named by position, not by index, because "HJ" is the thing you
      are choosing and the index that produces it changes with the table size. */
+  /* **Labelled from the table you are about to have, not the one you just left.**
+     These read `ST.labels`, and `redraw()` runs before `newTable()`, so switching
+     to heads-up drew chips labelled BTN/SB — and the chip labelled "SB" seated you
+     in the big blind. On a page whose premise is that position is most of preflop,
+     a position picker naming the wrong position is the worst possible place for a
+     stale read. `seatPos` derives the label from the seat count directly, the same
+     way the engine does, so it cannot lag. */
   const seatOpts=[["Rotate","rotate"]];
-  for(let s=0;s<cfg.seats;s++)
-    seatOpts.push([(ST&&ST.labels&&ST.labels[s])||("Seat "+s), String(s)]);
-  chipRow("cSeat", seatOpts, ()=>String(cfg.seat),
+  for(let s=0;s<cfg.seats;s++) seatOpts.push([seatPos(cfg.seats,s), String(s)]);
+  /* A pin to a seat that no longer exists lit no chip at all — not even Rotate —
+     while `heroSeatFor` silently clamped you to the last seat. Pick the CO
+     six-handed, switch to heads-up, and you were pinned to the big blind with an
+     empty selection. Clamp visibly instead. */
+  chipRow("cSeat", seatOpts, ()=>String(heroSeatSetting()),
     v=>{ cfg.seat=v; saveCfg(); redraw(); newTable(); });
   /* **A feature the engine cannot do must say so, not just not happen.**
      `wasm_play_set_hero` is new, and the `.wasm` is cached, so the first load
@@ -3172,11 +3331,26 @@ function buildSettings(){
     ()=>cfg.speed,v=>{ cfg.speed=v; saveCfg(); redraw(); });
   chipRow("cTheme",[["Night",'dark'],["Day",'light'],["Auto",'auto']],
     ()=>cfg.theme,v=>{ cfg.theme=v; saveCfg(); applyTheme(); redraw(); });
+  /* **Operable without a pointer, and its state announced.** These were bare
+     `<div>`s: no role, no tabindex, no `aria-checked`, and the label beside them
+     was a `<div>` rather than a `<label>`. The villain `<select>`s got a real
+     label in the accessibility pass and these four were missed, so "Name my
+     hand", "Pot odds", "Show mucked cards" and "Warn me off chart" could not be
+     reached or read at all. */
   const tog=(id,key)=>{
     const el=$(id);
-    el.classList.toggle("on",!!cfg[key]);
-    el.onclick=()=>{ cfg[key]=!cfg[key]; saveCfg(); el.classList.toggle("on",!!cfg[key]);
+    const paint=()=>{ el.classList.toggle("on",!!cfg[key]);
+                      el.setAttribute("aria-checked", cfg[key]?"true":"false"); };
+    el.setAttribute("role","switch");
+    el.setAttribute("tabindex","0");
+    const lab=el.parentElement && el.parentElement.querySelector(".lab");
+    if(lab && !el.getAttribute("aria-label"))
+      el.setAttribute("aria-label", lab.textContent.trim().split("\n")[0]);
+    paint();
+    const flip=()=>{ cfg[key]=!cfg[key]; saveCfg(); paint();
                      if(ST) frame((ST.history||[]).length); };
+    el.onclick=flip;
+    el.onkeydown=e=>{ if(e.key===" "||e.key==="Enter"){ e.preventDefault(); flip(); } };
   };
   buildVillains();
   buildCharts();
@@ -3259,7 +3433,7 @@ function buildVillains(){
     // otherwise the position this seat is in is not announced with it.
     const lab=document.createElement("label"); lab.className="vseat";
     lab.htmlFor="vsel"+i;
-    lab.textContent=(ST&&ST.labels&&ST.labels[seat])||("Seat "+seat);
+    lab.textContent=seatPos(cfg.seats,seat);   // not ST.labels: see `cSeat`
     const sel=document.createElement("select");
     sel.id="vsel"+i;
     const any=document.createElement("option");
@@ -3349,6 +3523,8 @@ function setMode(t){
   training=t;
   $("mPlay").classList.toggle("on",!t);
   $("mTrain").classList.toggle("on",t);
+  $("mPlay").setAttribute("aria-pressed", t?"false":"true");
+  $("mTrain").setAttribute("aria-pressed", t?"true":"false");
   drill={n:0,ok:0,skipped:0,peeks:0};
   document.body.classList.toggle("training",t);
   newTable();

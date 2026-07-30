@@ -30,7 +30,7 @@
    worker down with it. Each file is added independently and a miss is
    tolerated. */
 
-const CACHE = 'preflop-v18';
+const CACHE = 'preflop-v19';
 
 /* Everything either app needs offline. `./` is the directory index, which is
    what a bookmark to the site root asks for. */
@@ -38,14 +38,26 @@ const SHELL = [
   './',
   './index.html',           // the product: the merged play + trainer page
   './play.html',            // the same page under its old name, for old links
-  './trainer.html',         // the standalone trainer: range browser, builder
-  './poker-trainer.html',   // the trainer's name when served from the repo root
-  './preflop_wasm.wasm',    // ~890 KB; without it the table cannot deal a hand
+  './preflop_wasm.wasm',    // ~900 KB; without it the table cannot deal a hand
   './charts.json',          // preflop ranges: the bots' play and your grading
   './manifest.webmanifest', // without it an installed app has no name or icon
   './icon.png',
+  // Apache-2.0 s.4 attribution for `rs_poker`, which is compiled into the wasm
+  // above. `build.py` stages these and `APP.md` §1 calls them not optional, so
+  // they belong in the offline shell alongside the binary they cover — they were
+  // staged and then left out of it.
+  './LICENSE',
+  './NOTICE',
   './sw.js',
 ];
+
+/* **`trainer.html` is deliberately not here.** It is 156 KB gzipped, nothing in
+   the product links to it, and precaching it made a first visit ~715 KB rather
+   than ~560 KB — 30% of the transfer for a page no visitor can reach. It stays
+   deployed for a direct link and is cached on demand by the fetch handler if
+   anyone follows one. `poker-trainer.html` is gone from the list too: `build.py`
+   never stages it, so it was a guaranteed 404 at install and a dead arm in the
+   offline fallback below. */
 
 self.addEventListener('install', e => e.waitUntil((async () => {
   const c = await caches.open(CACHE);
@@ -135,10 +147,17 @@ self.addEventListener('fetch', e => {
         // The URL is refetched rather than the Request being reused because a
         // navigation Request has `mode: 'navigate'`, which cannot be
         // reconstructed with different options.
-        return await keep(await fetch(url.href, {
+        const res = await fetch(url.href, {
           cache: 'no-cache',
           credentials: 'same-origin',
-        }));
+        });
+        // **An error response does not throw.** Without this, a bad deploy, or a
+        // captive portal answering 200 with a login page, was handed straight to
+        // the user while a perfectly good copy sat in the cache. Only a real
+        // failure should reach the fallback, and a 404 is a real failure.
+        if (!res || !res.ok) throw new Error('http ' + (res && res.status));
+        // `keep` outside the success path would cache the error page.
+        return await keep(res);
       } catch (_) {
         // Offline. Fall back to **the page that was asked for**, then to
         // whichever app is present — never unconditionally to one of them,
@@ -148,16 +167,36 @@ self.addEventListener('fetch', e => {
         return (await caches.match(e.request, { ignoreSearch: true }))
             || (await caches.match('./' + name, { ignoreSearch: true }))
             || (await caches.match('./index.html', { ignoreSearch: true }))
-            || (await caches.match('./poker-trainer.html', { ignoreSearch: true }))
             || new Response('offline', { status: 503 });
       }
     })());
     return;
   }
 
+  /* Stale-while-revalidate — with both halves actually working.
+     Two bugs lived here, and both are this file's own reasoning not applied to
+     its third fetch:
+
+     1. **`cache: 'no-cache'`.** The install handler and the document handler each
+        force a conditional request, and each carries a comment explaining that a
+        plain `fetch` inside a worker resolves out of the browser's HTTP cache —
+        and that this "bites hardest on `preflop_wasm.wasm`". This was that plain
+        fetch, so the revalidation could re-`put` the very stale bytes it existed
+        to replace. On Pages (`max-age=600`) bumping `CACHE` did not reliably
+        deliver a new engine.
+     2. **`e.waitUntil(net)`.** On a cache hit the response resolves at once and
+        the browser is free to terminate the worker before the background fetch
+        and its `cache.put` finish. The refresh meant to arrive "next time" might
+        never land, so next time never came. */
   e.respondWith((async () => {
     const hit = await caches.match(e.request, { ignoreSearch: true });
-    const net = fetch(e.request).then(keep).catch(() => null);
-    return hit || (await net) || new Response('offline', { status: 503 });
+    const net = fetch(e.request, { cache: 'no-cache', credentials: 'same-origin' })
+      .then(res => (res && res.ok ? keep(res) : null))
+      .catch(() => null);
+    if (hit) {
+      e.waitUntil(net);
+      return hit;
+    }
+    return (await net) || new Response('offline', { status: 503 });
   })());
 });
