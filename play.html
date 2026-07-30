@@ -2933,6 +2933,17 @@ async function act(code,amt){
     // The bots have already decided — what follows is a replay of it, so the
     // "thinking" indicator stops here rather than running for the animation.
     $("say").textContent="";
+    /* **The verdict goes up the moment the action is accepted.**
+       It used to wait for `finish()`, which is after the opponents' replay has
+       animated and the next street has been dealt — most of a second at normal
+       speed, and blind-versus-blind that is the whole hand. So you clicked, watched
+       two players act, saw a flop, and *then* found out about the decision you
+       had already stopped thinking about. Grading happened before the action all
+       along (the node is gone once it lands); only the drawing was late.
+
+       `finish()` still calls this, which is what adds the *next* decision's block
+       to the list. Calling it twice is idempotent — it rebuilds from `grades`. */
+    if(training) showGrade();
     await revealTo((ST.history||[]).length);
     await finish();
     // After the hand has settled, not before: popping a modal over a running
