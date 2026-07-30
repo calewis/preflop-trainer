@@ -30,14 +30,23 @@
    worker down with it. Each file is added independently and a miss is
    tolerated. */
 
-const CACHE = 'preflop-v19';
+const CACHE = 'preflop-v20';
 
 /* Everything either app needs offline. `./` is the directory index, which is
    what a bookmark to the site root asks for. */
 const SHELL = [
-  './',
+  /* **One copy of the document, not three.** `./`, `./index.html` and
+     `./play.html` are byte-identical — `build.py` writes both outputs from one
+     source and now *asserts* they match — so precaching all three spent
+     127 KB gzipped, 19% of a first visit, delivering bytes the visitor already
+     has in the navigation response.
+
+     Only safe because of that build-time assertion. If the two ever diverged, an
+     offline visitor whose first navigation was `play.html` would fall through the
+     chain below to `index.html`'s bytes: the shape of the bug in the header
+     above, though not the bug, since they cannot be different apps. The guarantee
+     lives in `build.py` rather than here, which is the trade. */
   './index.html',           // the product: the merged play + trainer page
-  './play.html',            // the same page under its old name, for old links
   './preflop_wasm.wasm',    // ~900 KB; without it the table cannot deal a hand
   './charts.json',          // preflop ranges: the bots' play and your grading
   './manifest.webmanifest', // without it an installed app has no name or icon
@@ -125,10 +134,19 @@ self.addEventListener('fetch', e => {
   // Only GET is cacheable, and nothing here does anything else.
   if (e.request.method !== 'GET') return;
 
+  /* Writes are keyed by **path without the query**, because reads use
+     `ignoreSearch: true`. They disagreed: a request carrying `?v=1` was stored
+     under the full URL and could never be read back, so every cache-busted fetch
+     added an entry nothing would ever hit. Demonstrated accidentally during
+     profiling — two probe URLs left 1.85 MB of unreachable cache. No production
+     path adds a query today, so this was latent; a read and a write that use
+     different keys is a bug waiting for the first one that does. */
   const keep = async res => {
     if (res && res.ok && res.type === 'basic') {
       const c = await caches.open(CACHE);
-      await c.put(e.request, res.clone());
+      const key = new URL(e.request.url);
+      key.search = '';
+      await c.put(key.href, res.clone());
     }
     return res;
   };

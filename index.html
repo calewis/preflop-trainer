@@ -1358,14 +1358,36 @@ async function loadCharts(){
    every failure** — null pointer, empty, oversized, not UTF-8, or not a chart
    set. So `chartEntries` is the single honest answer to "are we grading against
    anything", and it is what trainer mode and the settings readout both test. */
+/* The buffer the chart file is handed across in.
+   **Allocated once and reused.** `wasm_alloc` is `Vec::with_capacity` +
+   `mem::forget`, so every call leaks by construction, and `wasm_dealloc` — which
+   exists, at `lib.rs:80` — had no caller anywhere in the JS. Trainer mode calls
+   `reapplyCharts` once per hand (`wasm_play_new` clears the charts, so it must),
+   and trainer mode is the default, so a drill leaked the whole chart file every
+   spot: measured at **917,504 bytes per hand**, monotonic, ~103 MiB per hundred
+   spots on the shipped set. A profiling session drove one tab from 7 MiB to
+   335 MiB.
+
+   Reuse rather than `wasm_dealloc` after each call: dealloc measured 9x better
+   but still left ~85 KB per call of fragmentation, and reuse measured exactly
+   zero growth. The cost is one more pointer beside `PTR`/`CAP`. */
+let CPTR=0, CCAP=0;
 function reapplyCharts(){
   chartEntries = 0;
   if(!hasCharts || !chartsJson) return;
   const bytes = enc.encode(chartsJson);
-  const p = W.wasm_alloc(bytes.length);
-  if(!p) return;
-  new Uint8Array(W.memory.buffer, p, bytes.length).set(bytes);
-  chartEntries = W.wasm_play_set_charts(p, bytes.length);
+  // Grow only when a larger file arrives — that leaks the old buffer once, which
+  // is the price of `wasm_alloc` having no shrink, and happens on a file change
+  // rather than on a hand.
+  if(bytes.length > CCAP){
+    const p = W.wasm_alloc(bytes.length);
+    if(!p) return;
+    CPTR = p; CCAP = bytes.length;
+  }
+  // The view is built after any allocation and used immediately: growing wasm
+  // memory detaches every older view onto the buffer.
+  new Uint8Array(W.memory.buffer, CPTR, bytes.length).set(bytes);
+  chartEntries = W.wasm_play_set_charts(CPTR, bytes.length);
 }
 
 /* Swap in a different range file. Returns the entry count, or 0.
@@ -1867,6 +1889,10 @@ function applyLineup(ids){
   // memory detaches any older view onto the buffer.
   new Uint8Array(W.memory.buffer, p, bytes.length).set(bytes);
   const matched = W.wasm_play_set_profiles(p, bytes.length);
+  // Handed back. Small — ~400 bytes a hand, which the allocator does reuse — but
+  // `wasm_alloc` leaks unless something frees it, and this runs every hand.
+  // Safe here: `set_profiles` parses into owned values and keeps no borrow.
+  if("wasm_dealloc" in W) W.wasm_dealloc(p, bytes.length);
   if(matched !== ids.length)
     console.warn("seated "+matched+" of "+ids.length+" named profiles");
   return matched;
@@ -2029,7 +2055,7 @@ function fail(m){
    "which ranges am I playing and being marked against" is a fact about the
    session, not a transient confirmation. */
 /* Injected by `build.py`. See there for why this is worth a line of screen. */
-const BUILD_ID = "2026-07-29 22:52 fd50917+";
+const BUILD_ID = "2026-07-29 23:17 de1d064+";
 function footNote(){
   const src = chartEntries
     ? " · ranges: <code>"+esc(chartName)+"</code> ("+chartEntries+")"
