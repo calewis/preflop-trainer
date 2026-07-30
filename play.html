@@ -1842,7 +1842,7 @@ const seatName = seat => {
 /* ==================================================================== *
  * settings
  * ==================================================================== */
-const DEF={seats:6,depth:100,units:"bb",speed:"normal",theme:"dark",
+const DEF={seats:6,depth:100,units:"bb",speed:"fast",theme:"dark",
            muck:true,odds:true,read:true,nudge:true,
            /* which seat you sit in; "rotate" moves you round every hand */
            seat:"rotate",
@@ -1853,8 +1853,14 @@ try{ Object.assign(cfg, JSON.parse(localStorage.getItem("play.cfg")||"{}")); }ca
 const saveCfg=()=>{ try{ localStorage.setItem("play.cfg",JSON.stringify(cfg)); }catch(e){} };
 const SB=50, BB=100;                 // blinds, in chips
 const stackChips=()=>cfg.depth*BB;   // depth is in big blinds
+/* Replay pacing, in ms per opponent action. **Fast is the default**: 400 ms a
+   seat means five opponents take two seconds before the action reaches you,
+   and you spend most of a session waiting to play rather than playing. 170 ms
+   is still slow enough to read who did what — the tags and chips land one at a
+   time — without the wait being the dominant experience. Normal stays for
+   anyone who wants to watch it unfold. */
 const SPEED={off:0,fast:170,normal:400};
-const stepMs=()=>SPEED[cfg.speed]??SPEED.normal;
+const stepMs=()=>SPEED[cfg.speed]??SPEED.fast;
 
 function applyTheme(){
   const t = cfg.theme==="auto"
