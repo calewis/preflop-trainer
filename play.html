@@ -515,6 +515,15 @@ body::before{
    sending one per seat all along. A muck is dimmed for the same reason its
    cards are: it is not table information, it is here because this is a
    trainer. */
+/* Seat equity, under the position. Their **range's** share of the pot, not
+   their hand's — see `frame()`. Deliberately quieter than the stack: it is
+   study information sitting on a live table, and it must not compete with the
+   things the hand is actually made of. */
+.seq{font-size:10px;font-weight:800;font-family:var(--mono);color:var(--amber-mid);
+  letter-spacing:-.2px;line-height:1.1;margin-top:1px}
+.seq .sqr{font-size:7.5px;font-weight:700;font-family:inherit;color:var(--faint);
+  letter-spacing:.3px;margin-left:1px}
+.seat.hero .seq{color:var(--amber)}
 .made{font-size:9.5px;font-weight:700;letter-spacing:.2px;color:var(--amber-mid);
   margin-top:3px;line-height:1.15;white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis;max-width:100%}
@@ -1974,7 +1983,7 @@ function fail(m){
    "which ranges am I playing and being marked against" is a fact about the
    session, not a transient confirmation. */
 /* Injected by `build.py`. See there for why this is worth a line of screen. */
-const BUILD_ID = "2026-07-29 21:20 ed4ea6d+";
+const BUILD_ID = "2026-07-29 21:22 274a433+";
 function footNote(){
   const src = chartEntries
     ? " · ranges: <code>"+esc(chartName)+"</code> ("+chartEntries+")"
@@ -2116,6 +2125,11 @@ let grades=[];
 let playOut=false;
 let drill={n:0, ok:0, skipped:0, peeks:0};
 let peeked=false;     // you opened a range before acting on this spot
+/* **The opponents' equity lives on the felt, not in a list under yours.**
+   A column of percentages under "Your hand" made you map row three back onto a
+   seat before it meant anything; the number belongs beside the player it
+   describes. Keyed by seat, cleared with the hand, and drawn by `frame()`. */
+let seatEq=null;
 
 /* Which of raise/call/fold an action counts as, in the chart's own indices. */
 const RCF = {3:0, 2:1, 1:1, 0:2};   // raise / call / check->call / fold
@@ -2153,7 +2167,7 @@ function gradePreflop(code){
 function showEquity(){
   const e = equityNow();
   const el = $("equity");
-  if(!e){ el.hidden = true; return; }
+  if(!e){ el.hidden = true; seatEq = null; return; }
   const pct = x => (x*100).toFixed(1) + "%";
   const rows = [];
   const note = [];
@@ -2166,13 +2180,14 @@ function showEquity(){
      at a glance. */
   rows.push('<div class="erow"><span class="elab">Your hand</span><b>'+
             pct(e.hand)+'</b></div>');
+  /* The opponents' shares go to their seats rather than into this list — see
+     `seatEq`. They still come from the same showdown as hero's, so the felt and
+     this panel add up to one pot between them. */
   const opp = Array.isArray(e.opp) ? e.opp : [];
-  for(const o of opp){
-    const nm = seatName(o.seat) || ("Seat "+o.seat);
-    const pos = (ST.labels && ST.labels[o.seat]) || "";
-    rows.push('<div class="erow opp"><span class="elab">'+esc(nm)+
-      (pos?' <i>'+esc(pos)+'</i>':"")+'</span><b>'+pct(o.eq)+'</b></div>');
-  }
+  const nextEq = {};
+  for(const o of opp) nextEq[o.seat] = o.eq;
+  const changed = JSON.stringify(nextEq) !== JSON.stringify(seatEq);
+  seatEq = nextEq;
 
   /* Hero's whole range, as a reference beside the hand: it answers "is this a
      good hand for the way I got here", which is a different question from "am I
@@ -2222,6 +2237,10 @@ function showEquity(){
   el.hidden = false;
   el.innerHTML = rows.join("") +
     (note.length ? '<p class="enote">'+note.join(" ")+'</p>' : "");
+  // Repaint the seats so the new numbers appear on the felt. Only when they
+  // actually changed: `frame` rebuilds every pod, and doing that unprompted is
+  // how the chip-pop animation ends up firing on chips that did not move.
+  if(changed && ST) frame((ST.history||[]).length);
 }
 
 const SPOT_NAME = {rfi:"Open", vs_rfi:"vs Open", vs_3bet:"vs 3-Bet",
@@ -2339,7 +2358,7 @@ async function newHand(){
   // `finally`, not a trailing assignment — see `act()`.
   try{
     settled=false; shown=0; potShown=-1; lastBet=[];
-    grades=[]; playOut=false; peeked=false; deviation=null;
+    grades=[]; playOut=false; peeked=false; deviation=null; seatEq=null;
     $("grade").hidden=true; $("equity").hidden=true;
     $("heroCards").dataset.key="";      // a new hand really is new cards
     // **A drill is a series of independent spots, not a session.** Carrying
@@ -2570,6 +2589,19 @@ function frame(k,streetOverride){
          '<div class="pod">'+d+
          '<div class="pos">'+seatName(s)+
            '<span class="pl">'+(ST.labels[s]||"")+'</span></div>'+
+         // Under the position, which is where it is being looked for. Not drawn
+         // for a seat that has folded: an equity for someone out of the hand is
+         // a number with nothing behind it.
+         /* **Their RANGE's equity, never their hand's.** The number is computed
+            by drawing their combo from their charted range — `equity_all` never
+            reads `deck`, so the value is a function of your cards, the public
+            board and the public charts alone. It is bit-identical whatever they
+            are actually holding, which is what makes it safe to show. The label
+            says `rng` so it cannot be misread as a peek. */
+         (seatEq && seatEq[s]!=null && !isFolded
+            ? '<div class="seq" title="This player\'s RANGE against yours on this '+
+              'board. It is not their hand — nothing here can see their cards.">'+
+              (seatEq[s]*100).toFixed(1)+'<span class="sqr">% rng</span></div>' : "")+
          '<div class="stk">'+money(stack)+(allin?' <span class="ai">ALL IN</span>':"")+'</div>'+
          '<div class="cards">'+cards+'</div>'+made+'</div>'+
          (bet[s]>0&&!isFolded
@@ -2809,7 +2841,7 @@ function endFoldedSpot(){
   let i = h.length-1;
   while(i>=0 && !(h[i].seat===ST.hero_seat && h[i].act==="fold")) i--;
   frame(i>=0 ? i+1 : h.length);
-  $("equity").hidden = true;      // no board worth pricing; you are out
+  $("equity").hidden = true; seatEq = null;   // no board worth pricing; you are out
   if(!settled && W.wasm_play_settle()===1) settled = true;
   const say=$("say"); say.className="";
   say.innerHTML='You folded <span class="pill">spot over</span>';
@@ -2831,7 +2863,7 @@ function showTurn(){
 
      `showEquity` self-hides when there is no board, which is what makes this
      safe to call unconditionally — preflop it draws nothing. */
-  if(ST && ST.street>0) showEquity(); else $("equity").hidden=true;
+  if(ST && ST.street>0) showEquity(); else { $("equity").hidden=true; seatEq=null; }
   const say=$("say"); say.className="";
   const bits=['Your move'];
   if(ST.to_call>0){
