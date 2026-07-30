@@ -1983,7 +1983,7 @@ function fail(m){
    "which ranges am I playing and being marked against" is a fact about the
    session, not a transient confirmation. */
 /* Injected by `build.py`. See there for why this is worth a line of screen. */
-const BUILD_ID = "2026-07-29 21:22 274a433+";
+const BUILD_ID = "2026-07-29 22:06 a7d6ca9+";
 function footNote(){
   const src = chartEntries
     ? " · ranges: <code>"+esc(chartName)+"</code> ("+chartEntries+")"
@@ -2168,7 +2168,20 @@ function showEquity(){
   const e = equityNow();
   const el = $("equity");
   if(!e){ el.hidden = true; seatEq = null; return; }
-  const pct = x => (x*100).toFixed(1) + "%";
+  /* **Whole percent, because the last decimal was noise.**
+     These figures are sampled, and the standard error of a pot share is at most
+     `0.5/sqrt(n)`. At n = 24,000 that is 0.32 points — inside the half-point a
+     1-point step needs, and *three times coarser* than the 0.1-point step this
+     used to print. An audit on 2026-07-29 measured the spread across 32 seeds at
+     0.49x the bound, so the bound is real and the old display was showing a
+     digit it had not earned. Buying an honest tenth would take n = 250,000,
+     which is not available on the main thread the moment the flop lands.
+
+     The pot-odds row is exact arithmetic rather than sampled, but it is rounded
+     the same way on purpose: it exists to be compared with the equity above it,
+     and a comparison between two different precisions invites false confidence
+     in whichever looks sharper. */
+  const pct = x => Math.round(x*100) + "%";
   const rows = [];
   const note = [];
 
@@ -2213,16 +2226,30 @@ function showEquity(){
     rows.push('<div class="erow odds"><span class="elab">Pot odds '+
       '<i>'+m2(ST.to_call)+' to call into '+m2(ST.pot)+'</i></span>'+
       '<b class="'+(ok?"good":"bad")+'">'+pct(need)+'</b></div>');
+    const gap = Math.round(Math.abs(e.hand-need)*100);
     note.push(ok
-      ? 'Your hand beats the price by '+((e.hand-need)*100).toFixed(1)+' points.'
-      : 'Your hand is '+((need-e.hand)*100).toFixed(1)+' points short of the '+
-        'price — a call needs implied odds or a read to make up the difference.');
+      ? 'Your hand beats the price by about '+gap+' point'+(gap===1?'':'s')+'.'
+      : 'Your hand is about '+gap+' point'+(gap===1?'':'s')+' short of the price '+
+        '— a call needs implied odds or a read to make up the difference.');
   }
 
   /* **Say how much of the field was guessed.** Chart sets routinely omit the
      blind-versus-late 3-bet and 4-bet nodes, so in exactly the spot worth
      studying an opponent may have no charted range at all. They are taken as
      any two cards, which is a real assumption and has to be visible. */
+  /* **When tuple rejection collapses, say so.** `n` is how many samples actually
+     survived — not the count asked for — and it is the `n` in the error bound. A
+     multiway pot against narrow ranges can drop an order of magnitude: an audit
+     measured 19% acceptance six-handed against the tightest column in the
+     shipped chart file, and 0.5% against a synthetic aces-kings-queens field.
+     Below ~10,000 the bound exceeds half a point and the whole-percent display
+     stops being honest, so the figures get their uncertainty stated rather than
+     being printed in the same typeface as a solid one. */
+  if(Number.isFinite(e.n) && e.n>0 && e.n<10000){
+    const se = Math.max(1, Math.round(50/Math.sqrt(e.n)));
+    note.push('Few card combinations were dealable here ('+e.n.toLocaleString()+
+      ' samples), so these are approximate — give them ±'+se+' points.');
+  }
   if(e.assumed>0)
     note.push(e.assumed===1
       ? "<b>One opponent's range is not in this chart file; it was taken as "+
@@ -2601,7 +2628,7 @@ function frame(k,streetOverride){
          (seatEq && seatEq[s]!=null && !isFolded
             ? '<div class="seq" title="This player\'s RANGE against yours on this '+
               'board. It is not their hand — nothing here can see their cards.">'+
-              (seatEq[s]*100).toFixed(1)+'<span class="sqr">% rng</span></div>' : "")+
+              Math.round(seatEq[s]*100)+'<span class="sqr">% rng</span></div>' : "")+
          '<div class="stk">'+money(stack)+(allin?' <span class="ai">ALL IN</span>':"")+'</div>'+
          '<div class="cards">'+cards+'</div>'+made+'</div>'+
          (bet[s]>0&&!isFolded
