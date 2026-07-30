@@ -786,6 +786,8 @@ summary .m{color:var(--faint);font-weight:600;text-transform:none;letter-spacing
 .lr .lp::before{content:"pot ";font-family:inherit;opacity:.7}
 .lr.brk{color:var(--amber-faint);justify-content:center;letter-spacing:2.4px;
   text-transform:uppercase;font-size:9px;font-weight:800;padding:7px 0 5px}
+/* The build stamp. Dim — it is diagnostic, not decoration. */
+.foot .build{color:var(--faint);opacity:.75;cursor:help}
 .foot{font-size:10px;color:var(--faint);text-align:center;line-height:1.9;margin:2px 0 0;
   letter-spacing:.3px}
 .foot code{background:var(--panel);padding:1.5px 5px;border-radius:4px;color:var(--amber-dim);
@@ -1971,13 +1973,18 @@ function fail(m){
    the place you had just closed. It belongs on the permanent line, because
    "which ranges am I playing and being marked against" is a fact about the
    session, not a transient confirmation. */
+/* Injected by `build.py`. See there for why this is worth a line of screen. */
+const BUILD_ID = "2026-07-29 21:20 ed4ea6d+";
 function footNote(){
   const src = chartEntries
     ? " · ranges: <code>"+esc(chartName)+"</code> ("+chartEntries+")"
     : " · <b>no ranges</b> — bots use the built-in pricer";
   $("foot").innerHTML =
     (SB/BB)+"/1 blinds · "+cfg.depth+"bb stacks · rules from <code>core::table</code>"+
-    " · bots are <code>core::policy::decide</code>"+src;
+    " · bots are <code>core::policy::decide</code>"+src+
+    ' · <span class="build" title="If this is not the build you expect, reload. '+
+    'The .wasm is cached deliberately, so a stale engine costs a feature '+
+    'silently.">build '+esc(BUILD_ID)+'</span>';
 }
 
 /* Grow the shared scratch buffer to at least `n` bytes. One place, because
@@ -2788,6 +2795,32 @@ async function finish(){
   showTurn();
 }
 
+/* The end of a spot you folded out of.
+   Draws the table **as it stood when you folded** rather than as it finished:
+   `frame(i + 1)` where `i` is your fold puts the board back to that street's
+   count and leaves `live` false, so no runout appears and no showdown cards are
+   dealt. The verdict is already up — it went up when the action landed — so all
+   this adds is the way out.
+
+   `settle()` still runs. The engine's hand completed and its bankroll must not
+   be left half-applied just because the page stopped drawing. */
+function endFoldedSpot(){
+  const h = ST.history||[];
+  let i = h.length-1;
+  while(i>=0 && !(h[i].seat===ST.hero_seat && h[i].act==="fold")) i--;
+  frame(i>=0 ? i+1 : h.length);
+  $("equity").hidden = true;      // no board worth pricing; you are out
+  if(!settled && W.wasm_play_settle()===1) settled = true;
+  const say=$("say"); say.className="";
+  say.innerHTML='You folded <span class="pill">spot over</span>';
+  const bt=$("btns"); bt.innerHTML=""; $("sizer").hidden=true;
+  const b=document.createElement("button");
+  b.className="b-next"; b.innerHTML='Next spot<span class="k">↵</span>';
+  b.onclick=()=>newHand();
+  bt.appendChild(b);
+  try{ b.focus({preventScroll:true}); }catch(e){ b.focus(); }
+}
+
 function showTurn(){
   /* **Recomputed at every postflop decision, so the price and the equity are
      the same age.** It used to be drawn once when the flop landed and then
@@ -3016,6 +3049,15 @@ async function act(code,amt){
        `finish()` still calls this, which is what adds the *next* decision's block
        to the list. Calling it twice is idempotent — it rebuilds from `grades`. */
     if(training) showGrade();
+    /* **In a drill, folding ends the spot.** The engine plays the whole hand
+       inside one `play()` call whatever you do, so without this you fold and
+       then sit through four other people contesting a pot you are not in,
+       followed by a showdown that tells you nothing about the decision you were
+       being tested on. The spot was over when you folded.
+
+       This is presentation only — the engine's hand still completed and still
+       settles. What is skipped is the replay, the runout and the showdown. */
+    if(training && code===A.fold){ endFoldedSpot(); return; }
     await revealTo((ST.history||[]).length);
     await finish();
     // After the hand has settled, not before: popping a modal over a running
