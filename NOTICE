@@ -31,6 +31,26 @@ CONDITIONS OF ANY KIND, either express or implied. See the License for the
 specific language governing permissions and limitations under the License.
 
 -------------------------------------------------------------------------------
+PHH poker hand history corpus
+-------------------------------------------------------------------------------
+Copyright the University of Toronto Computer Poker Research Group.
+Licensed under Creative Commons Attribution 4.0 International (CC-BY-4.0).
+https://doi.org/10.5281/zenodo.10796885
+
+The corpus includes the 10,000 hands released with Brown & Sandholm, "Superhuman
+AI for multiplayer poker" (Science, 2019) — one Pluribus seat against five human
+professionals, six-handed, 100 big blinds, no ante.
+
+**How it is used.** Aggregate frequencies measured from those hands — how often
+each seat opens, how often each seat defends — are fitting targets for the
+parameters of `ranges.tag.gen.py`. No range, grid or per-hand decision from the
+corpus is copied into `ranges.tag.json`; which hands make up every range in that
+file comes from this project's own equity table and model. CC-BY-4.0 permits
+derivative works, and this notice is the attribution it requires.
+
+The corpus itself is not redistributed here: `data/` is gitignored.
+
+-------------------------------------------------------------------------------
 Not included in this repository
 -------------------------------------------------------------------------------
 This project deliberately excludes third-party material that is not ours to
