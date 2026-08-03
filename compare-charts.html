@@ -1,0 +1,578 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chart diff — Poker Trainer</title>
+<!--
+  Compare two preflop chart files, node by node.
+
+  Standalone and self-contained: no build step, no dependencies, and **no chart
+  data of any kind is embedded here**. Both sides are loaded by the file picker
+  at runtime, which is deliberate — it means a copyrighted set can be inspected
+  against ours on this machine without ever entering the repository. This file is
+  ours and is safe to commit precisely because it holds nothing but code.
+
+  It reads the same schema `core::charts::ChartSet::from_json` reads, and it
+  re-implements nothing about *strategy* — only about layout. Where the app's
+  range viewer asks the engine which chart a seat plays (so that seat-to-position
+  and depth selection have one owner), this tool works the other way round: you
+  pick a node explicitly, because the whole point is to look at a node in two
+  files and the engine can only ever hold one.
+
+  COLOUR. The action grids consume the app's own ramp unchanged --needle (raise),
+  --amber (call), --fold-bar (fold), because a second visual language for the
+  same thing would be worse than no tool. The diff layer needs hues those three
+  do not use, so it adds a diverging pair, cyan and violet, with a neutral
+  recessive state for agreement. That pair was validated rather than eyeballed:
+  lightness band, chroma floor, CVD separation, normal-vision floor and contrast
+  all pass against this surface, and all-pairs against the action ramp the worst
+  confusable pair is ΔE 10.4 (deutan) / 19.0 (normal), above the 8 and 15 floors.
+-->
+<style>
+:root{
+  /* Ground and ink, from the app. */
+  --bg:#0a0705; --bg2:#130e08; --panel:#191209; --panel2:#231a0f;
+  --line:#3d2e1b; --line2:#584223;
+  --amber:#ffb224; --amber-hi:#ffe0b0; --amber-mid:#eda93f;
+  --amber-dim:#b48949; --amber-faint:#927348; --amber-ink:#1a1003;
+
+  /* The action ramp, identical to the app's range grid. */
+  --needle:#ff4a22;      /* raise */
+  --fold-bar:#4a3922;    /* fold  */
+  /* --amber is call */
+
+  /* The diff layer. Diverging: two poles and a neutral midpoint. */
+  --only-a:#2f9fb5;      /* only file A continues */
+  --only-b:#8f6ae0;      /* only file B continues */
+  --agree:#2a2115;       /* both agree — recessive, this is the "nothing here" state */
+  --clash:#e8dcc8;       /* both continue, different action — carries a marker too */
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f7f2e8; --bg2:#efe7d8; --panel:#fffaf0; --panel2:#f3ebdb;
+    --line:#ddd0b8; --line2:#c9b894;
+    --amber-hi:#3a2a10; --amber-mid:#7a5a1e; --amber-dim:#8a6c33; --amber-faint:#9d8355;
+    --fold-bar:#e3d8c2; --agree:#ece3d2; --clash:#5c4a2c;
+    --only-a:#1c7a8c; --only-b:#6a45b0;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f7f2e8; --bg2:#efe7d8; --panel:#fffaf0; --panel2:#f3ebdb;
+  --line:#ddd0b8; --line2:#c9b894;
+  --amber-hi:#3a2a10; --amber-mid:#7a5a1e; --amber-dim:#8a6c33; --amber-faint:#9d8355;
+  --fold-bar:#e3d8c2; --agree:#ece3d2; --clash:#5c4a2c;
+  --only-a:#1c7a8c; --only-b:#6a45b0;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--amber-dim);
+  font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:18px 14px 60px}
+h1{font-size:17px;color:var(--amber-hi);margin:0 0 3px;letter-spacing:.2px}
+.sub{font-size:12px;color:var(--amber-faint);margin:0 0 16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:14px;margin-bottom:14px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:9px}
+.lab{font-size:10px;letter-spacing:1px;text-transform:uppercase;
+  color:var(--amber-faint);margin-right:2px;min-width:52px}
+button,select{background:var(--panel2);color:var(--amber-dim);border:1px solid var(--line2);
+  border-radius:999px;padding:6px 12px;font:inherit;font-size:11.5px;font-weight:700;
+  cursor:pointer}
+button.on{background:var(--amber);color:var(--amber-ink);border-color:var(--amber)}
+button:disabled{opacity:.32;cursor:not-allowed}
+select{border-radius:8px}
+input[type=file]{font-size:11.5px;color:var(--amber-faint);max-width:100%}
+.slots{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:760px){.slots{grid-template-columns:1fr}}
+.slot{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px}
+.slot h2{font-size:12px;margin:0 0 7px;letter-spacing:1px;text-transform:uppercase}
+.slot.a h2{color:var(--only-a)} .slot.b h2{color:var(--only-b)}
+.meta{font-size:11px;color:var(--amber-faint);margin-top:6px;word-break:break-word}
+
+.grids{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media (max-width:980px){.grids{grid-template-columns:1fr}}
+.gwrap h3{font-size:12px;margin:0 0 2px;color:var(--amber-hi);letter-spacing:.3px}
+.gwrap .gsub{font-size:11px;color:var(--amber-faint);margin:0 0 7px;min-height:16px}
+.grid{display:grid;grid-template-columns:repeat(13,1fr);gap:1px;
+  background:var(--line);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.cell{position:relative;aspect-ratio:1;min-width:0;display:flex;align-items:center;
+  justify-content:center;font-size:8.5px;font-weight:700;letter-spacing:-.2px;
+  color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.75);cursor:default;
+  background:var(--fold-bar)}
+:root[data-theme="light"] .cell{color:#2a2010;text-shadow:none}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]) .cell{color:#2a2010;text-shadow:none}
+}
+.cell.dim{color:var(--amber-faint);text-shadow:none}
+.cell.clash::after{content:"";position:absolute;inset:auto 2px 2px auto;
+  width:5px;height:5px;border-radius:50%;background:var(--bg);
+  outline:1.5px solid var(--clash)}
+.legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:9px;font-size:11px;
+  color:var(--amber-faint)}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend i{width:11px;height:11px;border-radius:3px;display:inline-block;
+  border:1px solid rgba(0,0,0,.25)}
+.stats{display:flex;flex-wrap:wrap;gap:16px;margin-top:11px;font-size:12px}
+.stats b{color:var(--amber-hi);font-variant-numeric:tabular-nums}
+table{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:8px}
+th,td{text-align:right;padding:4px 7px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--amber-faint);font-size:10px;letter-spacing:.6px;text-transform:uppercase;
+  font-weight:700;cursor:pointer;user-select:none}
+td{font-variant-numeric:tabular-nums}
+tbody tr:hover{background:var(--panel2)}
+tbody tr.sel{background:var(--panel2);outline:1px solid var(--line2)}
+.scroll{overflow-x:auto;max-height:340px;overflow-y:auto}
+#tip{position:fixed;pointer-events:none;z-index:9;background:var(--panel2);
+  border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font-size:11.5px;
+  color:var(--amber-dim);box-shadow:0 8px 24px rgba(0,0,0,.5);max-width:260px;display:none}
+#tip b{color:var(--amber-hi)} #tip .k{color:var(--amber-faint)}
+.note{font-size:11.5px;color:var(--amber-faint);margin-top:10px;line-height:1.55}
+.warn{color:var(--needle)}
+.tog{margin-left:auto}
+</style>
+
+<div class="wrap">
+  <h1>Chart diff</h1>
+  <p class="sub">Two preflop chart files, node by node. Nothing is uploaded and nothing is
+     stored — both files are read in this tab.</p>
+
+  <div class="card">
+    <div class="slots">
+      <div class="slot a">
+        <h2>File A</h2>
+        <input type="file" id="fa" accept=".json,application/json">
+        <div class="row" style="margin:8px 0 0"><button id="la">load the served charts.json</button></div>
+        <div class="meta" id="ma">no file</div>
+      </div>
+      <div class="slot b">
+        <h2>File B</h2>
+        <input type="file" id="fb" accept=".json,application/json">
+        <div class="row" style="margin:8px 0 0"><button id="lb">load the served charts.json</button></div>
+        <div class="meta" id="mb">no file</div>
+      </div>
+    </div>
+    <div class="note" id="hint">Load two files. To compare one file against <i>itself</i> at two
+      stack depths, load the same file into both slots and set the depths differently.</div>
+  </div>
+
+  <div class="card" id="controls" hidden>
+    <div class="row"><span class="lab">Scenario</span><span id="cscen"></span></div>
+    <div class="row"><span class="lab">Hero</span><span id="chero"></span></div>
+    <div class="row" id="rvsrow"><span class="lab">Vs</span><span id="cvs"></span></div>
+    <div class="row"><span class="lab">Seats</span><span id="cseats"></span></div>
+    <div class="row">
+      <span class="lab">Depth A</span><span id="cda"></span>
+      <span class="lab" style="margin-left:14px">Depth B</span><span id="cdb"></span>
+    </div>
+  </div>
+
+  <div class="card" id="view" hidden>
+    <div class="grids">
+      <div class="gwrap"><h3 id="ta">A</h3><p class="gsub" id="sa"></p><div class="grid" id="ga"></div></div>
+      <div class="gwrap"><h3 id="tb">B</h3><p class="gsub" id="sb"></p><div class="grid" id="gb"></div></div>
+      <div class="gwrap"><h3>Difference</h3><p class="gsub" id="sd"></p><div class="grid" id="gd"></div></div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--needle)"></i>raise</span>
+      <span><i style="background:var(--amber)"></i>call</span>
+      <span><i style="background:var(--fold-bar)"></i>fold</span>
+      <span style="margin-left:14px"><i style="background:var(--only-a)"></i>only A plays</span>
+      <span><i style="background:var(--only-b)"></i>only B plays</span>
+      <span><i style="background:var(--clash)"></i>both play, different action</span>
+      <span><i style="background:var(--agree)"></i>agree</span>
+    </div>
+    <div class="stats" id="stats"></div>
+    <p class="note" id="vnote"></p>
+  </div>
+
+  <div class="card" id="summary" hidden>
+    <div class="row">
+      <span class="lab">All nodes</span>
+      <span id="scount" style="font-size:12px"></span>
+      <button class="tog" id="csv">copy as TSV</button>
+    </div>
+    <div class="scroll"><table id="stab">
+      <thead><tr>
+        <th data-k="node">node</th><th data-k="aw">A play%</th><th data-k="bw">B play%</th>
+        <th data-k="dw">Δ width</th><th data-k="agree">agree%</th><th data-k="diff">disagree combos</th>
+      </tr></thead><tbody></tbody>
+    </table></div>
+    <p class="note">“agree%” is combo-weighted over all 169 classes: the share of the deck the two
+      files give the same action. A node where both fold almost everything scores high for free, so
+      read “disagree combos” beside it.</p>
+  </div>
+</div>
+<div id="tip"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const RANKS = "AKQJT98765432".split("");
+const ACTS = ["raise","call","fold"];
+const SCEN = ["rfi","vs_rfi","vs_3bet","vs_4bet","vs_5bet"];
+const SCEN_LABEL = {rfi:"Open",vs_rfi:"vs Open",vs_3bet:"vs 3-Bet",vs_4bet:"vs 4-Bet",vs_5bet:"vs 5-Bet"};
+
+/* Combos per class: 6 for a pair, 4 suited, 12 offsuit. Sums to 1326. Every
+   width in this tool is combo-weighted, because "37 of 169 classes" and "12% of
+   the deck" are different numbers and only the second one is a range. */
+const ncomb = h => h.length === 2 ? 6 : (h.endsWith("s") ? 4 : 12);
+
+/* The class name for a cell of the 13x13 square: pairs on the diagonal, suited
+   above it, offsuit below. Same convention as the app's grid and as
+   `range::combo_class`. */
+function cellName(r, c){
+  return r === c ? RANKS[r] + RANKS[c]
+       : r < c   ? RANKS[r] + RANKS[c] + "s"
+       :           RANKS[c] + RANKS[r] + "o";
+}
+
+const F = {A:null, B:null};          // parsed files
+const state = {scen:"rfi", hero:null, vs:null, seats:0, da:null, db:null,
+               sortK:"diff", sortDesc:true};
+
+/* ---------- loading ---------- */
+
+function describe(f, name){
+  const depths = [...new Set(f.charts.map(c => c.stack ?? f.meta?.stack).filter(x => x != null))]
+                 .sort((a,b) => a-b);
+  const seats = [...new Set(f.charts.map(c => c.seats ?? 0))].sort((a,b) => a-b);
+  return {name, charts:f.charts, meta:f.meta || {}, depths, seats,
+          src:(f.meta && f.meta.source) || "(no meta.source)"};
+}
+
+function setFile(slot, raw, name){
+  let j;
+  try { j = JSON.parse(raw); }
+  catch(e){ $("m"+slot.toLowerCase()).innerHTML =
+    '<span class="warn">not JSON: '+esc(e.message)+'</span>'; return; }
+  if(!j || !Array.isArray(j.charts)){
+    $("m"+slot.toLowerCase()).innerHTML =
+      '<span class="warn">no "charts" array — is this a chart file?</span>'; return;
+  }
+  F[slot] = describe(j, name);
+  const f = F[slot];
+  $("m"+slot.toLowerCase()).innerHTML =
+    "<b>"+esc(name)+"</b> — "+f.charts.length+" charts · depths "+
+    (f.depths.length ? f.depths.join(", ")+"bb" : "none named")+
+    "<br>"+esc(f.src.slice(0,150));
+  rebuild();
+}
+
+const esc = s => String(s).replace(/[&<>"]/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+
+for(const slot of ["A","B"]){
+  $("f"+slot.toLowerCase()).addEventListener("change", ev => {
+    const file = ev.target.files && ev.target.files[0];
+    if(!file) return;
+    const rd = new FileReader();
+    rd.onload = () => setFile(slot, rd.result, file.name);
+    rd.readAsText(file);
+  });
+  $("l"+slot.toLowerCase()).addEventListener("click", async () => {
+    try{
+      const r = await fetch("charts.json");
+      if(!r.ok) throw new Error("HTTP "+r.status);
+      setFile(slot, await r.text(), "charts.json (served)");
+    }catch(e){
+      $("m"+slot.toLowerCase()).innerHTML =
+        '<span class="warn">could not fetch charts.json from this origin — '+
+        'use the file picker.</span>';
+    }
+  });
+}
+
+/* ---------- node selection ---------- */
+
+/* A node key. `seats` and `stack` are separate axes: two entries can share
+   (scenario, hero, vs) and differ in either, which is exactly what a multi-depth
+   file is and what the depth control exists to walk. */
+const keyOf = c => c.scenario+"|"+c.hero+"|"+(c.vs ?? "")+"|"+(c.seats ?? 0);
+
+function entry(f, scen, hero, vs, seats, depth){
+  if(!f) return null;
+  const pool = f.charts.filter(c =>
+    c.scenario === scen && c.hero === hero &&
+    (c.vs ?? null) === (vs ?? null) && (c.seats ?? 0) === seats);
+  if(!pool.length) return null;
+  if(depth == null) return pool[0];
+  /* Nearest in LOG depth, matching `ChartSet::for_stack`: 20->40 is a bigger
+     strategic change than 80->100, so nearness in chips is the wrong metric.
+     This tool never blends — it shows you a chart that exists in the file. */
+  let best = pool[0], bd = Infinity;
+  for(const c of pool){
+    const s = c.stack ?? f.meta?.stack;
+    if(s == null || !(s > 0)) continue;
+    const d = Math.abs(Math.log(s) - Math.log(depth));
+    if(d < bd){ bd = d; best = c; }
+  }
+  return best;
+}
+
+function chips(host, items, cur, onPick, fmt){
+  host.innerHTML = "";
+  for(const it of items){
+    const b = document.createElement("button");
+    b.textContent = fmt ? fmt(it) : it;
+    if(it === cur || (it == null && cur == null)) b.className = "on";
+    b.onclick = () => { onPick(it); };
+    host.appendChild(b);
+  }
+}
+
+function rebuild(){
+  const a = F.A, b = F.B;
+  $("controls").hidden = !(a || b);
+  if(!a || !b){ $("view").hidden = true; $("summary").hidden = true; return; }
+
+  const seatsOpts = [...new Set([...a.seats, ...b.seats])].sort((x,y)=>x-y);
+  if(!seatsOpts.includes(state.seats)) state.seats = seatsOpts[0];
+
+  const heroesFor = f => [...new Set(f.charts
+      .filter(c => c.scenario === state.scen && (c.seats ?? 0) === state.seats)
+      .map(c => c.hero))];
+  const heroes = [...new Set([...heroesFor(a), ...heroesFor(b)])];
+  if(!heroes.includes(state.hero)) state.hero = heroes[0] ?? null;
+
+  const vsFor = f => [...new Set(f.charts
+      .filter(c => c.scenario === state.scen && c.hero === state.hero &&
+                   (c.seats ?? 0) === state.seats)
+      .map(c => c.vs ?? null))];
+  const vss = [...new Set([...vsFor(a), ...vsFor(b)])];
+  if(!vss.some(v => v === state.vs)) state.vs = vss[0] ?? null;
+
+  chips($("cscen"), SCEN, state.scen, v => { state.scen = v; state.hero = null; state.vs = null; rebuild(); },
+        v => SCEN_LABEL[v]);
+  chips($("chero"), heroes, state.hero, v => { state.hero = v; state.vs = null; rebuild(); });
+  $("rvsrow").hidden = vss.length === 1 && vss[0] == null;
+  chips($("cvs"), vss, state.vs, v => { state.vs = v; rebuild(); }, v => v == null ? "—" : v);
+  chips($("cseats"), seatsOpts, state.seats,
+        v => { state.seats = v; state.hero = null; rebuild(); },
+        v => v === 0 ? "any" : v+"-handed");
+  chips($("cda"), [null, ...a.depths], state.da, v => { state.da = v; rebuild(); },
+        v => v == null ? "file order" : v+"bb");
+  chips($("cdb"), [null, ...b.depths], state.db, v => { state.db = v; rebuild(); },
+        v => v == null ? "file order" : v+"bb");
+
+  draw();
+  summarise();
+}
+
+/* ---------- the grids ---------- */
+
+/* Three hard-stopped segments, the width of each being its frequency — the app's
+   own encoding, verbatim. A blended single colour cannot tell "half the time I
+   jam" from "every time I flat", because mixing the two ends of a ramp lands you
+   in the middle of it. */
+function bars(w){
+  const t = (w[0]+w[1]+w[2]) || 1;
+  const a = w[0]/t*100, b = a + w[1]/t*100;
+  return "linear-gradient(90deg,var(--needle) 0 "+a.toFixed(2)+"%,"+
+         "var(--amber) "+a.toFixed(2)+"% "+b.toFixed(2)+"%,"+
+         "var(--fold-bar) "+b.toFixed(2)+"% 100%)";
+}
+const plays = w => (w[0]+w[1]) > 0.5;          // continues rather than folds
+/* NOT `top`: that is an existing property of `window`, and `const top`
+   is a redeclaration that kills the whole script at parse time. */
+const topAct = w => w.indexOf(Math.max(...w));
+
+function paint(host, grid, mode, other){
+  host.innerHTML = "";
+  for(let r=0;r<13;r++) for(let c=0;c<13;c++){
+    const h = cellName(r,c);
+    const d = document.createElement("div");
+    d.className = "cell";
+    d.textContent = h;
+    d.dataset.hand = h;
+    const w = grid && grid[h];
+    if(mode === "diff"){
+      const wa = grid && grid[h], wb = other && other[h];
+      if(!wa || !wb){ d.style.background = "var(--agree)"; d.classList.add("dim"); }
+      else{
+        const pa = plays(wa), pb = plays(wb);
+        if(pa && pb && topAct(wa) !== topAct(wb)){
+          d.style.background = "var(--clash)";
+          d.classList.add("clash");
+          d.style.color = "var(--bg)";
+        } else if(pa && !pb){ d.style.background = "var(--only-a)"; }
+        else if(!pa && pb){ d.style.background = "var(--only-b)"; }
+        else { d.style.background = "var(--agree)"; d.classList.add("dim"); }
+      }
+    } else if(w){
+      d.style.background = bars(w);
+    } else {
+      d.style.background = "var(--agree)";
+      d.classList.add("dim");
+      d.title = "not in this file";
+    }
+    host.appendChild(d);
+  }
+}
+
+const pct = x => (Math.abs(x-Math.round(x)) < 0.05 ? x.toFixed(0) : x.toFixed(1)) + "%";
+
+function widths(grid){
+  let r=0,c=0,tot=0;
+  for(let i=0;i<13;i++) for(let j=0;j<13;j++){
+    const h = cellName(i,j), n = ncomb(h), w = grid && grid[h];
+    tot += n;
+    if(!w) continue;
+    r += n*w[0]; c += n*w[1];
+  }
+  return {raise:r/tot*100, call:c/tot*100, play:(r+c)/tot*100};
+}
+
+function draw(){
+  const ea = entry(F.A, state.scen, state.hero, state.vs, state.seats, state.da);
+  const eb = entry(F.B, state.scen, state.hero, state.vs, state.seats, state.db);
+  $("view").hidden = !(ea || eb);
+  if(!ea && !eb) return;
+
+  const ga = ea && ea.grid, gb = eb && eb.grid;
+  paint($("ga"), ga, "act");
+  paint($("gb"), gb, "act");
+  paint($("gd"), ga, "diff", gb);
+
+  const label = e => !e ? "<span class='warn'>no chart for this node</span>"
+    : esc(e.raise_label || "") +
+      /* `+n` then trim: a raise size of 2.2*3 lands as 6.6000000000000005 in
+         the file, and a tool for reading numbers must not show that. */
+      (e.raise_size != null ? " · to <b>"+(+e.raise_size).toFixed(2).replace(/\.?0+$/,"")+"bb</b>" : "") +
+      " · " + ((e.stack ?? F.A.meta.stack) != null ? (e.stack ?? "?")+"bb" : "no depth");
+  $("ta").textContent = "A — " + (F.A.name || "");
+  $("tb").textContent = "B — " + (F.B.name || "");
+  $("sa").innerHTML = label(ea);
+  $("sb").innerHTML = label(eb);
+
+  if(ga && gb){
+    const wa = widths(ga), wb = widths(gb);
+    let same=0, tot=0, dcombo=0;
+    for(let i=0;i<13;i++) for(let j=0;j<13;j++){
+      const h=cellName(i,j), n=ncomb(h), x=ga[h], y=gb[h];
+      tot+=n; if(!x||!y) continue;
+      if(topAct(x)===topAct(y)) same+=n; else dcombo+=n;
+    }
+    $("sd").innerHTML = "agreement <b>"+pct(same/tot*100)+"</b> of the deck";
+    $("stats").innerHTML =
+      "<span>A plays <b>"+pct(wa.play)+"</b> <span style='color:var(--amber-faint)'>("+
+        pct(wa.raise)+" raise / "+pct(wa.call)+" call)</span></span>"+
+      "<span>B plays <b>"+pct(wb.play)+"</b> <span style='color:var(--amber-faint)'>("+
+        pct(wb.raise)+" raise / "+pct(wb.call)+" call)</span></span>"+
+      "<span>Δ width <b>"+(wa.play-wb.play>=0?"+":"")+pct(wa.play-wb.play)+"</b></span>"+
+      "<span>disagree on <b>"+dcombo+"</b> combos</span>";
+    $("vnote").textContent = "";
+  } else {
+    $("sd").textContent = "";
+    $("stats").innerHTML = "";
+    $("vnote").innerHTML = "<span class='warn'>Only one file covers this node.</span> "+
+      "A missing node is not an empty range — the app falls back to an uncapped "+
+      "pricer where a chart is absent, so a gap is worth more attention than a "+
+      "narrow range.";
+  }
+}
+
+/* ---------- hover ---------- */
+
+const tip = $("tip");
+function bindTip(host, which){
+  host.addEventListener("mousemove", ev => {
+    const cell = ev.target.closest(".cell");
+    if(!cell){ tip.style.display = "none"; return; }
+    const h = cell.dataset.hand;
+    const ea = entry(F.A, state.scen, state.hero, state.vs, state.seats, state.da);
+    const eb = entry(F.B, state.scen, state.hero, state.vs, state.seats, state.db);
+    const fmt = e => {
+      const w = e && e.grid && e.grid[h];
+      if(!w) return "<span class='k'>—</span>";
+      return ACTS.map((a,i) => w[i] > 0.005
+              ? a+" <b>"+pct(w[i]*100)+"</b>" : null).filter(Boolean).join(" · ")
+             || "<span class='k'>—</span>";
+    };
+    tip.innerHTML = "<b>"+h+"</b> <span class='k'>· "+ncomb(h)+" combos</span><br>"+
+      "<span class='k'>A</span> "+fmt(ea)+"<br><span class='k'>B</span> "+fmt(eb);
+    tip.style.display = "block";
+    const pad = 14;
+    let x = ev.clientX + pad, y = ev.clientY + pad;
+    const r = tip.getBoundingClientRect();
+    if(x + r.width > innerWidth - 8) x = ev.clientX - r.width - pad;
+    if(y + r.height > innerHeight - 8) y = ev.clientY - r.height - pad;
+    tip.style.left = x+"px"; tip.style.top = y+"px";
+  });
+  host.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+}
+["ga","gb","gd"].forEach(id => bindTip($(id), id));
+
+/* ---------- the all-nodes table ---------- */
+
+let rows = [];
+function summarise(){
+  const a = F.A, b = F.B;
+  if(!a || !b){ $("summary").hidden = true; return; }
+  const idx = f => {
+    const m = new Map();
+    for(const c of f.charts){
+      const k = keyOf(c) + "|" + (c.stack ?? f.meta?.stack ?? "");
+      m.set(k, c);
+    }
+    return m;
+  };
+  /* Matched on (scenario, hero, vs, seats) AND depth, because the same node at
+     two depths is two different strategies and averaging them would hide exactly
+     the thing a multi-depth file exists to express. */
+  const ia = idx(a), ib = idx(b);
+  rows = [];
+  for(const [k, ca] of ia){
+    const cb = ib.get(k);
+    if(!cb) continue;
+    let same=0, tot=0, dcombo=0;
+    for(let i=0;i<13;i++) for(let j=0;j<13;j++){
+      const h=cellName(i,j), n=ncomb(h), x=ca.grid[h], y=cb.grid[h];
+      tot+=n; if(!x||!y) continue;
+      if(topAct(x)===topAct(y)) same+=n; else dcombo+=n;
+    }
+    const wa = widths(ca.grid), wb = widths(cb.grid);
+    const p = k.split("|");
+    rows.push({node:p[0]+" "+p[1]+(p[2]?" vs "+p[2]:"")+
+                    (p[3]!=="0"?" ("+p[3]+"h)":"")+" @"+(p[4]||"?")+"bb",
+               aw:wa.play, bw:wb.play, dw:wa.play-wb.play,
+               agree:same/tot*100, diff:dcombo});
+  }
+  $("summary").hidden = rows.length === 0;
+  $("scount").textContent = rows.length + " nodes present in both files" +
+    (ia.size !== rows.length ? " · " + (ia.size-rows.length) + " only in A" : "") +
+    (ib.size !== rows.length ? " · " + (ib.size-rows.length) + " only in B" : "");
+  renderTable();
+}
+
+function renderTable(){
+  const tb = $("stab").querySelector("tbody");
+  const k = state.sortK, desc = state.sortDesc;
+  const sorted = rows.slice().sort((x,y) => {
+    const A = x[k], B = y[k];
+    const c = typeof A === "string" ? A.localeCompare(B) : A - B;
+    return desc ? -c : c;
+  });
+  tb.innerHTML = "";
+  for(const r of sorted.slice(0, 400)){
+    const tr = document.createElement("tr");
+    tr.innerHTML = "<td>"+esc(r.node)+"</td><td>"+pct(r.aw)+"</td><td>"+pct(r.bw)+
+      "</td><td>"+(r.dw>=0?"+":"")+pct(r.dw)+"</td><td>"+pct(r.agree)+
+      "</td><td>"+r.diff+"</td>";
+    tb.appendChild(tr);
+  }
+}
+$("stab").querySelectorAll("th").forEach(th => {
+  th.onclick = () => {
+    const k = th.dataset.k;
+    if(state.sortK === k) state.sortDesc = !state.sortDesc;
+    else { state.sortK = k; state.sortDesc = true; }
+    renderTable();
+  };
+});
+$("csv").onclick = () => {
+  const head = "node\tA_play\tB_play\tdelta\tagree\tdisagree_combos";
+  const body = rows.map(r => [r.node, r.aw.toFixed(2), r.bw.toFixed(2),
+                              r.dw.toFixed(2), r.agree.toFixed(2), r.diff].join("\t"));
+  navigator.clipboard.writeText([head, ...body].join("\n"))
+    .then(() => { $("csv").textContent = "copied"; setTimeout(()=>$("csv").textContent="copy as TSV", 1400); })
+    .catch(() => { $("csv").textContent = "clipboard blocked"; });
+};
+</script>

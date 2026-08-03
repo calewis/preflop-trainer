@@ -30,7 +30,7 @@
    worker down with it. Each file is added independently and a miss is
    tolerated. */
 
-const CACHE = 'preflop-v21';
+const CACHE = 'preflop-v22';
 
 /* Everything either app needs offline. `./` is the directory index, which is
    what a bookmark to the site root asks for. */
@@ -133,6 +133,26 @@ self.addEventListener('fetch', e => {
   if (url.origin !== location.origin) return;
   // Only GET is cacheable, and nothing here does anything else.
   if (e.request.method !== 'GET') return;
+
+  /* **The heads-up bot's tables never touch this worker.**
+     They are `hubot.bp`, `hubot.flop.abs` and `hubot.turn.abs` — 157 MB of
+     blueprint and k-means data that `play.html` loads for local testing only.
+     They are not in `SHELL`, but leaving them out of the precache list is not
+     enough: the stale-while-revalidate branch below caches *every* same-origin
+     non-document GET it sees, so the first load would `cache.put` 157 MB into
+     Cache Storage — 45x the entire app, on an origin quota that would then
+     evict the shell it exists to hold, and `keep` clones the response so the
+     140 MB turn table is briefly held twice.
+
+     Returning without calling `respondWith` hands the request back to the
+     browser untouched. That also keeps `play.html`'s streaming reader reading
+     from the network directly rather than through a worker that would buffer
+     the whole body before the first chunk arrived, which is what makes the
+     progress bar move.
+
+     Matched on the filename rather than a substring of the URL: a path that
+     merely *contains* "hubot" is somebody else's file. */
+  if (/^hubot\.(bp|flop\.abs|turn\.abs)$/.test(url.pathname.split('/').pop())) return;
 
   /* Writes are keyed by **path without the query**, because reads use
      `ignoreSearch: true`. They disagreed: a request carrying `?v=1` was stored

@@ -1,0 +1,5 @@
+# The heads-up bot tables: 157 MB of local-testing data, symlinked in by
+# hand. Never publishable and never committable — see play.html.
+hubot.bp
+hubot.flop.abs
+hubot.turn.abs

@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#0a0705">
+<meta name="theme-color" content="#0a0604">
 <title>Preflop Trainer</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="mobile-web-app-capable" content="yes">
@@ -28,21 +28,21 @@
      actions by aggression the way a reader already expects, and it is
      legible to a red-green colourblind player in a way that the red /
      green / blue it replaced was not. */
-  --felt1:#3d2a13; --felt2:#1e1409; --felt3:#0c0805;
-  --rail:#1c1509; --rail2:#2a2010;
-  --bg:#0a0705; --panel:#191209; --panel2:#231a0f; --line:#3d2e1b;
-  --txt:#ffe0b0; --dim:#c2934e; --faint:#927348;
-  --amber:#ffb224; --amber-ink:#1a1003; --needle:#ff6127; --needle-ink:#1c0900;
-  --glow:rgba(255,178,36,.4); --cool:rgba(64,180,200,.055);
+  --felt1:#3a1f10; --felt2:#1c1108; --felt3:#0c0805;
+  --rail:#1a1108; --rail2:#2a2010;
+  --bg:#0a0604; --panel:#1a1008; --panel2:#25170d; --line:#3f2a17;
+  --txt:#ffc99a; --dim:#c2934e; --faint:#875a41;
+  --amber:#eb741c; --amber-ink:#1a1003; --needle:#c33a26; --needle-ink:#ffeee6;
+  --glow:rgba(235,116,28,.4); --cool:rgba(64,180,200,.055);
   /* Card stock is white shifted 16% toward the amber illuminant, so it reads
      as white in a room lit by this interface rather than as the one cold patch
      on screen. Suits are the standard four-colour deck, warm-shifted; clubs sit
      well below hearts in lightness because red/green is the pair colour-blind
      viewers cannot separate by hue. See play.html for the full reasoning. */
-  --card:#fff3dc; --card2:#f7e6c9; --card-back:#f0dcb8; --card-back2:#d6bd92;
+  --card:#fbe0cd; --card2:#f9d3b6; --card-back:#f0d4a9; --card-back2:#d6b283;
   --card-blk:#221b12; --card-red:#c8321e; --card-blue:#6450bd; --card-green:#0f6640;
-  --raise:#ff6127; --call:#ffb224; --fold:#4a3922;
-  --gold:#ffb224; --good:#ffcf6a; --bad:#ff6127; --warn:#ffb224;
+  --raise:#f5301f; --call:#eb741c; --fold:#4a3922;
+  --gold:#eb741c; --good:#ffcf6a; --bad:#f5301f; --warn:#eb741c;
   --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,"Roboto Mono",monospace;
   --safeT:env(safe-area-inset-top); --safeB:env(safe-area-inset-bottom);
 }
@@ -67,7 +67,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:199;
   background:radial-gradient(125% 78% at 50% 34%,transparent 42%,rgba(0,0,0,.5) 100%)}
 html,body{margin:0;height:100%;color:var(--txt);
   background:
-    radial-gradient(85% 40% at 50% 0%, rgba(255,178,36,.06), transparent 70%),
+    radial-gradient(85% 40% at 50% 0%, rgba(235,116,28,.06), transparent 70%),
     radial-gradient(70% 50% at 6% 100%, var(--cool), transparent 70%),
     radial-gradient(70% 50% at 94% 92%, var(--cool), transparent 70%),
     var(--bg);
@@ -125,25 +125,25 @@ html,body{margin:0;height:100%;color:var(--txt);
 /* Same inset and rail width as play.html, so the felt is pixel-identical
    between the two modes rather than merely similar. */
 #table{position:absolute;inset:8px;border-radius:48% / 46%;
-  background:radial-gradient(ellipse 60% 44% at 50% 30%,rgba(255,178,36,.11),transparent 72%),
+  background:radial-gradient(ellipse 60% 44% at 50% 30%,rgba(235,116,28,.11),transparent 72%),
              radial-gradient(ellipse at 50% 40%,var(--felt1),var(--felt2) 58%,var(--felt3) 100%);
   border:calc(11px * var(--u)) solid var(--rail);
   box-shadow:0 0 0 1px #000, inset 0 0 60px rgba(0,0,0,.8),
-             inset 0 2px 0 rgba(255,178,36,.09), 0 16px 34px rgba(0,0,0,.65),
+             inset 0 2px 0 rgba(235,116,28,.09), 0 16px 34px rgba(0,0,0,.65),
              0 0 60px -22px var(--glow);}
 /* decorative only — must not swallow taps meant for the seats underneath */
 /* the rim light — the cue that says "lit instrument" rather than "brown" */
 #table::after{content:"";position:absolute;inset:5px;border-radius:47%/45%;
-  border:1px solid rgba(255,178,36,.3);
+  border:1px solid rgba(235,116,28,.3);
   box-shadow:0 0 26px -7px var(--glow) inset,0 0 15px -6px var(--glow);
   pointer-events:none}
 #feltLabel{pointer-events:none;position:absolute;left:50%;top:33%;transform:translate(-50%,-50%);
-  color:rgba(255,178,36,.17);font-weight:800;font-size:min(6vw,30px);letter-spacing:5px}
+  color:rgba(235,116,28,.17);font-weight:800;font-size:min(6vw,30px);letter-spacing:5px}
 
 /* center: pot + story */
 #center{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);
   text-align:center;width:54%;max-width:230px}
-#pot{display:inline-block;background:rgba(0,0,0,.55);border:1px solid rgba(255,178,36,.34);
+#pot{display:inline-block;background:rgba(0,0,0,.55);border:1px solid rgba(235,116,28,.34);
   border-radius:999px;padding:3px 13px;font-size:16px;font-weight:700;color:var(--amber);
   font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.3px;
   text-shadow:0 0 14px var(--glow);box-shadow:0 0 22px -8px var(--glow)}
@@ -277,8 +277,8 @@ html,body{margin:0;height:100%;color:var(--txt);
   transition:opacity .2s;z-index:6;cursor:pointer}
 .seat .pod{transition:transform .1s}
 .seat:active .pod{transform:scale(.95)}
-.seat .pod{background:linear-gradient(#2d2214,#181009);border:1px solid #584223;
-  box-shadow:0 4px 12px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,178,36,.07);
+.seat .pod{background:linear-gradient(#2d2214,#181009);border:1px solid #5a3c1e;
+  box-shadow:0 4px 12px rgba(0,0,0,.6),inset 0 1px 0 rgba(235,116,28,.07);
   border-radius:11px;padding:4px 2px 3px;position:relative}
 .seat.hero .pod{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold)}
 .seat.acting .pod{border-color:var(--amber);
@@ -293,7 +293,7 @@ html,body{margin:0;height:100%;color:var(--txt);
   box-shadow:0 1px 2px rgba(0,0,0,.4);line-height:1}
 .seat.folded .cards{visibility:hidden}
 .bet{position:absolute;font-size:12px;font-weight:700;color:var(--amber);
-  background:rgba(0,0,0,.7);border:1px solid rgba(255,178,36,.3);
+  background:rgba(0,0,0,.7);border:1px solid rgba(235,116,28,.3);
   font-family:var(--mono);font-variant-numeric:tabular-nums;
   box-shadow:0 0 16px -6px var(--glow);padding:1px 7px;border-radius:999px;white-space:nowrap;
   left:50%;transform:translateX(-50%);top:100%;margin-top:3px}
@@ -321,7 +321,7 @@ html,body{margin:0;height:100%;color:var(--txt);
 .bigcard .r{font-size:32px}.bigcard .s{font-size:23px}
 
 /* ---- action bar ---- */
-#bar{padding:8px 12px 10px;background:linear-gradient(#130e08,var(--bg))}
+#bar{padding:8px 12px 10px;background:linear-gradient(#140d07,var(--bg))}
 #feedback{min-height:34px;text-align:center;font-size:16px;font-weight:600;
   margin-bottom:6px;line-height:1.25}
 #feedback .sub{display:block;font-size:14px;font-weight:500;color:var(--dim);margin-top:2px}
@@ -340,11 +340,11 @@ html,body{margin:0;height:100%;color:var(--txt);
 .abtn:disabled{opacity:.32}
 /* fold is unlit, call is lit, raise is the needle — the same three
    intensities the range grid and play.html use. */
-.abtn.fold{background:transparent;border-color:#584223;color:var(--faint)}
+.abtn.fold{background:transparent;border-color:#5a3c1e;color:var(--faint)}
 .abtn.call{background:var(--amber);color:var(--amber-ink);border-color:var(--amber);
   box-shadow:0 0 26px -7px var(--glow)}
 .abtn.raise{background:var(--needle);color:var(--needle-ink);border-color:var(--needle);
-  box-shadow:0 0 26px -7px rgba(255,97,39,.45)}
+  box-shadow:0 0 26px -7px rgba(195,58,38,.4)}
 .abtn small{display:block;font-size:12px;font-weight:600;opacity:.85;margin-top:1px}
 #nextBtn{width:100%;border:1px solid var(--amber);border-radius:13px;padding:15px;font-size:20px;
   font-weight:800;color:var(--amber-ink);background:var(--amber);min-height:56px;
@@ -414,9 +414,9 @@ html,body{margin:0;height:100%;color:var(--txt);
   background:
     linear-gradient(var(--bg) 30%, transparent) top / 100% 40px no-repeat local,
     linear-gradient(transparent, var(--bg) 72%) bottom / 100% 40px no-repeat local,
-    radial-gradient(farthest-side at 50% 0, rgba(255,178,36,.28), transparent)
+    radial-gradient(farthest-side at 50% 0, rgba(235,116,28,.28), transparent)
       top / 100% 15px no-repeat scroll,
-    radial-gradient(farthest-side at 50% 100%, rgba(255,178,36,.28), transparent)
+    radial-gradient(farthest-side at 50% 100%, rgba(235,116,28,.28), transparent)
       bottom / 100% 15px no-repeat scroll;
   scrollbar-width:thin;scrollbar-color:var(--amber-faint) transparent}
 .settingsScroll::-webkit-scrollbar{width:8px}
@@ -9998,7 +9998,7 @@ const ACT_COL = {raise:0,call:1,fold:2};
 /* Must stay in step with --raise / --call / --fold in the stylesheet: the
    grid mixes these three by weight, so an anchor that disagrees with the
    legend produces cells in a colour the legend never explains. */
-const COL_RGB = [[255,97,39],[255,178,36],[74,57,34]]; // raise/call/fold
+const COL_RGB = [[195,58,38],[235,116,28],[74,57,34]]; // raise/call/fold
 const SCENARIOS = [
   {id:"rfi",     name:"RFI (open)"},
   {id:"vs_limp", name:"vs Limp (ISO)"},
@@ -10086,6 +10086,13 @@ function save(){ localStorage.setItem(LS,JSON.stringify(S)); }
 
 /* ---------- helpers ---------- */
 const $=id=>document.getElementById(id);
+/* A loaded chart file is data from outside this page, and two of its strings
+   reach `innerHTML`: the set name (`meta.source`, via the Chart Set list) and
+   each chart's `raise_label` (via the action buttons). The settings copy
+   invites sharing these files, so "it's your own file" is not a boundary —
+   escape at the sink, as play.html already does for filenames. */
+const esc=s=>String(s).replace(/[&<>"']/g,c=>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const rnd=n=>Math.floor(Math.random()*n);
 const pick=a=>a[rnd(a.length)];
 function inPlaySeats(){ return SEATS.slice(SEATS.length - S.size); }   // last n seats
@@ -11498,7 +11505,8 @@ function buildButtons(node){
     : Math.round((maxCommitted()-(H.committed[H.hero]||0))*10)/10;
   specs.forEach(sp=>{
     const b=document.createElement("button"); b.className="abtn "+sp.cls;
-    b.innerHTML=sp.l+(sp.cls==="call"?`<small>${fmt(toCall)} bb</small>`:"");
+    // `sp.l` carries the file's own `raise_label` on the raise button — data.
+    b.innerHTML=esc(sp.l)+(sp.cls==="call"?`<small>${fmt(toCall)} bb</small>`:"");
     b.onclick=()=>answerHero(sp.col); wrap.appendChild(b);
   });
 }
@@ -11954,7 +11962,7 @@ function renderChartList(){
     const row=document.createElement("div"); row.className="csrow"+(on?" on":"");
     const dot=document.createElement("div"); dot.className="csr-dot"; dot.textContent=on?"●":"○";
     const lab=document.createElement("div"); lab.className="csr-lab";
-    lab.innerHTML=`${r.label}<span class="csr-sub">${r.nc} charts · ${r.stack}bb${r.def?" · built-in":""}</span>`;
+    lab.innerHTML=`${esc(r.label)}<span class="csr-sub">${r.nc} charts · ${esc(r.stack)}bb${r.def?" · built-in":""}</span>`;
     dot.onclick=lab.onclick=()=>activateSet(r.name);
     row.appendChild(dot); row.appendChild(lab);
     const ex=document.createElement("button"); ex.className="csr-edit"; ex.textContent="⬇"; ex.title="Export / share (.json)";

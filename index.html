@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0a0705">
+<meta name="theme-color" content="#0a0604">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Play">
@@ -104,22 +104,22 @@
  * ==================================================================== */
 :root{
   /* ground — warm near-black, never pure #000 */
-  --bg:#0a0705;
-  --bg2:#130e08;
-  --panel:#191209;
-  --panel2:#231a0f;
-  --line:#3d2e1b;
-  --line2:#584223;
+  --bg:#0a0604;
+  --bg2:#140d07;
+  --panel:#1a1008;
+  --panel2:#25170d;
+  --line:#3f2a17;
+  --line2:#5a3c1e;
 
   /* the illuminant, hot to cold */
-  --amber:#ffb224;        /* the lamp: primary actions, key numbers */
-  --amber-hi:#ffe0b0;     /* filament: headline text */
-  --amber-mid:#eda93f;    /* lit, secondary */
-  --amber-dim:#b48949;    /* backlit label */
-  --amber-faint:#927348;  /* barely lit: hints, disabled */
+  --amber:#eb741c;        /* the lamp: primary actions, key numbers */
+  --amber-hi:#ffc99a;     /* filament: headline text */
+  --amber-mid:#dd7a33;    /* lit, secondary */
+  --amber-dim:#a56640;    /* backlit label */
+  --amber-faint:#875a41;  /* barely lit: hints, disabled */
   --amber-ink:#1a1003;    /* text ON amber */
-  --glow:rgba(255,178,36,.4);
-  --glow-soft:rgba(255,178,36,.14);
+  --glow:rgba(235,116,28,.4);
+  --glow-soft:rgba(235,116,28,.14);
 
   /* the needle */
   /* The unlit end of the action ramp. It was only ever written as a literal
@@ -129,15 +129,24 @@
      the ramp alongside `--needle` (raise) and `--amber` (call), and the grade
      bars and the range grid both draw from it. */
   --fold-bar:#4a3922;
-  /* The needle is red-orange, and it had drifted toward plain orange: at hue
-     16 deg it sat only ~23 deg from the amber lamp at 39 deg, which is not much
-     separation for the two colours that have to mean "raise" and "call" side
-     by side in a range grid. Pulled to ~11 deg — clearly red-orange, still not
-     red, and still bright enough to carry dark ink (5.7:1 against
-     `--needle-ink`). */
-  --needle:#ff4a22;
-  --needle-ink:#1c0900;
-  --needle-glow:rgba(255,74,34,.45);
+  /* The needle carries "raise", and it has to stay clear of the amber lamp
+     that carries "call" — the two sit adjacent in the range grid, so the hue
+     gap between them is load-bearing rather than decorative. The lamp has since
+     been pulled to ~25 deg, and the needle tracks it down to ~8 deg to keep
+     that gap around 17-20 deg.
+
+     **It is deliberately not a bright red.** At full chroma it read as a
+     warning rather than an action — the raise button is the most common thing
+     on the screen, not an alarm. Deepened to L .46 and desaturated to ~.67,
+     which reads as brick rather than neon.
+
+     That inverts the ink. Dark ink on this needle is 3.6:1, under the 4.5:1
+     an action label needs; warm near-white is 4.7:1. The light theme already
+     did exactly this — `#ad1408` on `#fffbf2` — so the two themes now agree
+     rather than one carrying an exception. */
+  --needle:#c33a26;
+  --needle-ink:#ffeee6;
+  --needle-glow:rgba(195,58,38,.4);
 
   /* the cool fill — shadows and edges only, never text */
   --cool:rgba(64,180,200,.055);
@@ -148,8 +157,8 @@
   --faint:var(--amber-faint);
 
   /* felt: a table lit from above by one warm lamp */
-  --felt1:#3d2a13; --felt2:#1e1409; --felt3:#0c0805;
-  --rail:#1c1509;
+  --felt1:#3a1f10; --felt2:#1c1108; --felt3:#0c0805;
+  --rail:#1a1108;
 
   /* ---- playing card stock ----
      ## Why the "white" of a card is not #ffffff
@@ -157,12 +166,12 @@
      lit only by this interface that white point sits on the amber, and a truly
      neutral patch dropped into it reads *cyan* — cooler than everything the eye
      has adapted to. So the stock is white shifted toward the illuminant: about
-     16% of the amber mixed in for the lit face, ~26% for the shaded half.
+     22% of the amber mixed in for the lit face, ~32% for the shaded half.
      Enough to belong to the scene, not enough to read as cream. */
-  --card:#fff3dc;         /* lit face  — white + 16% amber */
-  --card2:#f7e6c9;        /* shaded    — white + 26% amber */
-  --card-back:#f0dcb8;    /* face down — a white card back, not a dark hole */
-  --card-back2:#d6bd92;
+  --card:#fbe0cd;         /* lit face  — white + 16% amber */
+  --card2:#f9d3b6;        /* shaded    — white + 26% amber */
+  --card-back:#f0d4a9;    /* face down — a white card back, not a dark hole */
+  --card-back2:#d6b283;
   --card-blk:#221b12;     /* spades   L≈0.01 */
   --card-red:#c8321e;     /* hearts   L≈0.18 */
   --card-blue:#6450bd;    /* diamonds L≈0.12 — blue-violet, not blue */
@@ -170,7 +179,7 @@
 
   --safeT:env(safe-area-inset-top); --safeB:env(safe-area-inset-bottom);
   --r:13px;               /* corner radius, one value */
-  --hud:rgba(255,178,36,.55);
+  --hud:rgba(235,116,28,.55);
   --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,"Roboto Mono","DejaVu Sans Mono",monospace;
 }
 /* A daylight variant of the same instrument: burnt amber ink on warm
@@ -178,17 +187,17 @@
 :root[data-theme="light"]{
   --bg:#f4ecdd; --bg2:#ebe0ca; --panel:#fffbf2; --panel2:#f6ebd4;
   --line:#d9c8a6; --line2:#bfa87e;
-  --amber:#95500a; --amber-hi:#2f1d08; --amber-mid:#7d450a;
-  --amber-dim:#6a5024; --amber-faint:#8f7a58; --amber-ink:#fffbf2;
-  --glow:rgba(149,80,10,.2); --glow-soft:rgba(149,80,10,.08);
-  --needle:#b62408; --needle-ink:#fffbf2; --needle-glow:rgba(182,36,8,.22);
+  --amber:#8f3608; --amber-hi:#2f1d08; --amber-mid:#782e08;
+  --amber-dim:#67401f; --amber-faint:#8a6a52; --amber-ink:#fffbf2;
+  --glow:rgba(143,54,8,.2); --glow-soft:rgba(143,54,8,.08);
+  --needle:#ad1408; --needle-ink:#fffbf2; --needle-glow:rgba(173,20,8,.22);
   --fold-bar:#ddcaa6;     /* unlit, but on paper: the light theme's "off" */
   --cool:rgba(40,90,110,.05);
   --felt1:#cdae7d; --felt2:#b0916a; --felt3:#8a7050;
   --rail:#6a5539;
   --card:#fffdf7; --card2:#f3ecdd; --card-back:#efe6d6; --card-back2:#dccfb8;
   --card-blk:#241a0c; --card-red:#bd3208; --card-blue:#4f3da3; --card-green:#0d5c39;
-  --hud:rgba(149,80,10,.5);
+  --hud:rgba(143,54,8,.5);
 }
 
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -207,7 +216,7 @@ body{
      Everything else falls to black, which is what makes it read as "lit"
      rather than merely "brown". */
   background:
-    radial-gradient(85% 42% at 50% -2%, rgba(255,178,36,.07), transparent 70%),
+    radial-gradient(85% 42% at 50% -2%, rgba(235,116,28,.07), transparent 70%),
     radial-gradient(70% 50% at 6% 100%, var(--cool), transparent 70%),
     radial-gradient(70% 50% at 94% 90%, var(--cool), transparent 70%),
     radial-gradient(130% 95% at 50% 6%, var(--bg2), var(--bg) 56%),
@@ -273,7 +282,7 @@ body::before{
 #top{display:flex;align-items:center;gap:8px}
 .swap{display:flex;background:var(--panel);border:1px solid var(--line);
   border-radius:999px;padding:3px;gap:2px;flex:1;min-width:0;
-  box-shadow:inset 0 1px 0 rgba(255,178,36,.06)}
+  box-shadow:inset 0 1px 0 rgba(235,116,28,.06)}
 .swap button{flex:1;text-align:center;border:0;cursor:pointer;background:transparent;
   color:var(--dim);font:inherit;
   font-size:12.5px;font-weight:700;letter-spacing:.6px;padding:8px 6px;
@@ -295,10 +304,14 @@ body::before{
 .stat{flex:1;background:linear-gradient(var(--panel),var(--bg2));
   border:1px solid var(--line);border-radius:var(--r);
   padding:7px 4px 6px;text-align:center;min-width:0;
-  box-shadow:inset 0 1px 0 rgba(255,178,36,.05)}
+  box-shadow:inset 0 1px 0 rgba(235,116,28,.05)}
 .stat b{display:block;font-size:16.5px;font-weight:700;line-height:1.15;
   color:var(--amber);text-shadow:0 0 15px var(--glow);letter-spacing:-.5px}
 .stat b.neg{color:var(--needle);text-shadow:0 0 15px var(--needle-glow)}
+/* A word, not a number. 16.5px fits "0" and "-12.4"; it does not fit
+   "Blueprint" in a quarter of a 375px phone, and the tile is the permanent
+   answer to "which bot am I playing" so it must not be truncated. */
+.stat b.sm{font-size:11px;letter-spacing:0;line-height:1.6}
 .stat span{font-size:8px;letter-spacing:1.3px;color:var(--faint);text-transform:uppercase;
   display:block;margin-top:3px;font-weight:700}
 
@@ -314,23 +327,23 @@ body::before{
   max-height:min(64vh, calc(590px * var(--u)))}
 #table{position:absolute;inset:8px;border-radius:48% / 46%;
   background:
-    radial-gradient(ellipse 60% 44% at 50% 28%, rgba(255,178,36,.115), transparent 72%),
+    radial-gradient(ellipse 60% 44% at 50% 28%, rgba(235,116,28,.115), transparent 72%),
     radial-gradient(ellipse 80% 60% at 50% 108%, var(--cool), transparent 65%),
     radial-gradient(ellipse at 50% 36%,var(--felt1),var(--felt2) 55%,var(--felt3) 100%);
   border:calc(11px * var(--u)) solid var(--rail);
   box-shadow:
     0 0 0 1px #000,
     inset 0 0 74px rgba(0,0,0,.82),
-    inset 0 2px 0 rgba(255,178,36,.1),
+    inset 0 2px 0 rgba(235,116,28,.1),
     0 20px 44px rgba(0,0,0,.7),
     0 0 70px -24px var(--glow)}
 /* the rim light — the single strongest cue that this is a lit instrument */
 #table::after{content:"";position:absolute;inset:3px;border-radius:47%/45%;
-  border:1px solid rgba(255,178,36,.32);
+  border:1px solid rgba(235,116,28,.32);
   box-shadow:0 0 28px -7px var(--glow) inset, 0 0 16px -6px var(--glow);
   pointer-events:none;transition:border-color .3s,box-shadow .3s}
 /* a new street: the rim flares for a beat, then settles */
-#table.sweep::after{border-color:rgba(255,178,36,.85);
+#table.sweep::after{border-color:rgba(235,116,28,.85);
   box-shadow:0 0 48px -6px var(--glow) inset, 0 0 36px -6px var(--glow);
   transition-duration:.1s}
 
@@ -338,7 +351,7 @@ body::before{
 #centre{position:absolute;left:50%;top:51%;transform:translate(-50%,-50%);
   text-align:center;width:78%;z-index:3}
 #pot{display:inline-flex;align-items:center;gap:6px;
-  background:rgba(0,0,0,.58);border:1px solid rgba(255,178,36,.36);
+  background:rgba(0,0,0,.58);border:1px solid rgba(235,116,28,.36);
   border-radius:999px;padding:3px 13px 3px 9px;font-size:13.5px;font-weight:700;
   color:var(--amber);white-space:nowrap;text-shadow:0 0 15px var(--glow);
   box-shadow:0 0 24px -8px var(--glow);letter-spacing:-.2px}
@@ -350,7 +363,7 @@ body::before{
    part of the pot readout, where it is always legible and never collides. */
 #pot .ps{font-size:9px;font-weight:800;letter-spacing:1.6px;color:var(--amber-mid);
   font-family:ui-sans-serif,system-ui,sans-serif;padding-right:8px;margin-right:1px;
-  border-right:1px solid rgba(255,178,36,.28)}
+  border-right:1px solid rgba(235,116,28,.28)}
 #board{display:flex;gap:4px;justify-content:center;margin-top:9px;min-height:58px;align-items:center}
 
 /* ==================================================================== *
@@ -460,23 +473,27 @@ body::before{
 .bcard .ix{font-size:8px}
 .bcard .r{font-size:23px}
 .bcard .s{font-size:15px;margin-top:1px}
-.bcard.hole{background:rgba(255,178,36,.028);box-shadow:none;
-  border:1px dashed rgba(255,178,36,.22)}
+.bcard.hole{background:rgba(235,116,28,.028);box-shadow:none;
+  border:1px dashed rgba(235,116,28,.22)}
 .bcard.hole::after{display:none}
-.hcard{width:54px;height:75px;border-radius:8px;
+.hcard{width:76px;height:105px;border-radius:10px;
   box-shadow:0 7px 18px rgba(0,0,0,.72),0 0 32px -8px var(--glow),
              inset 0 0 0 1px rgba(0,0,0,.09);
   animation:deal .34s cubic-bezier(.2,.9,.3,1.25)}
-.hcard .ix{font-size:11px;top:4px;left:5px}
-.hcard .r{font-size:33px}
-.hcard .s{font-size:21px;margin-top:2px}
+.hcard .ix{font-size:15px;top:6px;left:7px}
+.hcard .r{font-size:46px}
+.hcard .s{font-size:29px;margin-top:2px}
 
 @keyframes deal{from{transform:translateY(-12px) rotateX(48deg) scale(.76);opacity:0}
                 to{transform:none;opacity:1}}
 
 /* seats */
-.seat{position:absolute;transform:translate(-50%,-50%);width:88px;text-align:center;z-index:6;
-  transition:opacity .25s;cursor:pointer}
+/* 88px was sized for a six-handed felt and for a roster of short first names.
+   Heads-up there are two plates on an otherwise empty ellipse and the name is
+   "Blueprint", which clipped to "Blueprin…" — on the one label that says which
+   bot you are playing. Set per table size by `newTable`, beside `--tmin`. */
+.seat{position:absolute;transform:translate(-50%,-50%);width:var(--seatw,88px);
+  text-align:center;z-index:6;transition:opacity .25s;cursor:pointer}
 /* A seat is a control — it opens that position's range — so it has to look
    like one on hover and be reachable and visible from the keyboard. */
 @media(hover:hover){ .seat:hover .pod{border-color:var(--amber-dim)} }
@@ -484,7 +501,7 @@ body::before{
 .seat:focus-visible .pod{outline:2px solid var(--amber);outline-offset:2px}
 .pod{background:linear-gradient(#2d2214,#181009);border:1px solid var(--line2);
   border-radius:10px;padding:4px 3px 3px;position:relative;
-  box-shadow:0 4px 12px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,178,36,.07);
+  box-shadow:0 4px 12px rgba(0,0,0,.6),inset 0 1px 0 rgba(235,116,28,.07);
   transition:box-shadow .18s,border-color .18s}
 .seat.hero .pod{border-color:var(--amber-dim)}
 .seat.acting .pod{border-color:var(--amber);
@@ -555,7 +572,7 @@ body::before{
   box-shadow:0 0 0 1px rgba(0,0,0,.5),0 0 9px -1px var(--glow)}
 .bet{position:absolute;left:50%;transform:translateX(-50%);top:100%;margin-top:5px;
   font-size:10.5px;font-weight:700;color:var(--amber);background:rgba(0,0,0,.72);
-  border:1px solid rgba(255,178,36,.32);box-shadow:0 0 18px -6px var(--glow);
+  border:1px solid rgba(235,116,28,.32);box-shadow:0 0 18px -6px var(--glow);
   padding:1.5px 8px 1.5px 5px;border-radius:999px;white-space:nowrap;
   display:inline-flex;align-items:center;gap:4px}
 /* Only a chip that just moved animates — see `lastBet` in `frame()`. */
@@ -587,17 +604,27 @@ body::before{
   100%{transform:translate(-50%,-18px);opacity:0}}
 
 /* ---- your hand ---- */
-#hero{display:flex;flex-direction:column;align-items:center;gap:5px;min-height:96px;
+#hero{display:flex;flex-direction:column;align-items:center;gap:5px;min-height:128px;
   justify-content:center}
 #heroCards{display:flex;gap:8px}
 #heroRead{font-size:11px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;
   color:var(--amber-mid);min-height:15px;text-align:center}
 #heroRead b{color:var(--amber);font-weight:800;text-shadow:0 0 13px var(--glow)}
 #heroRead .sep{color:var(--faint);margin:0 7px;font-weight:400}
+/* The reveal. Deliberately quiet: it is a thing you reach for, not a thing the
+   page is offering you, and the whole point of the feature is that the table
+   stops volunteering how good your hand is. Sized like `#say .pill` so it reads
+   as part of the same row rather than as an action button. */
+#revealBtn{font:inherit;font-size:10px;letter-spacing:.8px;text-transform:uppercase;
+  font-weight:700;padding:4px 12px;border-radius:999px;cursor:pointer;
+  background:var(--panel2);border:1px solid var(--line);color:var(--dim)}
+#revealBtn:hover{color:var(--amber);border-color:var(--amber-dim)}
+#revealBtn:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+#revealBtn .k{font-family:var(--mono);opacity:.5;margin-left:5px;font-weight:600}
 
 /* ---- trainer mode: what the flop is worth ---- */
 #equity{background:linear-gradient(var(--panel),var(--bg2));border:1px solid var(--line);
-  border-radius:var(--r);padding:10px 13px;box-shadow:inset 0 1px 0 rgba(255,178,36,.05)}
+  border-radius:var(--r);padding:10px 13px;box-shadow:inset 0 1px 0 rgba(235,116,28,.05)}
 #equity .erow{display:flex;align-items:baseline;gap:10px;padding:3px 0}
 #equity .elab{flex:1;font-size:11.5px;letter-spacing:.6px;text-transform:uppercase;
   color:var(--dim);font-weight:700}
@@ -627,7 +654,7 @@ body::before{
 
 /* ---- trainer mode: the grade for your preflop decision ---- */
 #grade{background:linear-gradient(var(--panel),var(--bg2));border:1px solid var(--line);
-  border-radius:var(--r);padding:11px 13px;box-shadow:inset 0 1px 0 rgba(255,178,36,.05)}
+  border-radius:var(--r);padding:11px 13px;box-shadow:inset 0 1px 0 rgba(235,116,28,.05)}
 #grade .gh{display:flex;align-items:baseline;gap:9px;margin-bottom:9px}
 #grade .verdict{font-size:15px;font-weight:800;letter-spacing:.3px}
 #grade .verdict.ok{color:var(--amber);text-shadow:0 0 16px var(--glow)}
@@ -670,7 +697,7 @@ body::before{
    screen. Amber-forward, still light enough to read at a glance. */
 #say{text-align:center;font-size:14px;font-weight:650;min-height:26px;
   display:flex;align-items:center;justify-content:center;gap:7px;flex-wrap:wrap;
-  color:#ffc96e;text-shadow:0 0 18px rgba(255,178,36,.28)}
+  color:#ffc96e;text-shadow:0 0 18px rgba(235,116,28,.28)}
 #say .pill{font-size:10px;font-weight:700;padding:2.5px 9px;border-radius:999px;
   background:var(--panel2);border:1px solid var(--line);color:var(--dim);
   letter-spacing:.8px;text-transform:uppercase;font-variant-numeric:tabular-nums}
@@ -696,7 +723,7 @@ body::before{
 #pad{background:linear-gradient(var(--panel),var(--bg2));
   border:1px solid var(--line);border-radius:var(--r);padding:10px;
   position:sticky;bottom:calc(6px + var(--safeB));z-index:20;
-  box-shadow:inset 0 1px 0 rgba(255,178,36,.05),0 10px 30px -14px #000,
+  box-shadow:inset 0 1px 0 rgba(235,116,28,.05),0 10px 30px -14px #000,
              0 0 0 6px var(--bg)}
 #btns{display:flex;gap:7px}
 #btns button{flex:1;padding:15px 6px;border-radius:10px;border:1px solid var(--line2);
@@ -741,11 +768,11 @@ input[type=range]{-webkit-appearance:none;appearance:none;flex:1;min-width:0;
    every value. */
 input[type=range]::-webkit-slider-runnable-track{height:8px;border-radius:999px;
   background:linear-gradient(90deg,var(--amber) var(--pct,0%),
-             rgba(255,178,36,.17) var(--pct,0%));
-  border:1px solid rgba(255,178,36,.32);
+             rgba(235,116,28,.17) var(--pct,0%));
+  border:1px solid rgba(235,116,28,.32);
   box-shadow:inset 0 1px 2px rgba(0,0,0,.45)}
 input[type=range]::-moz-range-track{height:8px;border-radius:999px;
-  background:rgba(255,178,36,.17);border:1px solid rgba(255,178,36,.32)}
+  background:rgba(235,116,28,.17);border:1px solid rgba(235,116,28,.32)}
 input[type=range]::-moz-range-progress{height:8px;border-radius:999px;background:var(--amber)}
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
   width:22px;height:22px;border-radius:50%;margin-top:-8px;
@@ -806,10 +833,16 @@ summary .m{color:var(--faint);font-weight:600;text-transform:none;letter-spacing
 /* The banner doubles as the failure line — see `fail()`. It has to read as an
    error there and as information otherwise. */
 #banner.err{border-color:var(--needle);color:var(--needle);
-  background:rgba(255,74,34,.07)}
-#banner{background:rgba(255,178,36,.09);border:1px solid var(--amber-dim);color:var(--amber);
+  background:rgba(195,58,38,.07)}
+#banner{background:rgba(235,116,28,.09);border:1px solid var(--amber-dim);color:var(--amber);
   border-radius:10px;padding:9px 12px;font-size:12px;text-align:center;font-weight:600;
   box-shadow:0 0 26px -10px var(--glow)}
+/* The bot loader's progress. `width` only — no transition, because the chunks
+   already arrive smoothly and an eased bar lags far enough behind a 140 MB
+   file to still read "half done" after it has finished. */
+#loadBar{height:4px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:6px}
+#loadBar i{display:block;height:100%;width:0;background:var(--amber);
+  box-shadow:0 0 10px var(--glow)}
 
 /* ---- settings sheet ---- */
 /* Bottom sheet on a phone, dialog on anything bigger.
@@ -832,9 +865,9 @@ summary .m{color:var(--faint);font-weight:600;text-transform:none;letter-spacing
   background:
     linear-gradient(var(--bg2) 30%, transparent) top / 100% 44px no-repeat local,
     linear-gradient(transparent, var(--bg2) 72%) bottom / 100% 44px no-repeat local,
-    radial-gradient(farthest-side at 50% 0, rgba(255,178,36,.3), transparent)
+    radial-gradient(farthest-side at 50% 0, rgba(235,116,28,.3), transparent)
       top / 100% 16px no-repeat scroll,
-    radial-gradient(farthest-side at 50% 100%, rgba(255,178,36,.3), transparent)
+    radial-gradient(farthest-side at 50% 100%, rgba(235,116,28,.3), transparent)
       bottom / 100% 16px no-repeat scroll,
     var(--bg2);
   width:100%;max-width:580px;
@@ -851,6 +884,13 @@ summary .m{color:var(--faint);font-weight:600;text-transform:none;letter-spacing
 .grp h3{font-size:8.5px;letter-spacing:1.8px;text-transform:uppercase;color:var(--faint);
   margin:0 0 9px;font-weight:700}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
+/* **`hidden` has to beat the `display` above.** The UA sheet's `[hidden]` is an
+   author-sheet loss, so `$("cShuffle").hidden = true` set the attribute, passed
+   its own test, and left the button on screen — "Shuffle the table" sitting
+   under a blueprint that has nothing to shuffle. Same shape as the existing
+   `#sheet[hidden]` and `#rsheet[hidden]` rules, and needed for the same reason:
+   any class that sets `display` silently disables `hidden`. */
+.chips[hidden]{display:none}
 .chips button{padding:10px 15px;border-radius:999px;border:1px solid var(--line2);
   background:transparent;color:var(--dim);font:inherit;font-size:12.5px;font-weight:700;
   cursor:pointer;transition:all .14s}
@@ -860,6 +900,10 @@ summary .m{color:var(--faint);font-weight:600;text-transform:none;letter-spacing
 .chips button small{opacity:.62;font-weight:600}
 .note{font-size:11px;color:var(--faint);margin:9px 0 0;line-height:1.65}
 .rowt{display:flex;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--line)}
+/* Same trap as `.chips[hidden]`, same fix: an author `display` beats the UA
+   sheet's `[hidden]`, so without this `rHubotCharts.hidden = true` would set
+   the attribute, pass its own test, and leave the switch on screen. */
+.rowt[hidden]{display:none}
 .rowt:first-of-type{border-top:0}
 .rowt .lab{flex:1;font-size:13px;font-weight:600;color:var(--txt)}
 .rowt .lab small{display:block;font-size:10.5px;color:var(--faint);font-weight:400;
@@ -908,13 +952,13 @@ summary .m{color:var(--faint);font-weight:600;text-transform:none;letter-spacing
 #rsheet .rsub b{color:var(--amber-mid);font-family:var(--mono)}
 /* Who you are looking at, and which node. Two rows of chips, same control as
    the settings sheet so there is one chip in this app. */
-#rwho,#rscen,#rvs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px;align-items:center}
-#rwho button,#rscen button,#rvs button{background:var(--panel2);color:var(--dim);
+#rwho,#rscen,#rvs,#rdepth{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px;align-items:center}
+#rwho button,#rscen button,#rvs button,#rdepth button{background:var(--panel2);color:var(--dim);
   border:1px solid var(--line2);border-radius:999px;padding:7px 12px;font:inherit;
   font-size:11.5px;font-weight:700;cursor:pointer}
-#rwho button.on,#rscen button.on,#rvs button.on{background:var(--amber);
+#rwho button.on,#rscen button.on,#rvs button.on,#rdepth button.on{background:var(--amber);
   color:var(--amber-ink);border-color:var(--amber)}
-#rvs .vlab{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--faint);
+#rvs .vlab,#rdepth .vlab{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--faint);
   font-weight:700;margin-right:2px}
 #rvs[hidden]{display:none}
 #rwho button.me{border-color:var(--amber-dim)}
@@ -967,7 +1011,7 @@ summary .m{color:var(--faint);font-weight:600;text-transform:none;letter-spacing
 /* The peek warning, in trainer mode only. */
 #rwarn{font-size:11px;color:var(--needle);margin:0 0 10px;line-height:1.55;
   border:1px solid var(--needle);border-radius:9px;padding:8px 10px;
-  background:rgba(255,97,39,.06)}
+  background:rgba(195,58,38,.06)}
 @media (min-width:700px){
   #rsheet{align-items:flex-start;padding:34px 16px}
   #rbox{border-radius:var(--r);border-bottom:1px solid var(--line);max-height:none}
@@ -997,10 +1041,10 @@ summary .m{color:var(--faint);font-weight:600;text-transform:none;letter-spacing
    your own two cards are what you actually need to see. */
 @media (max-height:740px){
   #tableWrap{min-height:200px}
-  .hcard{width:50px;height:70px}
-  .hcard .r{font-size:30px}
-  .hcard .s{font-size:19px}
-  #hero{min-height:86px;gap:5px}
+  .hcard{width:62px;height:86px}
+  .hcard .r{font-size:37px}
+  .hcard .s{font-size:24px}
+  #hero{min-height:102px;gap:5px}
   #btns button{padding:13px 6px}
   .foot{display:none}          /* the credits are the first thing to go */
 }
@@ -1020,12 +1064,37 @@ summary .m{color:var(--faint);font-weight:600;text-transform:none;letter-spacing
  * ==================================================================== */
 /* `--ucard` runs ahead of `--u`: the seat pods have slack that the rest of
    the layout does not, and the card back is the one element that gets better
-   the more pixels it has. */
-:root{--u:1;--us:1;--ucard:1}
-@media (min-width:700px)  and (min-height:720px){ :root{--u:1.15;--us:1.12;--ucard:1.25} }
-@media (min-width:900px)  and (min-height:860px){ :root{--u:1.3; --us:1.18;--ucard:1.5} }
-@media (min-width:1150px) and (min-height:1000px){ :root{--u:1.45;--us:1.22;--ucard:1.75} }
-@media (min-width:1500px) and (min-height:1200px){ :root{--u:1.6; --us:1.25;--ucard:2} }
+   the more pixels it has.
+
+   `--ub` does the same for the **board**, and harder. The five community cards
+   sit in the middle of the felt, which is the emptiest region on the page and
+   the last to run out of room — at the wide breakpoints the table was mostly
+   unused green with five small cards in it. It stays at 1 through the base
+   size, so nothing changes on a phone where the height is the binding
+   constraint; it only spends space that already exists. */
+:root{--u:1;--us:1;--ucard:1;--ub:1}
+@media (min-width:700px)  and (min-height:720px){ :root{--u:1.15;--us:1.12;--ucard:1.25;--ub:1.35} }
+@media (min-width:900px)  and (min-height:860px){ :root{--u:1.3; --us:1.18;--ucard:1.5; --ub:1.65} }
+@media (min-width:1150px) and (min-height:1000px){ :root{--u:1.45;--us:1.22;--ucard:1.75;--ub:1.95} }
+@media (min-width:1500px) and (min-height:1200px){ :root{--u:1.6; --us:1.25;--ucard:2;   --ub:2.25} }
+
+/* ---- desktop, where height is the limiting factor and width is not ----
+   The ladder above stopped at 1.6 and left 384px of dead space under the
+   footer on a 3840x1985 screen. These tiers step on **height alone** past a
+   single width gate, because that is the actual constraint: at 3840 wide there
+   is width to spare at any of these sizes, and it is the vertical stack —
+   tabs, tiles, felt, hand, action pad, log, footer — that runs out first.
+
+   **They stop at 2.05, and not because of overflow.** `#tableWrap` is
+   `flex:1 1 auto`, so it absorbs whatever the rest of the column does not use;
+   past ~2.0 every further step makes the chrome bigger by taking it off the
+   felt. Measured at 3840x2041: the table is 1083px at `--u:2.0`, 998 at 2.2 and
+   914 at 2.4, with zero overflow at all three. Bigger numbers keep "fitting"
+   and give you a smaller table, which is the opposite of the point. */
+@media (min-width:1400px) and (min-height:1250px){ :root{--u:1.75;--us:1.28;--ucard:2.2; --ub:2.45} }
+@media (min-width:1400px) and (min-height:1450px){ :root{--u:1.85;--us:1.30;--ucard:2.35;--ub:2.6} }
+@media (min-width:1400px) and (min-height:1650px){ :root{--u:1.95;--us:1.32;--ucard:2.5; --ub:2.75} }
+@media (min-width:1400px) and (min-height:1850px){ :root{--u:2.05;--us:1.34;--ucard:2.6; --ub:2.9} }
 
 .app{max-width:calc(580px * var(--u));gap:calc(9px * var(--u))}
 #sheetBox{max-width:calc(580px * var(--u))}
@@ -1043,22 +1112,22 @@ summary .m{color:var(--faint);font-weight:600;text-transform:none;letter-spacing
      calc(3px * var(--u)) calc(9px * var(--u))}
 #pot .ps{font-size:calc(9px * var(--u));padding-right:calc(8px * var(--u))}
 .disc{width:calc(9px * var(--u));height:calc(9px * var(--u))}
-#board{gap:calc(4px * var(--u));min-height:calc(58px * var(--u))}
+#board{gap:calc(4px * var(--ub));min-height:calc(58px * var(--ub))}
 
 /* cards */
-.bcard{width:calc(38px * var(--u));height:calc(53px * var(--u))}
-.bcard .ix{font-size:calc(8px * var(--u))}
-.bcard .r{font-size:calc(23px * var(--u))}
-.bcard .s{font-size:calc(15px * var(--u))}
-.hcard{width:calc(54px * var(--u));height:calc(75px * var(--u))}
-.hcard .ix{font-size:calc(11px * var(--u))}
-.hcard .r{font-size:calc(33px * var(--u))}
-.hcard .s{font-size:calc(21px * var(--u))}
+.bcard{width:calc(38px * var(--ub));height:calc(53px * var(--ub))}
+.bcard .ix{font-size:calc(8px * var(--ub))}
+.bcard .r{font-size:calc(23px * var(--ub))}
+.bcard .s{font-size:calc(15px * var(--ub))}
+.hcard{width:calc(76px * var(--u));height:calc(105px * var(--u))}
+.hcard .ix{font-size:calc(15px * var(--u))}
+.hcard .r{font-size:calc(46px * var(--u))}
+.hcard .s{font-size:calc(29px * var(--u))}
 #heroCards{gap:calc(8px * var(--u))}
-#hero{min-height:calc(96px * var(--u))}
+#hero{min-height:calc(128px * var(--u))}
 
 /* seats */
-.seat{width:calc(88px * var(--u))}
+.seat{width:calc(var(--seatw,88px) * var(--u))}
 .pos{font-size:calc(12.5px * var(--u))}
 .stk{font-size:calc(10.5px * var(--u))}
 .cards{height:calc(30px * var(--ucard)); gap:calc(3px * var(--ucard))}
@@ -1131,10 +1200,22 @@ summary .m{font-size:calc(11px * var(--u))}
     <div class="stat"><b id="sHands">0</b><span id="sHandsU">hands</span></div>
     <div class="stat"><b id="sNet">0</b><span id="sNetU">net bb</span></div>
     <div class="stat"><b id="sRate">–</b><span id="sRateU">bb / 100</span></div>
-    <div class="stat"><b id="sTable">6</b><span>handed</span></div>
+    <!-- **Who you are actually playing, not how many seats.** The table is
+         heads-up and cannot be anything else, so "2 handed" was a constant
+         occupying a quarter of the strip. Which bot is on the other side is
+         the fact that varies, and it is the one fact a session is worthless
+         without: judging this bot's strength while `BotAgent` is the one
+         playing would be a wrong answer with no symptom. Read from
+         `wasm_play_hubot_active()` — see `botLine()`. -->
+    <div class="stat"><b id="sBot" class="sm">…</b><span id="sBotU">opponent</span></div>
   </div>
 
   <div id="banner" role="status" aria-live="polite" hidden></div>
+  <!-- The heads-up bot's tables are 157 MB and take a few seconds off local
+       disk. `#banner` carries the words (it is a live region, so it is
+       announced); this carries the proportion, and is `aria-hidden` because a
+       bar that updates on every chunk would otherwise be read out continuously. -->
+  <div id="loadBar" hidden aria-hidden="true"><i></i></div>
 
   <div id="tableWrap" class="hud">
     <div id="table"></div>
@@ -1153,6 +1234,12 @@ summary .m{font-size:calc(11px * var(--u))}
   <div id="hero">
     <div id="heroCards"></div>
     <div id="heroRead"></div>
+    <!-- Its own row, not appended to `#heroRead`. It was inside it, and
+         `heroRead` early-returns empty when "Name my hand" is switched off —
+         so turning off the hand caption also removed the only control that
+         reveals the *equity*, which is a different switch entirely. `hidden`
+         rather than empty, so an unofferable reveal costs no flex gap. -->
+    <div id="revealRow" hidden></div>
   </div>
   <!-- The running commentary: whose move, the price, the result. It is the
      only place several of those are said at all, so it has to be announced.
@@ -1183,25 +1270,52 @@ summary .m{font-size:calc(11px * var(--u))}
 <div id="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="setTitle">
   <div id="sheetBox">
     <div class="sh"><h2 id="setTitle">Settings</h2><button class="iconbtn" id="setClose" aria-label="Close">✕</button></div>
-    <p class="note">Changing the table or the stacks starts a fresh session.</p>
+    <!-- Written by `buildSettings`, because it says something different in each
+         mode and a static sentence claiming "heads-up" was wrong in Train. -->
+    <p class="note" id="modeNote"></p>
 
-    <div class="grp"><h3>Table</h3><div class="chips" id="cTable"></div></div>
+    <!-- **The table-size control belongs to Train only.**
+         Play is heads-up and only heads-up: its bot is a heads-up blueprint
+         whose infoset keys have no way to represent a third player, and
+         `set_robo` refuses anything but two seats, so a chip that switched Play
+         to 6-max would silently drop you back onto `BotAgent` — the wrong-bot
+         failure this page is built to prevent. The preflop drill has no such
+         constraint and position is its entire subject, so it keeps the control.
+         Hidden rather than disabled: a greyed chip invites you to wonder what
+         would happen. -->
+    <div class="grp" id="gTable" hidden><h3>Table</h3>
+      <div class="chips" id="cTable"></div>
+      <p class="note">The drill deals this many seats. <b>Play</b> is always
+        heads-up — that is the bot, not a setting.</p>
+    </div>
     <div class="grp"><h3>Who you are playing</h3>
+      <p class="note" id="botNote"></p>
       <div id="cVillains"></div>
-      <div class="chips" style="margin-top:9px">
+      <div class="chips" id="cShuffle" style="margin-top:9px">
         <button id="shuffleBtn">Shuffle the table</button>
       </div>
-      <p class="note">A seat left on <b>Random</b> draws someone new each time you
+      <p class="note" id="villainNote">A seat left on <b>Random</b> draws someone new each time you
         shuffle or start a session. Pick a name and they keep that seat, including
         through a shuffle. Each name always plays its own settings — working out
         what those are is the exercise.</p>
+      <!-- Only meaningful while the blueprint is seated, so `buildVillains`
+           hides it otherwise. It lives here rather than under "Preflop ranges"
+           because it changes *who you are playing*, not which file is loaded. -->
+      <div class="rowt" id="rHubotCharts" hidden><div class="lab">Blueprint plays my ranges
+        <small>Its preflop comes from the loaded chart file instead of from
+          itself; postflop stays the blueprint. Turns itself on the first time
+          you load a file of your own.</small></div>
+        <div class="sw" id="tHubotCharts"></div></div>
+      <p class="note" id="hubotChartsNote" hidden></p>
     </div>
     <div class="grp"><h3>Starting stacks</h3><div class="chips" id="cDepth"></div></div>
     <div class="grp"><h3>Where you sit</h3><div class="chips" id="cSeat"></div>
       <p class="note" id="seatNote">Position is most of preflop and the ranges you
         are marked against are per-position, so <b>Rotate</b> moves you one seat
         every hand and deals you the whole table over time. Pick a position to
-        drill it. Applies to <b>both</b> Play and Train.</p>
+        drill it. The choice is remembered per mode: a seat that only exists at
+        the drill's table falls back to <b>Rotate</b> in heads-up Play, and comes
+        back when you switch.</p>
     </div>
     <div class="grp"><h3>Preflop ranges</h3>
       <p class="note" id="chartNow"></p>
@@ -1223,6 +1337,12 @@ summary .m{font-size:calc(11px * var(--u))}
     </div>
     <div class="grp"><h3>Theme</h3><div class="chips" id="cTheme"></div></div>
     <div class="grp"><h3>Help me learn</h3>
+      <!-- The reveal is a fact about the table, so it is stated where the two
+           switches it gates are, rather than left to be discovered. -->
+      <p class="note">Your hand and its equity start <b>hidden every hand</b> —
+        read the board yourself, then press <b>Show hand &amp; equity</b> under
+        your cards (or <b>H</b>) if you want them. These switches decide whether
+        they are available at all.</p>
       <div class="rowt"><div class="lab">Name my hand
         <small>Reads your two cards against the board. No advice — just what you have.</small></div>
         <div class="sw" id="tRead"></div></div>
@@ -1256,6 +1376,7 @@ summary .m{font-size:calc(11px * var(--u))}
     <div id="rwho"></div>
     <div id="rscen"></div>
     <div id="rvs" hidden></div>
+    <div id="rdepth" hidden></div>
     <div id="rgrid"></div>
     <div id="rkey"></div>
     <p id="rnone" hidden></p>
@@ -1270,22 +1391,70 @@ summary .m{font-size:calc(11px * var(--u))}
  * ==================================================================== */
 const WASM_URL = "preflop_wasm.wasm";
 
-/* Three wasm-bindgen imports we must satisfy. They are NOT ours and nothing
-   calls them: rs_poker -> rand -> getrandom/default, built with
+/* The wasm-bindgen imports we must satisfy. They are NOT ours and nothing calls
+   them: `rs_poker -> rand -> getrandom/default`, built with
    `--cfg getrandom_backend="wasm_js"`. Every RNG in the engine is explicitly
    seeded (the replay design requires it), so these are dead references the
-   linker could not drop. Instantiating with {} throws "expected 3 imports,
+   linker could not drop. Instantiating with `{}` throws "expected N imports,
    found 0" and the page dies before the first hand — a real failure this page
    hit. They throw rather than returning 0: a silent stub would hand the engine
    a predictable "random" number, surfacing as subtly bad play instead of an
-   error. Verified unreachable over hundreds of hands. */
-const IMPORTS = {
-  __wbindgen_placeholder__:{ __wbindgen_describe:()=>{throw new Error("__wbindgen_describe called")} },
-  __wbindgen_externref_xform__:{
-    __wbindgen_externref_table_set_null:()=>{throw new Error("externref_table_set_null called")},
-    __wbindgen_externref_table_grow:()=>{throw new Error("externref_table_grow called")},
-  },
-};
+   error.
+
+   **Derived from the module, not hard-coded.** This was a literal object naming
+   three imports, and it was correct for exactly as long as the dependency graph
+   was. Adding `robobot` took the count to five — a second placeholder entry and
+   `__wbg_getRandomValues_3f44b700395062e5`, whose name carries a wasm-bindgen
+   hash that changes whenever the toolchain does — and the page died on
+   instantiation with the engine sitting there perfectly good. A list that has
+   to be maintained by hand, in a different file from the thing that determines
+   it, will be wrong again; asking the module what it wants cannot be.
+
+   Only function imports are stubbed. A memory, table or global import needs a
+   real value and there is no honest guess, so instantiation is left to fail
+   with wasm's own message rather than being papered over.
+
+   **`getRandomValues` is the one that is implemented, not stubbed**, and it is
+   not dead: `robobot::RoboBot::replay` builds a shadow `robopoker::Game` and
+   deals it hole cards through `deuce::Deck::hole()`, which reaches
+   `rand::thread_rng()`. The throwing stub caught it on the very first bot
+   decision, with the whole call chain in the stack trace. Real entropy is the
+   honest answer — `getrandom_backend="wasm_js"` is asking for
+   `crypto.getRandomValues` and that is exactly what wasm-bindgen's own glue
+   would supply — but see `hostRandomCalls`: it means one RNG in the engine is
+   NOT seeded, so `RoboBot`'s decisions are not reproducible across replays of
+   the same hand. That is a Rust-side fault, and the count is surfaced rather
+   than hidden so it cannot be forgotten. */
+let hostRandomCalls = 0;
+function deadImports(mod){
+  const out = {};
+  for(const {module, name, kind} of WebAssembly.Module.imports(mod)){
+    if(kind !== "function") continue;
+    const put = fn => (out[module] || (out[module] = {}))[name] = fn;
+    /* Matched on the substring, not the full name: wasm-bindgen suffixes it
+       with a hash of the signature (`..._3f44b700395062e5`) that changes with
+       the toolchain, and pinning the hash would break the page on a rebuild
+       in exactly the silent way this whole function exists to prevent. */
+    if(name.includes("getRandomValues")){
+      put((ptr, len) => {
+        hostRandomCalls++;
+        // A fresh view every call: growing wasm memory detaches the old one,
+        // and 157 MB of bot tables arriving mid-session grows it a lot.
+        crypto.getRandomValues(new Uint8Array(W.memory.buffer, ptr, len));
+      });
+      continue;
+    }
+    put(() => {
+      // Loud on the way past: the throw unwinds through a wasm call and can be
+      // caught somewhere unhelpful, but this line always lands.
+      console.error("wasm import "+module+"."+name+" was called — it is a dead "+
+                    "reference and has no implementation. Something now needs "+
+                    "unseeded randomness or JS interop.");
+      throw new Error("wasm import "+module+"."+name+" was called");
+    });
+  }
+  return out;
+}
 let W=null, PTR=0, CAP=8192, hasProfiles=false, hasCharts=false, hasHero=false;
 const enc=new TextEncoder();
 let chartsJson=null, chartEntries=0, chartName="";
@@ -1325,6 +1494,11 @@ const paint=()=>new Promise(r=>{
    A failure here is **not fatal**. Without charts the bots fall back to the
    engine's chartless pricer and trainer mode says so rather than grading you
    against nothing. */
+/* The name `chartName` takes when nothing was loaded by hand. It decides
+   whether the blueprint is asked to play the charts — see `applyHubotCharts`
+   — so it is a constant rather than a string literal repeated in three
+   places, one of which would eventually be spelt differently. */
+const BUILTIN_CHARTS="the built-in set";
 const CHART_KEY="play.charts", CHART_NAME_KEY="play.charts.name";
 async function loadCharts(){
   if(!hasCharts) return;
@@ -1343,7 +1517,7 @@ async function loadCharts(){
     const r = await fetch("charts.json");
     if(!r.ok) throw new Error("charts.json " + r.status);
     chartsJson = await r.text();
-    chartName = "the built-in set";
+    chartName = BUILTIN_CHARTS;
   }catch(e){ console.warn("no preflop charts:", e.message); return; }
   // Fetch only. Handing them to the engine needs a session to hand them *to*,
   // and there is none until `wasm_play_new` — an earlier version pushed them
@@ -1418,6 +1592,297 @@ function saveCharts(text,name){
   }catch(e){ return false; }
 }
 
+/* ==================================================================== *
+ * the heads-up bot
+ *
+ * `preflop-wasm` can play this table with `robobot::RoboBot` — the robopoker
+ * blueprint — instead of `core`'s `BotAgent`, if it is handed three tables:
+ * the packed blueprint and the flop and turn k-means assignments. The k-means
+ * indices *are* the blueprint's keys, so they are not an optimisation that
+ * could be skipped: without them every lookup misses and the bot plays a
+ * strategy nobody measured.
+ *
+ * **157 MB, so this is a local-testing path and not a shipped feature.** It is
+ * 45x the whole app; `sw.js` must not precache it (`cache.addAll` is atomic —
+ * see the comment there) and a phone on mobile data must never be asked for
+ * it. Shipping needs the table format to shrink first. Everything below is
+ * therefore written to make *absence* the ordinary case: the three files are
+ * usually not on the server, the fetch 404s, and play mode keeps `BotAgent`.
+ *
+ * **Which bot is playing is read from the engine, never inferred from the
+ * fetch.** `wasm_play_load_hubot` refuses a table that is not heads-up and
+ * refuses a truncated table, so "the bytes arrived" and "the blueprint is
+ * playing" are different facts. A page that showed the first while the second
+ * was false would make every judgement about this bot's strength worthless,
+ * which is the single worst outcome this file can produce.
+ * ==================================================================== */
+const HUBOT_URLS = ["hubot.bp","hubot.flop.abs","hubot.turn.abs"];
+const mb=n=>(n/1048576).toFixed(n<10485760?1:0)+" MB";
+let hasHubot=false;
+/* The three `wasm_alloc`'d buffers, or null. **Allocated once for the life of
+   the page**, like `CPTR`: `wasm_alloc` leaks by construction (`lib.rs:80`'s
+   `wasm_dealloc` notwithstanding — the engine holds no borrow, but re-fetching
+   157 MB to rebuild what we already have is the wrong trade). */
+let hubotBuf=null;
+/* What actually happened, for the label. Never "the fetch resolved". */
+let hubotState="off";     // off | loading | absent | ready | refused
+let hubotWhy="";
+let hubotActive=false;    // mirrors wasm_play_hubot_active(), refreshed per session
+let hubotCharts=false;    // mirrors wasm_play_hubot_charts_active(); see applyHubotCharts
+let hasHubotCharts=false;
+let hubotMs=0;            // last install (parse) time, ms
+
+/* Stream one file straight into wasm linear memory.
+   **Streamed rather than `arrayBuffer()`d.** The turn table is 140 MB; holding
+   a JS copy while wasm holds its own and Rust then parses a third puts three
+   simultaneous copies on the heap for the largest of the three files. Reading
+   in chunks keeps it to the one that has to exist. It is also the only way to
+   report progress, which a several-second load needs. */
+async function fetchIntoWasm(url, onBytes){
+  const r = await fetch(url, {credentials:"same-origin"});
+  if(!r.ok) throw new Error(url+" → HTTP "+r.status);
+  const len = Number(r.headers.get("content-length")||0);
+  // No length, or no streaming body: fall back to one buffer in JS. Correct but
+  // memory-hungry, so it is the fallback rather than the path.
+  if(!len || !r.body){
+    const ab = await r.arrayBuffer();
+    const p = W.wasm_alloc(ab.byteLength);
+    if(!p) throw new Error("wasm_alloc("+ab.byteLength+") returned null");
+    new Uint8Array(W.memory.buffer, p, ab.byteLength).set(new Uint8Array(ab));
+    onBytes(ab.byteLength);
+    return {ptr:p, len:ab.byteLength};
+  }
+  const ptr = W.wasm_alloc(len);
+  if(!ptr) throw new Error("wasm_alloc("+len+") returned null");
+  const reader = r.body.getReader();
+  let off = 0;
+  for(;;){
+    const {done, value} = await reader.read();
+    if(done) break;
+    // A server that sends more than it declared would otherwise write past the
+    // allocation and corrupt whatever wasm put after it — a wrong answer with
+    // no crash, which is exactly this project's documented failure shape.
+    if(off + value.length > len) throw new Error(url+" sent more than its Content-Length");
+    // Rebuilt every chunk on purpose: growing wasm memory detaches every view
+    // onto the old buffer, and `await` gives other code the chance to grow it.
+    new Uint8Array(W.memory.buffer, ptr, len).set(value, off);
+    off += value.length;
+    onBytes(value.length);
+  }
+  // The engine length-checks too, but it can only see a short *table*; a short
+  // *transfer* that still parses would give a bot that misses lookups and
+  // silently falls back mid-hand. Catch it where the byte count is known.
+  if(off !== len) throw new Error(url+" stopped at "+off+" of "+len+" bytes");
+  return {ptr, len};
+}
+
+/* Fetch the three tables, once, before the first session exists.
+   Failure is expected and is not an error: the files are gitignored and are
+   normally simply not there. */
+async function loadHubot(){
+  if(!hasHubot || hubotBuf) return;
+  hubotState="loading";
+  const t0 = performance.now();
+  const bar=$("loadBar"), fill=$("loadBar").firstElementChild, b=$("banner");
+  /* Sizes come from the HEAD responses rather than being hard-coded: a
+     hard-coded total that disagreed with the files on disk would show a bar
+     that finishes at 60% or runs past the end. */
+  let total=0, got=0, sizes=[];
+  try{
+    for(const u of HUBOT_URLS){
+      const h = await fetch(u, {method:"HEAD", credentials:"same-origin"});
+      if(!h.ok) throw new Error(u+" → HTTP "+h.status);
+      const n = Number(h.headers.get("content-length")||0);
+      sizes.push(n); total += n;
+    }
+  }catch(e){
+    /* **A 404 is not a failure, it is a build without the tables.**
+       The three files are 157 MB and are deliberately not published — the
+       GitHub Pages build ships without them and play mode falls back to
+       `core::policy::decide`. Reporting that as "the heads-up bot did not
+       load", in red, on every visit, describes a broken site to someone
+       looking at a working one.
+
+       Anything that is *not* a 404 stays a failure and keeps the loud
+       message: a 500, a CORS rejection, a truncated body or a network drop
+       all mean the tables were meant to be here and something went wrong,
+       and that is worth shouting about. The distinction is the status code,
+       so it is drawn where the status code is still in hand. */
+    hubotState = /→ HTTP 404$/.test(e.message) ? "unshipped" : "absent";
+    hubotWhy   = hubotState === "absent" ? e.message : "";
+    return;
+  }
+  b.textContent="Loading the heads-up bot — "+mb(total)+"…";
+  b.className=""; b.hidden=false;
+  bar.hidden=false; fill.style.width="0%";
+  // Throttled: the bar is repainted per chunk but the *announced* text is not,
+  // because `#banner` is a live region and a screen reader would read every
+  // update of it aloud.
+  let lastSaid=-1;
+  const tick=n=>{
+    got+=n;
+    fill.style.width=(total? (100*got/total):0).toFixed(1)+"%";
+    const pct=Math.floor(20*got/total);
+    if(pct!==lastSaid){ lastSaid=pct;
+      b.textContent="Loading the heads-up bot — "+mb(got)+" of "+mb(total)+"…"; }
+  };
+  try{
+    const out=[];
+    for(let i=0;i<HUBOT_URLS.length;i++) out.push(await fetchIntoWasm(HUBOT_URLS[i], tick));
+    hubotBuf={bp:out[0], flop:out[1], turn:out[2]};
+    hubotState="ready";
+    console.log("hubot: fetched "+mb(total)+" in "+Math.round(performance.now()-t0)+" ms");
+  }catch(e){
+    hubotBuf=null; hubotState="absent"; hubotWhy=e.message;
+    console.warn("hubot: "+e.message);
+  }
+  bar.hidden=true; b.hidden=true;
+}
+
+/* Install the blueprint into the session `wasm_play_new` just created.
+   **Every session, not once.** `wasm_play_new` replaces the whole `Game`, and
+   the tables live on it — the same reason `reapplyCharts` has to run there.
+   The buffers are reused, but `Blueprint::from_bytes`/`Lookup::from_bytes` copy
+   and validate, so this is a real cost and is measured into `hubotMs`. */
+function installHubot(){
+  hubotActive=false;
+  if(!hasHubot) return;
+  /* **Not offered to a table it cannot play.** The drill deals up to six seats
+     and `set_robo` refuses anything but two, so calling it there would spend
+     ~28 ms parsing 157 MB to be told no, and — worse — would then latch
+     `hubotState="refused"` and light the strip red for a bot that was never
+     wanted at a six-handed drill. `wantHubot` is the honest question: is this a
+     table the blueprint is *for*. */
+  const wantHubot = tableSeats()===2;
+  if(hubotBuf && wantHubot){
+    const t0=performance.now();
+    W.wasm_play_load_hubot(hubotBuf.bp.ptr,   hubotBuf.bp.len,
+                           hubotBuf.flop.ptr, hubotBuf.flop.len,
+                           hubotBuf.turn.ptr, hubotBuf.turn.len);
+    hubotMs=performance.now()-t0;
+  }
+  // **The return value is deliberately not consulted.** The question is not
+  // "did the call succeed" but "is the blueprint the thing that will act", and
+  // only the engine can answer that. They differ whenever a table is refused.
+  hubotActive = W.wasm_play_hubot_active()===1;
+  if(hubotBuf && wantHubot && !hubotActive && hubotState==="ready"){
+    hubotState="refused";
+    hubotWhy="the engine would not seat it at this table";
+  }
+  applyHubotCharts();
+}
+
+/* Should the blueprint take its **preflop** from the table's charts?
+
+   **`cfg.hubotCharts` is the authority, and it defaults off.** The first
+   version of this inferred it from "are charts loaded", which is always true —
+   the built-in set boots loaded — so every player silently got a blueprint with
+   its preflop replaced: measured at zero deviation from the chart in 60 SB
+   spots, with the open rate moved 65% -> 82%. The second version inferred it
+   from "did you load your own file", which fixed that bug but left no way to
+   say no. A switch is the answer to both: the built-in set never turns it on by
+   itself, and a choice you made is a choice the page keeps.
+
+   `chartName` still gates the *request* alongside the switch, because a switch
+   left on across a "Use the built-in set" would put the shipped TAG charts back
+   into the blueprint's preflop — the original bug, arrived at by a different
+   road. The engine would allow it; the page does not ask.
+
+   **This is a different bot from the measured one.** `+1872 ± 253 mbb/hand` is
+   the blueprint playing its own preflop; the frequencies it learned at every
+   postflop infoset were shaped by the hands that arrive there under its own
+   range. Change the range and the arrival distribution moves while the
+   frequencies do not. So the footer has to distinguish the two — see
+   `botLine` — and nothing may quote that number about this configuration.
+
+   Re-applied after every `installHubot`, and **after** it: `set_robo_charts`
+   refuses unless the blueprint is already seated. */
+function applyHubotCharts(){
+  hubotCharts=false;
+  if(!hasHubotCharts) return;
+  const ownFile = !!chartName && chartName!==BUILTIN_CHARTS;
+  W.wasm_play_hubot_charts(cfg.hubotCharts && ownFile ? 1 : 0);
+  // Asked, not assumed — as with `wasm_play_hubot_active`. The engine refuses
+  // unless the blueprint is seated *and* a set is loaded, so the request and
+  // the answer differ in exactly the cases worth labelling correctly.
+  hubotCharts = W.wasm_play_hubot_charts_active()===1;
+}
+
+/* Turn it on the first time a chart file of the user's own is accepted.
+
+   "Let me load my ranges and have the bot follow them" is what was asked for,
+   and a file that loads and changes nothing until you find a second control is
+   the dead-button complaint again. **Once only**, tracked by its own flag: if
+   you switch it back off, loading another file must not overrule you. */
+function armHubotCharts(){
+  if(cfg.hubotChartsAuto) return false;
+  cfg.hubotChartsAuto = true;
+  cfg.hubotCharts = true;
+  saveCfg();
+  return true;
+}
+
+/* One sentence naming the bot, from the engine's answer. */
+function botLine(){
+  if(hubotActive){
+    /* **Two configurations, and they are different bots.** The blueprint is
+       self-consistent: the frequencies it learned at every postflop infoset
+       were shaped by the hands that arrive there under its own preflop range.
+       Swap the range and the arrival distribution moves while the frequencies
+       do not, so `+1872 ± 253 mbb/hand` — measured on the blueprint playing its
+       own preflop — does not transfer. A page that called both of these "the
+       blueprint" would invite exactly that mistake. */
+    let s = hubotCharts
+      ? "robopoker blueprint <b>postflop only</b> — preflop from <code>"+
+        esc(chartName)+"</code> (<b>not the measured configuration</b>)"
+      : "robopoker blueprint (heads-up, 200bb, its own preflop)";
+    // The blueprint's tree is a fixed 400-chip / 200BB stack, so a table at any
+    // other depth is off it. Cheap to say, and it is the first thing that would
+    // explain odd play.
+    if(cfg.depth!==200) s+=" — <b>table is "+cfg.depth+"bb, off its 200bb tree</b>";
+    return s;
+  }
+  /* **A multiway table is not a failed heads-up table.** The drill deals up to
+     six seats and the blueprint cannot play there at all, so `BotAgent` is the
+     right answer and saying "the heads-up bot did not load" would be an alarm
+     about a bot nobody asked for. Only a *heads-up* table is entitled to it. */
+  if(tableSeats()!==2)
+    return "<code>core::policy::decide</code> ("+tableSeats()+" seats — the "+
+           "blueprint is heads-up only)";
+  // Not shipped in this build: state the bot, say why the other one is absent
+  // once, and do not dress it as an error.
+  if(hubotState==="unshipped")
+    return "<code>core::policy::decide</code> (the heads-up blueprint is not "+
+           "included in this build)";
+  if(hubotState==="absent")
+    return "<code>core::policy::decide</code> — <b>the heads-up bot did not load</b>"+
+           (hubotWhy?" ("+esc(hubotWhy)+")":"");
+  if(hubotState==="refused")
+    return "<code>core::policy::decide</code> — <b>the heads-up bot loaded but is "+
+           "not playing</b> ("+esc(hubotWhy)+")";
+  if(hubotState==="loading") return "loading the heads-up bot…";
+  return "<code>core::policy::decide</code>";
+}
+
+/* The permanent readout. Kept short enough for a quarter of a phone. */
+function botStat(){
+  const v=$("sBot"), u=$("sBotU");
+  if(!v) return;
+  v.classList.remove("neg");
+  if(hubotActive){
+    v.textContent="Blueprint";
+    // Two words of the distinction `botLine` spells out, because this tile is
+    // the label that is always on screen.
+    u.textContent = hubotCharts ? "+ your preflop" : "opponent";
+    return;
+  }
+  v.textContent="BotAgent";
+  // Red only when the blueprint was wanted here and is not playing. See `botLine`.
+  if(tableSeats()===2 && (hubotState==="absent"||hubotState==="refused")){
+    v.classList.add("neg"); u.textContent="hu bot failed";
+  } else u.textContent="opponent";   // includes "unshipped": nothing is wrong
+}
+
 /* Equity for the spot on screen, or null before there is a board. */
 function equityNow(){
   if(!("wasm_play_equity" in W)) return null;
@@ -1481,6 +1946,18 @@ function cellBars(pc){
 const freq=x=>(Math.abs(x-Math.round(x))<0.05?x.toFixed(0):x.toFixed(1))+"%";
 
 let rSeat=0, rScen=0, rVs=null;   // whose range, at which node, against whom
+/* The stack depths the loaded set carries, and which one the viewer is reading.
+   `rDepth` null means "whatever the table is playing", which is what the viewer
+   opens on — the range that is live right now is the one you wanted to see. */
+let rDepths=[], rDepth=null;
+function chartDepths(){
+  if(!("wasm_play_chart_depths" in W) || !chartEntries) return [];
+  if(!ensureCap(512)) return [];
+  const n = Number(W.wasm_play_chart_depths(PTR, CAP));
+  if(n < 0) return [];
+  try{ return JSON.parse(dec.decode(new Uint8Array(W.memory.buffer, PTR, n))); }
+  catch(e){ return []; }
+}
 let rVsOpen=null;     // the opponent the engine says hero is facing, if any
 /* Play mode: the preflop action you just took was one the chart barely plays.
    `{row, idx}` — the chart row you were on, and which of raise/call/fold you
@@ -1489,14 +1966,18 @@ let deviation=null;
 
 /* Ask the engine for a seat's grid. `-1` is "no particular opponent", which is
    what a browser asking "what does the cutoff open?" means. */
-function seatChart(seat, scen, vs){
+function seatChart(seat, scen, vs, stack){
   if(!("wasm_play_seat_chart" in W) || !chartEntries) return null;
   // A 169-class grid is ~5.5 KB and the shared buffer starts at 8 KB, which is
   // too close to rely on: the engine returns the same sentinel for "no chart
   // here" as for "it did not fit", so a buffer a few hundred bytes short would
   // report a missing range rather than a truncated one.
   if(!ensureCap(24576)) return null;
-  const n = Number(W.wasm_play_seat_chart(seat, vs==null?-1:vs, scen, PTR, CAP));
+  /* `stack` is the depth to read the chart AT, not the table's. Anything that
+     is not a positive number means "use the table's own", which is what every
+     caller that has no opinion passes. */
+  const n = Number(W.wasm_play_seat_chart(
+      seat, vs==null?-1:vs, scen, (stack>0?stack:-1), PTR, CAP));
   if(n < 0) return null;
   try{ return JSON.parse(dec.decode(new Uint8Array(W.memory.buffer, PTR, n))); }
   catch(e){ return null; }
@@ -1568,7 +2049,7 @@ function openRange(seat, opts){
      the engine whether this seat has a plain open, rather than hard-coding
      "seat 2 is the big blind", keeps the rule in one place and gets heads-up
      right for free. */
-  if(opts.scen==null && rScen===0 && !seatChart(seat, 0, null)) rScen=1;
+  if(opts.scen==null && rScen===0 && !seatChart(seat, 0, null, rDepth)) rScen=1;
   rVs=rVsOpen;
   rOpener=document.activeElement;
   $("rsheet").hidden=false;
@@ -1634,7 +2115,7 @@ function drawRange(){
 
      So: try without an opponent, and if the engine declines, that is the node
      telling us it needs one. No rule about which nodes those are lives here. */
-  let c = seatChart(rSeat, rScen, null);
+  let c = seatChart(rSeat, rScen, null, rDepth);
   const needsVs = !c;
   const vsRow=$("rvs");
   if(!needsVs){ vsRow.hidden=true; rVs=null; }
@@ -1645,9 +2126,9 @@ function drawRange(){
     // then have to click your way out of.
     // Only guess when the engine had no opinion — browsing a seat that is not
     // hero, or a node hero never faced.
-    if(rVs===null || rVs===rSeat || !seatChart(rSeat,rScen,rVs))
-      rVs = others.find(s=>seatChart(rSeat,rScen,s)) ?? (others[0] ?? null);
-    c = rVs===null ? null : seatChart(rSeat, rScen, rVs);
+    if(rVs===null || rVs===rSeat || !seatChart(rSeat,rScen,rVs,rDepth))
+      rVs = others.find(s=>seatChart(rSeat,rScen,s,rDepth)) ?? (others[0] ?? null);
+    c = rVs===null ? null : seatChart(rSeat, rScen, rVs, rDepth);
     vsRow.hidden=false; vsRow.innerHTML="";
     const lab=document.createElement("span");
     lab.className="vlab";
@@ -1659,10 +2140,43 @@ function drawRange(){
       if(s===rVs) b.className="on";
       // Grey out an opponent this file has nothing for, rather than letting
       // you click into an empty grid and wonder which choice was wrong.
-      if(!seatChart(rSeat,rScen,s)) b.disabled=true;
+      if(!seatChart(rSeat,rScen,s,rDepth)) b.disabled=true;
       b.onclick=()=>{ rVs=s; drawRange(); };
       vsRow.appendChild(b);
     }
+  }
+
+  /* **The depth control.** A set that carries the same node at several stack
+     depths has several different answers there, and the viewer is a reference
+     book rather than a mirror of the hand in progress — you should be able to
+     read any of them. Hidden entirely for a one-depth set, because a lone chip
+     reading "100bb" is furniture.
+
+     Which depths exist is the ENGINE's answer (`wasm_play_chart_depths` reads
+     `ChartSet::entries`), not a list parsed out of the file here. `meta.depths`
+     is a hint the file writes about itself; the entries are what the lookup
+     actually has, and those are the two things that must not disagree. */
+  const dRow=$("rdepth");
+  rDepths = chartDepths();
+  if(rDepths.length < 2){ dRow.hidden=true; rDepth=null; }
+  else{
+    dRow.hidden=false; dRow.innerHTML="";
+    const lab=document.createElement("span");
+    lab.className="vlab"; lab.textContent="depth";
+    dRow.appendChild(lab);
+    /* "Table" is first and is the default: it reads the chart at whatever the
+       table is actually playing, which is the range that is live right now. */
+    const mk=(text,val,title)=>{
+      const b=document.createElement("button");
+      b.textContent=text;
+      if(title) b.title=title;
+      if((val==null&&rDepth==null)||(val!=null&&rDepth===val)) b.className="on";
+      b.onclick=()=>{ rDepth=val; drawRange(); };
+      dRow.appendChild(b);
+    };
+    mk("table", null, "Read the chart at the depth this table is playing");
+    for(const d of rDepths)
+      mk(d+"bb", d, "Read the chart written for "+d+" big blinds");
   }
 
   /* Two things can want this slot, and only one of them is ever true at a
@@ -1707,7 +2221,11 @@ function drawRange(){
   none.hidden=true;
   $("rsub").innerHTML=c.label+" · "+
     (SCENARIOS.find(s=>s[1]===rScen)||["",""])[0]+
-    (Number.isFinite(c.size) ? " · raise to <b>"+c.size+"bb</b>" : "");
+    (Number.isFinite(c.size) ? " · raise to <b>"+c.size+"bb</b>" : "")+
+    /* Say which depth this grid is, whenever it is not the table's. Switching
+       depth changes the range under you, and a grid that changed without
+       saying so is the kind of quiet lie this app is trying not to tell. */
+    (rDepth!=null ? ' · <b>'+rDepth+'bb</b> chart' : "");
 
   // Your own hand, so you can find it without hunting — only on your own seat,
   // and only from your own two cards, which are yours to look at.
@@ -1879,8 +2397,8 @@ function applyLineup(ids){
   // so this is where the two meet. It used to be `[""].concat(ids)` — the human
   // hard-coded into slot 0 — which put the blank on whichever bot happened to
   // be on the button and dropped one bot's profile entirely.
-  const bySeat = new Array(cfg.seats).fill("");
-  for(let c=1;c<cfg.seats;c++) bySeat[seatOfChair(c)] = ids[c-1] || "";
+  const bySeat = new Array(tableSeats()).fill("");
+  for(let c=1;c<tableSeats();c++) bySeat[seatOfChair(c)] = ids[c-1] || "";
   const json = JSON.stringify({doc:PROFILE_DOC, seats:bySeat});
   const bytes = enc.encode(json);
   const p = W.wasm_alloc(bytes.length);
@@ -1920,11 +2438,18 @@ function applyLineup(ids){
  * The felt already worked this way: `frame()` draws chair `i` at `seatXY(i,n)`
  * with the human at bottom centre. Only the naming disagreed.
  * ==================================================================== */
-const chairOf = seat => ((seat - heroSeat) % cfg.seats + cfg.seats) % cfg.seats;
-const seatOfChair = chair => (heroSeat + chair) % cfg.seats;
+const chairOf = seat => ((seat - heroSeat) % tableSeats() + tableSeats()) % tableSeats();
+const seatOfChair = chair => (heroSeat + chair) % tableSeats();
 const seatName = seat => {
   const c = chairOf(seat);
   if(c === 0) return "Hero";
+  /* **Not a roster name while the blueprint is playing.** `Opponent::Robo`
+     ignores the profile document, so the seat labelled "Sally" is the same
+     program as the seat labelled "Marcus", and a page that names it after a
+     personality it is not playing is the wrong-bot failure in miniature — on
+     the felt, the hand log and the range popup at once. Every one of those
+     reads through here. */
+  if(hubotActive) return "Blueprint";
   const id = seated[c-1];
   return BY_ID[id] ? BY_ID[id].name : "";
 };
@@ -1932,15 +2457,102 @@ const seatName = seat => {
 /* ==================================================================== *
  * settings
  * ==================================================================== */
-const DEF={seats:6,depth:100,units:"bb",speed:"fast",theme:"dark",
+/* `core::table` asserts 2..=6 and `wasm_play_new` rejects anything outside it,
+   so this is the engine's limit restated, not a taste. */
+const MAX_SEATS=6;
+
+/* **Play is heads-up; Train is not.** They are two modes of one page and they
+   used to share one table size, which is how forcing heads-up for the blueprint
+   silently pinned the preflop drill to two seats as well — a regression, since
+   the drill's whole subject is position and heads-up has two of them.
+
+   So `cfg.seats` is **Train's** table size and Play does not read it. Play's
+   two is not a setting and never was: `robobot` was trained at two seats and
+   `set_robo` refuses anything else, because nothing in the blueprint's infoset
+   key could represent a third player. See `tableSeats`.
+
+   **200bb** is the blueprint's number too. `robobot` shadows every decision
+   into a robopoker `Game` whose `STACK` is a compile-time 400 chips at
+   SB 1 / BB 2 — exactly 200 BB, chosen so the two engines' chip scales differ
+   by a clean factor of 50 — so at any other depth the shadow is playing for a
+   different stack than the table is and the bucket it looks up is not the one
+   the position is in. */
+const DEF={seats:6,depth:200,units:"bb",speed:"fast",theme:"dark",
            muck:true,odds:true,read:true,nudge:true,
            /* which seat you sit in; "rotate" moves you round every hand */
            seat:"rotate",
-           /* one slot per bot seat; "" means "surprise me" */
-           villains:["","","","",""]};
+           /* one slot per bot seat; "" means "surprise me". Train's maximum. */
+           villains:["","","","",""],
+           /* **Off.** The blueprint plays its own preflop unless asked, because
+              the configuration that was measured at +1872 ± 253 is the one where
+              it plays itself. See `applyHubotCharts`. */
+           hubotCharts:false,
+           /* Whether the one-time auto-enable below has already fired. A
+              separate flag, not `hubotCharts` itself: switching it back off must
+              not re-arm the auto-enable, or the next file you load overrides a
+              choice you just made. */
+           hubotChartsAuto:false};
 let cfg=Object.assign({},DEF);
 try{ Object.assign(cfg, JSON.parse(localStorage.getItem("play.cfg")||"{}")); }catch(e){}
+/* A saved config can hold anything a previous version of this page wrote —
+   including, briefly, a `seats: 2` written by the build that forced heads-up on
+   both modes. Clamped into the engine's range rather than trusted. */
 const saveCfg=()=>{ try{ localStorage.setItem("play.cfg",JSON.stringify(cfg)); }catch(e){} };
+// After `saveCfg`, not before: it is a `const`, so calling it from above would
+// be a temporal-dead-zone `ReferenceError` and the page would not boot at all.
+{
+  const was = JSON.stringify([cfg.seats, cfg.villains, cfg.seat]);
+  // Clamped, not forced. `cfg.seats` is **Train's** table size now; Play does
+  // not read it at all. See `tableSeats`.
+  cfg.seats = Math.min(MAX_SEATS, Math.max(2, Number(cfg.seats)||DEF.seats));
+  if(!Array.isArray(cfg.villains)) cfg.villains = [];
+  cfg.villains = cfg.villains.slice(0, MAX_SEATS-1);
+  while(cfg.villains.length < MAX_SEATS-1) cfg.villains.push("");
+  /* **The seat pin is kept, and the collision is resolved where it happens.**
+     `1a9b572` dropped any numeric pin here, and that was right while heads-up
+     was forced on both modes: a pin to CO (seat 3) came back as a permanent pin
+     to seat 1 — the big blind heads-up — and you never took the button again,
+     which is what "we don't change positions" was.
+
+     It is wrong now that Train has six seats again. The pin is *valid* at the
+     drill's table, so dropping it at load throws away a working setting to
+     protect a different table; and it could not have fixed the general case
+     anyway, because the seat count is per mode and the same collision is one
+     press of "Play" away, long after load-time migration has run.
+
+     So nothing is dropped and `seatPinFits()` answers it on every deal instead
+     — see `heroSeatFor`. That subsumes this check: a pin past the end, a
+     non-integer, or a leftover from a bigger table all read as Rotate at a
+     table that cannot honour them, and mean what they say again at one that
+     can.
+
+     **A pin is never clamped either way**, which is `1a9b572`'s argument and
+     still holds: the seat *numbers change meaning* with the table. Seat 0 is
+     the button at every size, but seat 1 is the small blind six-handed and the
+     big blind heads-up, so there is no honest translation of "the seat I
+     picked". Falling back to rotation is — every position needs drilling.
+
+     Verified on a clean profile that rotation itself was never broken:
+     `heroSeat` alternates 1,0,1,0 over eight deals heads-up and walks
+     5,4,3,2,1,0 six-handed. */
+  // Written back, not just held in memory. Overriding on every read is what
+  // makes the page correct today; persisting is what stops a stale `seats: 6`
+  // sitting in storage waiting for the day somebody removes the override.
+  // Only on an actual change, so an ordinary load does not write.
+  if(JSON.stringify([cfg.seats, cfg.villains, cfg.seat]) !== was) saveCfg();
+}
+/* **How many seats this mode deals.** The one place the question is answered,
+   because the two modes disagree and a second copy of the rule is how they
+   start disagreeing with each other instead.
+
+   Play is always two — see `DEF`. Train is `cfg.seats`, clamped, because a
+   drill about position needs positions. Everything downstream reads this and
+   not `cfg.seats`: the session is created with it, the felt is laid out with
+   it, and `chairOf`/`seatOfChair` map with it, so a mismatch would seat the
+   roster one chair out for the whole hand. */
+const tableSeats = () =>
+  training ? Math.min(MAX_SEATS, Math.max(2, Number(cfg.seats)||DEF.seats)) : 2;
+
 const SB=50, BB=100;                 // blinds, in chips
 const stackChips=()=>cfg.depth*BB;   // depth is in big blinds
 /* Replay pacing, in ms per opponent action. **Fast is the default**: 400 ms a
@@ -1958,7 +2570,7 @@ function applyTheme(){
     : cfg.theme;
   document.documentElement.setAttribute("data-theme",t);
   const m=document.querySelector('meta[name=theme-color]');
-  if(m) m.setAttribute("content", t==="light"?"#f4ecdd":"#0a0705");
+  if(m) m.setAttribute("content", t==="light"?"#f4ecdd":"#0a0604");
 }
 applyTheme();
 matchMedia("(prefers-color-scheme: light)").addEventListener("change",()=>{
@@ -1996,12 +2608,22 @@ async function boot(){
      from its own cache and never reaches the network. Without it, it is a
      conditional request — headers and a 304, not 890 KB. */
   const wreq = () => fetch(WASM_URL, {cache:'no-cache', credentials:'same-origin'});
-  try{ mod=await WebAssembly.instantiateStreaming(wreq(),IMPORTS); }
+  /* Compile and instantiate as two steps, because `deadImports` has to read the
+     compiled module's import list before there is anything to satisfy it with.
+     `compileStreaming` keeps the streaming compile that `instantiateStreaming`
+     was there for; the `arrayBuffer` arm is still the fallback for a server that
+     does not send `application/wasm`. */
+  try{ mod=await WebAssembly.compileStreaming(wreq()); }
   catch(e){
-    try{ mod=await WebAssembly.instantiate(await (await wreq()).arrayBuffer(),IMPORTS); }
+    try{ mod=await WebAssembly.compile(await (await wreq()).arrayBuffer()); }
     catch(e2){ fail("could not load "+WASM_URL+" — "+e2.message); return; }
   }
-  W=mod.instance.exports;
+  let inst;
+  // Separated from the compile so the message names which of the two failed.
+  // They fail for unrelated reasons and the fix is different for each.
+  try{ inst=await WebAssembly.instantiate(mod, deadImports(mod)); }
+  catch(e){ fail("could not instantiate "+WASM_URL+" — "+e.message); return; }
+  W=inst.exports;
   for(const n of ["wasm_play_new","wasm_play_deal","wasm_play_act","wasm_play_settle",
                   "wasm_play_snapshot","wasm_play_snapshot_len","wasm_play_awaiting",
                   "wasm_alloc","memory"])
@@ -2017,7 +2639,19 @@ async function boot(){
   if(!PTR){ fail("wasm_alloc returned null"); return; }
   hasCharts = ("wasm_play_set_charts" in W) && ("wasm_play_hero_chart" in W);
   hasHero = "wasm_play_set_hero" in W;
+  hasHubot = ("wasm_play_load_hubot" in W) && ("wasm_play_hubot_active" in W);
+  // Newer than the pair above and tested separately: an engine that can seat
+  // the blueprint but cannot hand it charts is a real intermediate build, and
+  // the honest degradation is the blueprint playing its own preflop.
+  hasHubotCharts = ("wasm_play_hubot_charts" in W) &&
+                   ("wasm_play_hubot_charts_active" in W);
   await loadCharts();
+  /* **Before `newTable()`, and awaited.** `installHubot()` runs inside
+     `newTable()` and can only install tables that have arrived, so a fetch
+     still in flight there would deal the first hands against `BotAgent` and
+     then silently swap bots mid-session. Awaiting also means there is nothing
+     to act into while it loads: `newTable()` is what draws the first buttons. */
+  await loadHubot();
   buildSettings();
   /* Trainer mode cannot grade without ranges, and `loadCharts` is allowed to
      fail — an offline first visit, a 404, a corrupt saved file. Falling back to
@@ -2055,14 +2689,14 @@ function fail(m){
    "which ranges am I playing and being marked against" is a fact about the
    session, not a transient confirmation. */
 /* Injected by `build.py`. See there for why this is worth a line of screen. */
-const BUILD_ID = "2026-07-30 13:41 76734eb+";
+const BUILD_ID = "2026-08-03 18:31 76aefc1";
 function footNote(){
   const src = chartEntries
     ? " · ranges: <code>"+esc(chartName)+"</code> ("+chartEntries+")"
     : " · <b>no ranges</b> — bots use the built-in pricer";
   $("foot").innerHTML =
     (SB/BB)+"/1 blinds · "+cfg.depth+"bb stacks · rules from <code>core::table</code>"+
-    " · bots are <code>core::policy::decide</code>"+src+
+    " · opponent is "+botLine()+src+
     ' · <span class="build" title="If this is not the build you expect, reload. '+
     'The .wasm is cached deliberately, so a stale engine costs a feature '+
     'silently.">build '+esc(BUILD_ID)+'</span>';
@@ -2192,14 +2826,9 @@ let training=true;    // trainer mode on
    most worth feedback: opening ranges are memorised long before 3-bet
    defence is. */
 let grades=[];
-/* **You chose to play this spot out, so stop asking.** This used to be
-   `atFlop`, meaning "the play-on choice is on screen", and the two are not the
-   same question: `Play it out` cleared it, so the very next `finish()` — the
-   turn, or even a second decision on the flop — saw `street > 0` with the flag
-   down and put the choice back up. One click has to mean the whole hand, so
-   the latch records the *decision*, not the prompt, and only `newHand()`
-   clears it. */
-let playOut=false;
+/* (`playOut` lived here. The drill's "Play it out" button is gone by request —
+   see `finish()` — and a latch nothing can set is not state, it is a comment
+   that compiles.) */
 let drill={n:0, ok:0, skipped:0, peeks:0};
 let peeked=false;     // you opened a range before acting on this spot
 /* **The opponents' equity lives on the felt, not in a list under yours.**
@@ -2207,6 +2836,25 @@ let peeked=false;     // you opened a range before acting on this spot
    seat before it meant anything; the number belongs beside the player it
    describes. Keyed by seat, cleared with the hand, and drawn by `frame()`. */
 let seatEq=null;
+
+/* **Hidden until you ask, and re-hidden every hand.**
+   The page used to name your made hand and price it the moment the flop landed,
+   which answers the question before you have asked it — at a real table you
+   read your own board, and a trainer that reads it for you trains you to wait
+   for the readout. So `heroRead`'s hand name, the `#equity` panel and the
+   per-seat `% rng` figures on the felt all sit behind one control.
+
+   **Per hand, not per session.** A session-long reveal is a settings toggle
+   wearing a button, and this page already has two of those (`tRead`, `tOdds`);
+   they keep meaning "never show me this at all" and are checked first. The
+   thing that was asked for is a default of hidden, and a default only holds if
+   it comes back.
+
+   Position is NOT behind it. "You are on the BTN/SB" is the one fact this app
+   exists to make you think about, it is visible at any real table, and
+   `heroRead` already knows how to render position alone — that is its
+   older-engine degradation path, reused here. */
+let revealed=false;
 
 /* Which of raise/call/fold an action counts as, in the chart's own indices. */
 const RCF = {3:0, 2:1, 1:1, 0:2};   // raise / call / check->call / fold
@@ -2242,8 +2890,13 @@ function gradePreflop(code){
    Three numbers, and they are deliberately not equally trustworthy — which is
    why they are shown together rather than as one "equity" figure. */
 function showEquity(){
-  const e = equityNow();
   const el = $("equity");
+  /* **Before `equityNow()`, not after.** The sampled runout is the expensive
+     part of this function and it is also what populates `seatEq`, which
+     `frame()` paints onto the felt — so returning later would both do the work
+     nobody asked for and leak the answer to the seats. See `revealed`. */
+  if(!revealed){ el.hidden = true; seatEq = null; return; }
+  const e = equityNow();
   if(!e){ el.hidden = true; seatEq = null; return; }
   /* **Whole percent, because the last decimal was noise.**
      These figures are sampled, and the standard error of a pot share is at most
@@ -2436,13 +3089,14 @@ function newTable(){
      length of a replay. */
   gen++; busy=false;
   const seed=BigInt((Date.now()^0x9e3779b9)>>>0);
-  if(W.wasm_play_new(seed,cfg.seats,BigInt(SB),BigInt(BB),BigInt(stackChips()))!==1){
-    fail("engine refused "+cfg.seats+" seats at "+cfg.depth+"bb"); return;
+  if(W.wasm_play_new(seed,tableSeats(),BigInt(SB),BigInt(BB),BigInt(stackChips()))!==1){
+    fail("engine refused "+tableSeats()+" seats at "+cfg.depth+"bb"); return;
   }
   // Who is at the table. The engine mapping is (re)sent per hand by `newHand`,
   // because it depends on where the human is sitting and that moves.
-  seated = lineup(cfg.seats-1);
+  seated = lineup(tableSeats()-1);
   reapplyCharts();
+  installHubot();     // `wasm_play_new` threw the old tables away with the Game
   orbit=0; heroSeat=0;
   // **The drill counters reset too.** Settings says "changing the table or the
   // stacks starts a fresh session" and only `setMode` was honouring it, so
@@ -2450,10 +3104,12 @@ function newTable(){
   // two stack depths averaged under one accuracy figure.
   sess={hands:0,net:0};
   drill={n:0,ok:0,skipped:0,peeks:0};
-  $("sTable").textContent=cfg.seats;
+  botStat();
   // See `#tableWrap`: the felt needs more vertical room the more seats have to
   // fit above and below the board.
-  document.documentElement.style.setProperty("--tmin", cfg.seats<=2?"270px":"300px");
+  document.documentElement.style.setProperty("--tmin", tableSeats()<=2?"270px":"300px");
+  // And wider plates when only two of them share the felt — see `.seat`.
+  document.documentElement.style.setProperty("--seatw", tableSeats()<=2?"124px":"88px");
   footNote();
   newHand();
 }
@@ -2486,21 +3142,33 @@ function seatPos(seats, seat){
   if(seat===2) return "BB";
   return {1:"CO",2:"HJ",3:"LJ",4:"UTG+1",5:"UTG"}[seats-seat] || ("Seat "+seat);
 }
-/* What the seat setting *effectively* is, after clamping to the current table.
-   The picker highlights this rather than the raw stored value, so a pin left over
-   from a bigger table shows the seat you are actually in. */
+/* What the seat setting *effectively* is at this table.
+
+   **A pin to a seat this table does not have becomes Rotate, not the last
+   seat.** Clamping was the old behaviour and it is what produced "we don't
+   change positions": a pin to CO (seat 3) at a six-handed table silently became
+   a permanent pin to seat 1 heads-up, which is the big blind, every hand
+   forever. `1a9b572` fixed that by dropping stale pins at load — but the seat
+   count is now **per mode**, so the same collision comes back through the mode
+   switch the moment you pin a seat in Train and press Play. Load-time migration
+   cannot reach that; this can, because it is asked on every deal.
+
+   The stored pin is left alone rather than rewritten, so switching back to
+   Train restores the seat you picked. Only the *effect* falls back. */
+const seatPinFits = () =>
+  cfg.seat!=="rotate" && Number.isInteger(Number(cfg.seat)) &&
+  Number(cfg.seat)>=0 && Number(cfg.seat)<tableSeats();
 function heroSeatSetting(){
-  if(cfg.seat==="rotate") return "rotate";
-  return String(Math.min(cfg.seats-1, Number(cfg.seat)||0));
+  return seatPinFits() ? String(Number(cfg.seat)) : "rotate";
 }
 function heroSeatFor(){
-  const n=cfg.seats;
-  if(cfg.seat!=="rotate") return Math.min(n-1, Number(cfg.seat)||0);
+  const n=tableSeats();
+  if(seatPinFits()) return Number(cfg.seat);
   return (n - (orbit % n)) % n;
 }
 function seatHero(){
   heroSeat = heroSeatFor();
-  if(cfg.seat==="rotate") orbit++;
+  if(!seatPinFits()) orbit++;
   if(hasHero) W.wasm_play_set_hero(heroSeat);
   else heroSeat = 0;             // an older engine cannot move it; do not pretend
 }
@@ -2512,7 +3180,10 @@ async function newHand(){
   // `finally`, not a trailing assignment — see `act()`.
   try{
     settled=false; shown=0; potShown=-1; lastBet=[];
-    grades=[]; playOut=false; peeked=false; deviation=null; seatEq=null;
+    // `revealed` with the rest of the per-hand state: a reveal that survived
+    // into the next hand would be a session toggle, which is the thing this is
+    // deliberately not. See `revealed`.
+    grades=[]; peeked=false; deviation=null; seatEq=null; revealed=false;
     $("grade").hidden=true; $("equity").hidden=true;
     $("heroCards").dataset.key="";      // a new hand really is new cards
     // **A drill is a series of independent spots, not a session.** Carrying
@@ -2526,11 +3197,19 @@ async function newHand(){
       // advance — a wrong answer rather than a crash, which is this codebase's
       // documented failure shape.
       if(W.wasm_play_new(BigInt((Math.random()*0x7fffffff)>>>0),
-                         cfg.seats,BigInt(SB),BigInt(BB),BigInt(stackChips()))!==1){
-        fail("engine refused "+cfg.seats+" seats at "+cfg.depth+"bb"); return;
+                         tableSeats(),BigInt(SB),BigInt(BB),BigInt(stackChips()))!==1){
+        fail("engine refused "+tableSeats()+" seats at "+cfg.depth+"bb"); return;
       }
-      if(!seated.length) seated = lineup(cfg.seats-1);
+      if(!seated.length) seated = lineup(tableSeats()-1);
       reapplyCharts();      // `wasm_play_new` cleared them; nothing else does
+      /* And so did the blueprint's tables. **This re-parses ~157 MB every
+         drill spot** — measured below — which is the price of a drill being a
+         fresh session per hand. Skipping it is not the cheaper option, it is
+         a different bug: `wasm_play_hubot_active()` would go false while the
+         strip still said "Blueprint", and the whole point of reading the label
+         off the engine is that the two cannot drift. */
+      installHubot();
+      botStat(); footNote();
     }
     /* **Seat the human first, then map the profiles onto seats.** Both must
        happen before the deal and in this order: `seated` is indexed by chair,
@@ -2545,6 +3224,8 @@ async function newHand(){
     $("say").textContent="";            // last hand's result is not this hand's
     $("btns").innerHTML="";
     $("heroRead").textContent="";
+    // With it, because it is drawn from `ST` and the deal has not happened yet.
+    $("revealRow").hidden=true; $("revealRow").innerHTML="";
     if(W.wasm_play_deal(BigInt((Math.random()*0x7fffffff)>>>0))!==1){ fail("deal failed"); return; }
     ST=snap(); if(!ST) return;
     const b=$("banner");
@@ -2673,6 +3354,14 @@ function frame(k,streetOverride){
     else                     bet[e.seat]=e.in;
     paid[e.seat]+=Math.max(0,bet[e.seat]-was);
   }
+  /* The transition frame between streets — an override ahead of every event
+     drawn — is the sweep: the pot line below already includes the finished
+     street's bets (`e.pot + added` is the pot *after* the last action), so
+     leaving the same chips in front of the seats drew the money twice for a
+     beat. The loop above only clears on the first event OF a street, and this
+     frame deliberately has none yet. */
+  if(streetOverride!==undefined && h.length && streetOverride>h[h.length-1].street)
+    bet.fill(0);
 
   // --- the pot ---
   let pot=SB+BB;
@@ -2785,6 +3474,7 @@ function frame(k,streetOverride){
   drawBoard(done&&live ? (ST.board||[]).length : BOARD_AT[street]);
   drawHero();
   heroRead();
+  revealRow();
   drawLog(h);
 }
 
@@ -2840,12 +3530,65 @@ function heroRead(){
   const el=$("heroRead");
   if(!cfg.read || !ST){ el.textContent=""; return; }
   const seatName = ST.labels ? ST.labels[ST.hero_seat] : "";
-  const hand = ST.hero_hand ||
-    (ST.phase==="complete" && ST.hands ? ST.hands[ST.hero_seat] : null);
+  const done = ST.phase==="complete";
+  /* Once the hand is over the cards are face up on the felt and the result is
+     already written in `#say`, so naming the hand is a caption on something you
+     have seen rather than a tip about a decision you have not taken. The reveal
+     covers live decisions. */
+  const named = ST.hero_hand ||
+    (done && ST.hands ? ST.hands[ST.hero_seat] : null);
+  const hand = (revealed || done) ? named : null;
   const bits=[];
   if(hand) bits.push("You have <b>"+hand+"</b>");
   if(seatName) bits.push(hand ? seatName : "You are on the <b>"+seatName+"</b>");
   el.innerHTML=bits.join('<span class="sep">·</span>');
+}
+
+/* The reveal control. Drawn beside `heroRead` and independent of it — see the
+   markup for why.
+
+   **Offered on every live decision, including preflop.** It used to require a
+   made hand or a board, on the reasoning that preflop there is nothing to
+   reveal. That was wrong twice over. The settings copy promises the control is
+   "under your cards" on every hand, and preflop is the first place you look —
+   so the page appeared to have shipped the promise without the mechanism, which
+   is exactly how it was reported. And preflop is *not* empty: the pot-odds
+   figure ("needs 25%") is a live readout of the same kind, and leaving it on
+   screen while the button was absent made the omission look deliberate.
+
+   Withdrawn only once the hand is complete, when both readouts are settled and
+   `heroRead` shows the hand unconditionally. */
+function revealRow(){
+  const el=$("revealRow");
+  const offer = !!ST && ST.phase!=="complete" && !revealed;
+  el.hidden = !offer;
+  if(!offer){ el.innerHTML=""; return; }
+  el.innerHTML='<button type="button" id="revealBtn" '+
+    'title="Show what you have and what it is worth. Hidden by default, and '+
+    'hidden again on the next hand.">Show hand &amp; equity<span class="k">H</span></button>';
+  // Wired here rather than delegated: this element's `innerHTML` is rebuilt on
+  // every replayed action, so a handler bound once to the button would be
+  // thrown away with the button that carried it.
+  el.firstElementChild.onclick=reveal;
+}
+
+/* Show the readouts for the hand in progress.
+   **Refuses mid-replay.** `frame()` is walking the history at that point, so
+   `ST` describes the finished hand while the screen shows an earlier moment;
+   pricing one against the other would put a number from the future above a
+   board from the past. */
+function reveal(){
+  if(revealed || busy || !ST) return;
+  revealed=true;
+  // The felt carries the per-seat `% rng` figures and is only redrawn by
+  // `frame`, so `showEquity` alone would light the panel and leave the seats
+  // blank. `shown` is where the replay got to, which is what is on screen.
+  if(ST.street>0) showEquity(); else { $("equity").hidden=true; seatEq=null; }
+  frame(shown);          // also redraws `heroRead` and this control
+  // The pot-odds pill lives in the action line, which `frame` does not touch.
+  // Only while hero is actually on the clock: `#say` carries the result text
+  // once the hand is over and overwriting it with "Your move" would be a lie.
+  if(ST.phase==="awaiting_hero" && !busy) sayTurn();
 }
 
 function tagFor(e){
@@ -2963,20 +3706,25 @@ async function finish(){
      decision that has already happened and cannot be taken back. Withholding it
      bought nothing and cost the feedback its moment — you read the flop, then
      had to click before finding out whether you should have been there. */
-  if(training && !playOut && ST.phase!=="complete" && ST.street>0){
+  /* **The drill has no postflop.** "Play it out" used to sit beside "Next
+     spot", and it is gone by request: this mode is a preflop drill, the spot's
+     question is answered the moment the flop lands, and playing on turned a
+     series of independent spots into a hand that carried its own postflop
+     result into the accuracy figure. Its `playOut` latch went with it rather
+     than being left set-to-false for ever — a flag nothing can set is a second
+     model of "is the spot over" that only reads as one. Postflop play is what
+     Play mode is for. */
+  if(training && ST.phase!=="complete" && ST.street>0){
     frame((ST.history||[]).length);
     const say=$("say"); say.className="";
     say.innerHTML='Flop is out <span class="pill">preflop spot done</span>';
     showGrade();
     showEquity();
     const bt=$("btns"); bt.innerHTML=""; $("sizer").hidden=true;
-    const mk=(txt,cls,fn)=>{const b=document.createElement("button");
-      b.className=cls;b.textContent=txt;b.onclick=fn;bt.appendChild(b);return b;};
-    // The equity panel described the flop as it stood when you were asked. Once
-    // you play on it is a snapshot of a decision already taken, and leaving it
-    // above a live turn reads as a live number.
-    mk("Play it out","b-call",()=>{ playOut=true; showGrade(); showTurn(); });
-    const nx=mk("Next spot","b-next",()=>{ showGrade(); setTimeout(()=>newHand(),0); });
+    const nx=document.createElement("button");
+    nx.className="b-next"; nx.textContent="Next spot";
+    nx.onclick=()=>{ showGrade(); setTimeout(()=>newHand(),0); };
+    bt.appendChild(nx);
     nx.focus({preventScroll:true});
     return;
   }
@@ -3029,6 +3777,41 @@ function endFoldedSpot(){
   try{ b.focus({preventScroll:true}); }catch(e){ b.focus(); }
 }
 
+/* The "Your move · 1.5 bb to call · needs 25%" line.
+
+   **Its own function so `reveal()` can redraw it without rebuilding the action
+   buttons.** The pot-odds pill is now behind the reveal, and `showTurn` is the
+   only thing that drew it — so pressing the button lit the equity panel and
+   left the pill missing until the next decision. Calling `showTurn` from
+   `reveal` would have fixed that and thrown away the raise amount you had
+   already dialled into the slider, which is worse than the bug. */
+function sayTurn(){
+  if(!ST) return;
+  const say=$("say"); say.className="";
+  const bits=['Your move'];
+  if(ST.to_call>0){
+    bits.push('<span class="pill hot">'+m2(ST.to_call)+' to call</span>');
+    /* Pot odds: the price, and the equity that price needs. Arithmetic on the
+       engine's own pot and to_call, not a model of anything.
+
+       **Behind the reveal, like every other computed readout.** This pill was
+       the one that stayed on screen when the rest went behind the button, and
+       it is the same kind of thing: a number the page works out for you about
+       the decision in front of you. Leaving it visible also made the settings
+       copy false — it promises the equity starts hidden every hand, and here
+       was an equity requirement in the action line. The price itself is still
+       there ("1.5 bb to call"), because that is a fact about the pot and you
+       can see it at any table; what is hidden is the page doing the division. */
+    if(cfg.odds && revealed){
+      const need=ST.to_call/(ST.pot+ST.to_call);
+      bits.push('<span class="pill">needs '+(need*100).toFixed(0)+'%</span>');
+    }
+  } else {
+    bits.push('<span class="pill">nothing to call</span>');
+  }
+  say.innerHTML=bits.join(" ");
+}
+
 function showTurn(){
   /* **Recomputed at every postflop decision, so the price and the equity are
      the same age.** It used to be drawn once when the flop landed and then
@@ -3040,20 +3823,7 @@ function showTurn(){
      `showEquity` self-hides when there is no board, which is what makes this
      safe to call unconditionally — preflop it draws nothing. */
   if(ST && ST.street>0) showEquity(); else { $("equity").hidden=true; seatEq=null; }
-  const say=$("say"); say.className="";
-  const bits=['Your move'];
-  if(ST.to_call>0){
-    bits.push('<span class="pill hot">'+m2(ST.to_call)+' to call</span>');
-    if(cfg.odds){
-      // Pot odds: the price, and the equity that price needs. Arithmetic on
-      // the engine's own pot and to_call, not a model of anything.
-      const need=ST.to_call/(ST.pot+ST.to_call);
-      bits.push('<span class="pill">needs '+(need*100).toFixed(0)+'%</span>');
-    }
-  } else {
-    bits.push('<span class="pill">nothing to call</span>');
-  }
-  say.innerHTML=bits.join(" ");
+  sayTurn();
 
   const bt=$("btns"); bt.innerHTML="";
   const legal=ST.legal||[];
@@ -3315,9 +4085,25 @@ function chipRow(host,opts,cur,onPick){
 }
 function buildSettings(){
   const redraw=()=>buildSettings();
-  chipRow("cTable",[["Heads-up",2],["6-max",6],["3",3],["4",4],["5",5]],
-    ()=>cfg.seats,v=>{ cfg.seats=v; saveCfg(); redraw(); newTable(); });
-  chipRow("cDepth",[["20bb",20,"push/fold"],["50bb",50],["100bb",100,"cash"],["200bb",200,"deep"]],
+  /* The table size, in Train only — see `#gTable`. Drawn from `cfg.seats`
+     rather than `tableSeats()`: this is the control that *sets* the drill's
+     size, and in Play `tableSeats()` is a constant 2 that would light the wrong
+     chip the instant you switched back. */
+  $("gTable").hidden = !training;
+  $("modeNote").innerHTML = training
+    ? "The <b>preflop drill</b>. Each spot is a fresh table, and it ends when "+
+      "the flop lands. Changing the table or the stacks starts a fresh session."
+    : "<b>Play</b> is heads-up against the bot. Changing the stacks starts a "+
+      "fresh session.";
+  if(training)
+    chipRow("cTable",[["Heads-up",2],["3",3],["4",4],["5",5],["6-max",6]],
+      ()=>cfg.seats,v=>{ cfg.seats=v; saveCfg(); redraw(); newTable(); });
+  /* 200bb is marked as the blueprint's own depth rather than "deep". The chips
+     stay live — playing it at 50bb is a legitimate thing to want to see — but
+     the one that is on its tree has to be identifiable, because every other
+     one puts the bot's shadow game on a different stack than the table. */
+  chipRow("cDepth",[["20bb",20,"push/fold"],["50bb",50],["100bb",100,"cash"],
+                    ["200bb",200,hubotActive?"the bot's":"deep"]],
     ()=>cfg.depth,v=>{ cfg.depth=v; saveCfg(); redraw(); newTable(); });
   /* Seats are named by position, not by index, because "HJ" is the thing you
      are choosing and the index that produces it changes with the table size. */
@@ -3329,7 +4115,7 @@ function buildSettings(){
      stale read. `seatPos` derives the label from the seat count directly, the same
      way the engine does, so it cannot lag. */
   const seatOpts=[["Rotate","rotate"]];
-  for(let s=0;s<cfg.seats;s++) seatOpts.push([seatPos(cfg.seats,s), String(s)]);
+  for(let s=0;s<tableSeats();s++) seatOpts.push([seatPos(tableSeats(),s), String(s)]);
   /* A pin to a seat that no longer exists lit no chip at all — not even Rotate —
      while `heroSeatFor` silently clamped you to the last seat. Pick the CO
      six-handed, switch to heads-up, and you were pinned to the big blind with an
@@ -3385,6 +4171,25 @@ function buildSettings(){
     : sess.hands+(sess.hands===1?" hand":" hands")+" so far, "+
       (sess.net>=0?"+":"−")+m2(Math.abs(sess.net));
   tog("tRead","read"); tog("tOdds","odds"); tog("tMuck","muck"); tog("tNudge","nudge");
+  /* **Its own wiring, because flipping it changes the opponent.** `tog`'s flip
+     saves and repaints a frame, which is right for a display option and wrong
+     here: a session whose bot changed halfway is a win rate over two different
+     bots, which is the same reason the mode switch and the stack chips restart
+     the table. `newTable` also re-runs `applyHubotCharts`, so the engine and
+     the switch cannot end up disagreeing. */
+  {
+    const el=$("tHubotCharts");
+    const paint=()=>{ el.classList.toggle("on",!!cfg.hubotCharts);
+                      el.setAttribute("aria-checked", cfg.hubotCharts?"true":"false"); };
+    el.setAttribute("role","switch");
+    el.setAttribute("tabindex","0");
+    el.setAttribute("aria-label","Blueprint plays my ranges");
+    paint();
+    const flip=()=>{ cfg.hubotCharts=!cfg.hubotCharts; saveCfg(); paint();
+                     newTable(); buildVillains(); };
+    el.onclick=flip;
+    el.onkeydown=e=>{ if(e.key===" "||e.key==="Enter"){ e.preventDefault(); flip(); } };
+  }
   $("setFoot").textContent="Everything here is stored on this device only.";
 }
 
@@ -3399,13 +4204,25 @@ function buildCharts(){
     pick.disabled=true; reset.disabled=true; return;
   }
   pick.disabled=false;
-  const custom = chartName && chartName!=="the built-in set";
+  const custom = chartName && chartName!==BUILTIN_CHARTS;
   reset.disabled=!custom;
-  now.innerHTML = chartEntries
-    ? "Playing and grading from <b>"+esc(chartName)+"</b> · "+chartEntries+
-      (chartEntries===1?" chart":" charts")
-    : "No ranges loaded. The opponents fall back to the built-in pricer and "+
-      "trainer mode cannot grade.";
+  if(!chartEntries){
+    now.innerHTML = "No ranges loaded. The opponents fall back to the built-in "+
+      "pricer and trainer mode cannot grade.";
+    return;
+  }
+  /* **"Playing and grading" is two claims and only one of them is always
+     true.** Grading always reads the file. *Playing* from it depends on who is
+     at the table: `BotAgent` opens and defends from the charts, but the
+     blueprint plays its own preflop unless you loaded a set of your own — so
+     with the shipped default seated opposite the blueprint, the sentence was
+     asserting something no seat was doing. It is the same wrong-bot confusion
+     the strip and the footer exist to prevent, one panel further in. */
+  const count = " · "+chartEntries+(chartEntries===1?" chart":" charts");
+  now.innerHTML = (hubotActive && !hubotCharts)
+    ? "Grading from <b>"+esc(chartName)+"</b>"+count+". The blueprint plays "+
+      "<b>its own</b> preflop — load a file of your own and it will play yours."
+    : "Playing and grading from <b>"+esc(chartName)+"</b>"+count;
 }
 /* Open and close in one place, because both have to do the same two things:
    show/hide the panel, and stop/allow the page behind it scrolling. Without
@@ -3450,7 +4267,47 @@ function sheet(open){
    Sallys is not a table. */
 function buildVillains(){
   const host=$("cVillains"); host.innerHTML="";
-  const nBots=cfg.seats-1;
+  /* **The roster is hidden while the blueprint is playing, not disabled.**
+     `Opponent::Robo` ignores the profile document entirely, so every name in
+     the list would resolve to the same bot — a control that appears to choose
+     an opponent and cannot is worse than no control, and on this page it would
+     be actively misleading about which bot you are facing. */
+  $("botNote").innerHTML = "You are playing "+botLine()+".";
+  const hide = hubotActive;
+  $("cShuffle").hidden = hide;
+  $("villainNote").hidden = hide;
+  /* The preflop switch is the mirror image: only the blueprint has a preflop
+     of its own to replace, so it appears exactly where the roster does not. */
+  $("rHubotCharts").hidden = !hubotActive || !hasHubotCharts;
+  const note=$("hubotChartsNote");
+  note.hidden = $("rHubotCharts").hidden;
+  if(!note.hidden){
+    /* Four states, not two: the switch and "is a file of your own loaded" are
+       independent, and the pair where the switch is **on with no file** is real
+       — reset to the built-in set without touching the switch and you are in
+       it. Saying "On: preflop from <your last file>" there would name a file
+       that is not loaded and claim an effect that is not happening. The
+       setting is kept rather than silently flipped, so loading another file
+       does what you already asked for. */
+    const own = !!chartName && chartName!==BUILTIN_CHARTS;
+    note.className = "note";
+    note.innerHTML =
+      !own
+        ? (cfg.hubotCharts
+            ? "On, but the built-in set is loaded — so the blueprint is playing "+
+              "<b>its own</b> preflop. Load a range file below and this takes effect."
+            : "Load a range file below and this turns itself on. It stays off for "+
+              "the built-in set, because a blueprint playing charts is <b>not</b> "+
+              "the configuration its strength was measured in.")
+      : hubotCharts
+        ? "On: preflop from <code>"+esc(chartName)+"</code>, postflop from the "+
+          "blueprint. <b>Not the measured configuration</b> — its "+
+          "+1872 ± 253 mbb/hand was the blueprint playing its own preflop."
+        : "Off: the blueprint plays its own preflop and <code>"+esc(chartName)+
+          "</code> is only what you are graded against.";
+  }
+  if(hide) return;
+  const nBots=tableSeats()-1;
   const chosen=(cfg.villains||[]).slice(0,nBots);
   for(let i=0;i<nBots;i++){
     const row=document.createElement("div"); row.className="vrow";
@@ -3459,7 +4316,7 @@ function buildVillains(){
     // otherwise the position this seat is in is not announced with it.
     const lab=document.createElement("label"); lab.className="vseat";
     lab.htmlFor="vsel"+i;
-    lab.textContent=seatPos(cfg.seats,seat);   // not ST.labels: see `cSeat`
+    lab.textContent=seatPos(tableSeats(),seat);   // not ST.labels: see `cSeat`
     const sel=document.createElement("select");
     sel.id="vsel"+i;
     const any=document.createElement("option");
@@ -3508,12 +4365,32 @@ $("chartFile").onchange=async ev=>{
   // a load that never happened looked identical and the only confirmation was
   // buried in a panel you had to go and open.
   msg.className="note ok";
+  // Before `newTable()`, because `applyHubotCharts` runs inside it and reads
+  // the flag this sets. Returns whether it fired, so the confirmation can say
+  // that the opponent changed too — that is the thing being asked for.
+  const armed = armHubotCharts();
   msg.textContent = "Loaded "+f.name+" — "+chartEntries+
     (chartEntries===1?" chart":" charts")+" in play." +
+    (armed ? " The blueprint will play this preflop; switch that off under "+
+             "“Who you are playing”." : "") +
     (saveCharts(text,f.name) ? " Remembered for next time."
       : " Too big to remember, so it resets when you reload.");
-  buildCharts();
+  /* **`newTable()` first, then `buildCharts()`** — the same order `chartReset`
+     below already uses, and for a second reason now. Whether the blueprint is
+     playing your preflop is decided by `applyHubotCharts()` inside `newTable`,
+     and the panel reports it; built in the other order the panel read the
+     previous session's answer and said "The blueprint plays its own preflop"
+     on the very load that had just handed it yours. Measured saying exactly
+     that before this line moved.
+
+     **And `buildSettings()`, not `buildCharts()`** — the whole sheet, because
+     a chart file now moves things outside the ranges panel. Repainting only
+     that panel left the "Blueprint plays my ranges" switch reading off
+     immediately after the load had turned it on, and its note naming the
+     file before this one. Same bug, two panels along; measured both. One
+     repaint of everything the sheet shows cannot go stale in pieces. */
   newTable();                        // the ranges changed, so the table does
+  buildSettings();
   // The banner is on the main screen and is a live region, so the confirmation
   // survives closing the sheet and is announced.
   const b=$("banner");
@@ -3530,8 +4407,12 @@ $("chartReset").onclick=async ()=>{
   // the count comes from the engine accepting the set, which happens in
   // `reapplyCharts()` inside `newTable()`. Reading it first reported "no ranges
   // loaded" at the exact moment the ranges had just been restored.
+  //
+  // `buildSettings()` rather than `buildCharts()`, as in the loader above:
+  // dropping back to the built-in set also makes the preflop switch inert,
+  // and that has to be said where the switch is, not only in this panel.
   newTable();
-  buildCharts();
+  buildSettings();
 };
 
 $("shuffleBtn").onclick=()=>{
@@ -3570,8 +4451,8 @@ $("sheet").onclick=e=>{ if(e.target.id==="sheet") sheet(false); };
 
 /* ==================================================================== *
  * keyboard. Deliberately not a shortcut for everything: F, C and R are the
- * three a player reaches for, and Enter repeats the leftmost button so
- * "next hand" is one key.
+ * three a player reaches for, and Enter presses "Next" so a drill is one
+ * key per spot.
  * ==================================================================== */
 document.addEventListener("keydown",e=>{
   // An open panel owns the keyboard. Without this, browsing a range and
@@ -3582,10 +4463,20 @@ document.addEventListener("keydown",e=>{
   const btns=[...$("btns").children].filter(b=>!b.disabled);
   const byClass=c=>btns.find(b=>b.classList.contains(c));
   const k=(e.key||"").toLowerCase();
-  if(k==="enter"){ const b=byClass("b-next")||btns[0]; if(b){e.preventDefault();b.click();} return; }
+  /* **Enter presses Next, and only Next.** The old fallback was `|| btns[0]`,
+     and during a live decision the leftmost button is Fold — so Enter-Enter
+     through a drill folded the next spot unseen, and a keyboard user who had
+     tabbed onto Call and pressed Enter folded instead, because the handler's
+     preventDefault beat the focused button to it. When there is no Next,
+     falling through leaves Enter meaning what it always means: activate the
+     control that has focus. */
+  if(k==="enter"){ const b=byClass("b-next"); if(b){e.preventDefault();b.click();} return; }
   if(k==="f"){ const b=byClass("b-fold"); if(b){e.preventDefault();b.click();} return; }
   if(k==="c"){ const b=byClass("b-call")||byClass("b-check"); if(b){e.preventDefault();b.click();} return; }
   if(k==="r"){ const b=byClass("b-raise"); if(b){e.preventDefault();b.click();} return; }
+  // H for the readouts. Not in `btns`, so it is matched on the element rather
+  // than by class like the four above; `reveal` is idempotent and self-guards.
+  if(k==="h"){ const b=$("revealBtn"); if(b){e.preventDefault();b.click();} return; }
   if((k==="arrowleft"||k==="arrowright")&&!$("sizer").hidden){
     const sl=$("slider"), stepN=Math.max(1,Math.round((sl.max-sl.min)/40));
     sl.value=Number(sl.value)+(k==="arrowright"?stepN:-stepN);
