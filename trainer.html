@@ -40,12 +40,62 @@
      well below hearts in lightness because red/green is the pair colour-blind
      viewers cannot separate by hue. See play.html for the full reasoning. */
   --card:#fbe0cd; --card2:#f9d3b6; --card-back:#f0d4a9; --card-back2:#d6b283;
-  --card-blk:#221b12; --card-red:#c8321e; --card-blue:#6450bd; --card-green:#0f6640;
-  --raise:#f5301f; --call:#eb741c; --fold:#4a3922;
+  /* diamonds: a true lavender (was muddy violet); clubs: vintage Bianchi
+     celeste — the night deck's cools retuned 2026-08-04, worst suit pair
+     ΔE 4.2 → 13.9 protan */
+  --card-blk:#221b12; --card-red:#c8321e; --card-blue:#8b79e6; --card-green:#43a48c;
+  --raise:#f5301f; --call:#eb741c; --call-ink:#1a1003; --fold:#4a3922;
+  --line2:#5a3c1e;
   --gold:#eb741c; --good:#ffcf6a; --bad:#f5301f; --warn:#eb741c;
   --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,"Roboto Mono",monospace;
   --safeT:env(safe-area-inset-top); --safeB:env(safe-area-inset-bottom);
 }
+/* "Harbor" — the day theme, designed 2026-08-04 from the palette Papaya
+   Whip / Deep Space Blue / Flag Red / Molten Lava / Steel Blue and
+   validated pair by pair (numbers in APP.md). Each colour has ONE job:
+   papaya grounds, navy is the ink, Flag Red is the lamp printed (lit
+   states, the weight ramp), Molten is the needle, and Steel is the felt,
+   the measurements — and Call itself, with navy text. Because call and
+   felt share a hue, call-coloured elements sitting ON the felt wear a
+   navy ring (the rule below); everywhere else the papaya ground does the
+   separating. The deck is the validated day deck. */
+:root[data-theme="light"]{
+  --felt1:#669bbc; --felt2:#4d81a1; --felt3:#35688c;
+  --rail:#003049; --rail2:#12507a;
+  --bg:#fdf0d5; --panel:#f5e7c4; --panel2:#eddcac; --line:#d8c69a; --line2:#bda276;
+  --txt:#003049; --dim:#3d647c; --faint:#7793a4;
+  --amber:#c1121f; --amber-ink:#fdf0d5; --needle:#780000; --needle-ink:#fdeee6;
+  --glow:rgba(193,18,31,.25); --cool:rgba(102,155,188,.14);
+  --card:#fffdf7; --card2:#f4eedd; --card-back:#dfe7ee; --card-back2:#c3d3df;
+  --card-blk:#221b12; --card-red:#c1121f; --card-blue:#5d93b5; --card-green:#33684a;
+  --raise:#c1121f; --call:#669bbc; --call-ink:#003049; --fold:#f2e4bc;
+  --gold:#c1121f; --good:#8a5c00; --bad:#8a1a12; --warn:#b46a10;
+  --face-ink:#003049; --face-gold:#c1911d; --face-gold2:#8f6a0e;
+}
+:root[data-theme="light"] .tag-call{box-shadow:0 0 0 1.5px var(--call-ink)}
+/* The night chrome that is written in literals rather than tokens (the pod
+   gradient, the bar's fade, the pot's black pill, the grain and vignette)
+   gets its day counterpart here — printed paper, not a lamp. */
+:root[data-theme="light"] body::after{opacity:.06;mix-blend-mode:multiply}
+:root[data-theme="light"] body::before{
+  background:radial-gradient(125% 78% at 50% 36%,transparent 55%,rgba(72,52,20,.14) 100%)}
+:root[data-theme="light"] .seat .pod{
+  background:linear-gradient(#fffcf1,#f2e6cb);border:1px solid var(--line2);
+  box-shadow:0 4px 12px rgba(30,40,60,.25),inset 0 1px 0 rgba(255,255,255,.6)}
+:root[data-theme="light"] #bar{background:linear-gradient(#f4e5c4,var(--bg))}
+:root[data-theme="light"] #pot{
+  background:rgba(255,252,241,.85);border-color:rgba(0,48,73,.35);text-shadow:none}
+:root[data-theme="light"] #story{text-shadow:none}
+:root[data-theme="light"] #feltLabel{color:rgba(253,240,213,.5);text-shadow:none}
+:root[data-theme="light"] .abtn.fold{background:rgba(255,252,241,.6)}
+:root[data-theme="light"] .overlay{background:rgba(250,238,214,.96)}
+:root[data-theme="light"] #cellFreq{background:rgba(255,252,241,.98);border-color:var(--line2)}
+/* measurements wear Steel by day — the bars are information, not action */
+:root[data-theme="light"] .labbar,
+:root[data-theme="light"] .labrow .bar{background:#e8d8b2}
+:root[data-theme="light"] .labbar i{background:linear-gradient(90deg,#8fb6cf,#669bbc);box-shadow:none}
+:root[data-theme="light"] .labrow .bar i{background:#669bbc}
+:root[data-theme="light"] .labeq b{text-shadow:none}
 :root{--u:1}
 @media (min-width:700px)  and (min-height:720px){ :root{--u:1.15} }
 @media (min-width:900px)  and (min-height:860px){ :root{--u:1.3}  }
@@ -81,42 +131,42 @@ html,body{margin:0;height:100%;color:var(--txt);
   box-shadow:0 0 40px rgba(0,0,0,.6)}
 
 /* ---- top bar ---- */
+/* One header for the one page: the name on the left, round tool pills on the
+   right, session stats in a strip below. The bar used to carry the stats
+   itself plus a lit Play pill to a second page, with two colour-emoji tools
+   under a tint filter — a different chrome from the page it linked to.
+   Every icon up here is a text glyph, so `color` reaches all of them and the
+   emoji-filter hack is gone with the second page. */
 #top{display:flex;align-items:center;gap:8px;padding:8px 12px 6px}
-/* The top bar now carries a navigation pill as well as three stats and four
-   tools, so the stats have to survive being squeezed. `min-width:0` lets the
-   flex item shrink at all (flex items refuse to go below their content width
-   by default), and the ellipsis makes the failure legible instead of chopping
-   "Accuracy" mid-word. */
-.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;
-  padding:5px 8px;line-height:1.05;min-width:0;text-align:center;flex:0 1 auto}
-.stat b{display:block;font-size:20px;color:var(--amber);text-shadow:0 0 14px var(--glow);
-  font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.5px}
-.stat span{font-size:10px;letter-spacing:.3px;color:var(--dim);text-transform:uppercase;
-  display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #top .grow{flex:1}
+#brand{display:flex;align-items:center;gap:8px;min-width:0;
+  font-size:15px;font-weight:800;letter-spacing:1.1px;color:var(--txt);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#brand .g{color:var(--amber);text-shadow:0 0 13px var(--glow);font-size:19px}
+#brand i{font-style:normal}
 .iconbtn{background:var(--panel);border:1px solid var(--line);color:var(--txt);
-  width:46px;height:46px;border-radius:10px;font-size:24px;display:flex;flex:0 0 auto;
-  align-items:center;justify-content:center}
+  border-radius:999px;width:38px;height:38px;font-size:17px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.iconbtn:hover{color:var(--amber)}
 .iconbtn[disabled]{opacity:.35}
-.iconbtn.nav{width:auto;gap:6px;padding:0 13px;text-decoration:none;font-size:19px;
-  background:var(--amber);color:var(--amber-ink);border-color:var(--amber);
-  box-shadow:0 0 22px -6px var(--glow)}
-.iconbtn.nav b{font-size:14px;font-weight:800;letter-spacing:.4px}
-/* 🕘 and 👥 are colour emoji: the font draws them in its own palette and
-   `color` cannot touch them, so on an amber page they sit there as two blue
-   blobs. A sepia-plus-hue rotation pulls any emoji into the one hue this
-   interface has. The other two icons (▦ ⚙) are text glyphs and already
-   inherit `color`, so they are deliberately left alone. */
-#histBtn,#plBtn{filter:grayscale(1) sepia(1) saturate(6) hue-rotate(-14deg) brightness(1.05)}
-/* On a narrow phone the top bar is already full, so the label goes and the
-   suit alone carries it. */
-@media (max-width:540px){ .iconbtn.nav b{display:none} .iconbtn.nav{padding:0;width:40px} }
+/* % and vs are typographic icons — text in the mono, sized like a glyph. */
+.iconbtn.txt{font-family:var(--mono);font-weight:900;font-size:15px;letter-spacing:-.5px}
+#labBtn{font-size:17px}
+#strip{display:flex;gap:7px;padding:0 12px 6px}
+.stat{flex:1;background:linear-gradient(var(--panel),var(--panel2));
+  border:1px solid var(--line);border-radius:10px;
+  padding:6px 4px 5px;line-height:1.05;min-width:0;text-align:center}
+.stat b{display:block;font-size:18px;color:var(--amber);text-shadow:0 0 14px var(--glow);
+  font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.5px}
+.stat span{font-size:9px;letter-spacing:1.1px;color:var(--dim);text-transform:uppercase;
+  display:block;margin-top:2px;font-weight:700;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (max-width:540px){
   #top{gap:6px;padding:8px 8px 6px}
-  .stat{padding:5px 5px}
-  .stat b{font-size:17px}
-  .iconbtn{width:40px;height:40px;font-size:20px}
-  .iconbtn.nav{height:40px}
+  #strip{gap:5px;padding:0 8px 6px}
+  /* Five tools want the width: the wordmark drops to the suit alone. */
+  #brand i{display:none}
+  .stat b{font-size:16px}
 }
 
 /* ---- table ---- */
@@ -150,15 +200,13 @@ html,body{margin:0;height:100%;color:var(--txt);
 #story{margin-top:6px;font-size:14px;color:var(--txt);min-height:14px;text-shadow:0 1px 3px #000}
 #board{display:flex;gap:5px;justify-content:center;margin-bottom:6px;min-height:0}
 /* ==================================================================== *
- * Playing cards — shared by poker-trainer.html and play.html.
+ * Playing cards — inlined into the trainer at build time by `build.py`.
  *
- * Inlined into both at build time by `build.py`, so there is one card
- * recipe rather than two that drift. It was two: the four-colour deck
- * had to be written twice on the day it was added, which is exactly the
- * duplication this removes.
- *
- * Colour tokens live in each page's own `:root` (they are theme, not
- * card structure) and are named identically in both.
+ * Kept as a module of its own (from when a second page shared the deck)
+ * so the card recipe stays one thing: the four-colour deck once had to
+ * be written twice on the day it was added, which is exactly the
+ * duplication this removes. Colour tokens live in the page's `:root` —
+ * they are theme, not card structure.
  * ==================================================================== */
 
 /* One recipe, sized by a modifier class.
@@ -231,6 +279,61 @@ html,body{margin:0;height:100%;color:var(--txt);
     0 1px 3px rgba(0,0,0,.6),
     0 0 7px -2px var(--glow);
 }
+/* ---- face styles (user-selectable; see cards.js) ----
+   Applied only to the big faces — a 17px mini has no room for decoration and
+   the rank must stay the loudest thing on every card. Each style is one
+   ::before overlay (::after is the sheen above), sized by the card itself.
+   The gold pair and the ink read from tokens with night fallbacks, so the
+   day theme retints them by defining --face-* in its own block. */
+[data-face="sumi"] .bigcard::before, [data-face="sumi"] .boardcard::before,
+[data-face="sumi"] .bcard::before,   [data-face="sumi"] .vcard::before{
+  content:"";position:absolute;inset:3px;pointer-events:none;
+  border:2.5px solid var(--face-ink,#7a4a20);
+  border-radius:10px 7px 11px 6px;opacity:.6;
+  clip-path:polygon(1% 3%,97% 0,100% 96%,3% 100%);
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.12);
+}
+[data-face="hanafuda"] .bigcard::before, [data-face="hanafuda"] .boardcard::before,
+[data-face="hanafuda"] .bcard::before,   [data-face="hanafuda"] .vcard::before{
+  content:"";position:absolute;inset:2px;pointer-events:none;
+  border:3px solid var(--face-ink,#3a2414);border-radius:8px;opacity:.85;
+}
+[data-face="kasumi"] .bigcard::before, [data-face="kasumi"] .boardcard::before,
+[data-face="kasumi"] .bcard::before,   [data-face="kasumi"] .vcard::before{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 88 124'%3E%3Cg fill='%23d69434'%3E%3Crect x='34' y='10' width='58' height='7' rx='3.5'/%3E%3Crect x='46' y='16' width='50' height='7' rx='3.5'/%3E%3Crect x='-10' y='98' width='52' height='7' rx='3.5'/%3E%3Crect x='2' y='104' width='42' height='7' rx='3.5'/%3E%3C/g%3E%3C/svg%3E");
+  background-size:100% 100%;
+}
+:root[data-theme="light"] [data-face="kasumi"] .bigcard::before,
+:root[data-theme="light"] [data-face="kasumi"] .boardcard::before,
+:root[data-theme="light"] [data-face="kasumi"] .bcard::before,
+:root[data-theme="light"] [data-face="kasumi"] .vcard::before{
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 88 124'%3E%3Cg fill='%23669bbc'%3E%3Crect x='34' y='10' width='58' height='7' rx='3.5'/%3E%3Crect x='46' y='16' width='50' height='7' rx='3.5'/%3E%3Crect x='-10' y='98' width='52' height='7' rx='3.5'/%3E%3Crect x='2' y='104' width='42' height='7' rx='3.5'/%3E%3C/g%3E%3C/svg%3E");
+}
+[data-face="enso"] .bigcard::before, [data-face="enso"] .boardcard::before,
+[data-face="enso"] .bcard::before,   [data-face="enso"] .vcard::before{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.17;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Ccircle cx='40' cy='40' r='31' fill='none' stroke='%236b3d16' stroke-width='7.5' stroke-linecap='round' stroke-dasharray='168 28' transform='rotate(-64 40 40)'/%3E%3C/svg%3E") center/86% auto no-repeat;
+}
+:root[data-theme="light"] [data-face="enso"] .bigcard::before,
+:root[data-theme="light"] [data-face="enso"] .boardcard::before,
+:root[data-theme="light"] [data-face="enso"] .bcard::before,
+:root[data-theme="light"] [data-face="enso"] .vcard::before{
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Ccircle cx='40' cy='40' r='31' fill='none' stroke='%23003049' stroke-width='7.5' stroke-linecap='round' stroke-dasharray='168 28' transform='rotate(-64 40 40)'/%3E%3C/svg%3E");
+}
+[data-face="kintsugi"] .bigcard::before, [data-face="kintsugi"] .boardcard::before,
+[data-face="kintsugi"] .bcard::before,   [data-face="kintsugi"] .vcard::before{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.8;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 88 124'%3E%3Cg fill='none' stroke='%23d9a441' stroke-linecap='round'%3E%3Cpath d='M12 -2 C 20 22 14 34 30 48 C 44 60 40 74 52 88 C 60 97 58 110 66 126' stroke-width='2.4'/%3E%3Cpath d='M30 48 C 40 44 48 46 58 40 M52 88 C 44 96 34 96 26 104' stroke-width='1.3'/%3E%3C/g%3E%3C/svg%3E") center/100% 100% no-repeat;
+}
+[data-face="kinpaku"] .bigcard::before, [data-face="kinpaku"] .boardcard::before,
+[data-face="kinpaku"] .bcard::before,   [data-face="kinpaku"] .vcard::before{
+  content:"";position:absolute;top:-2px;left:-2px;width:44%;height:36%;
+  pointer-events:none;opacity:.85;
+  background:linear-gradient(135deg,var(--face-gold,#d9a441),var(--face-gold2,#a06b16));
+  clip-path:polygon(0 0,100% 0,88% 22%,96% 45%,70% 60%,54% 88%,28% 74%,0 92%);
+}
+
 /* On paper the same card is printed, not lit: the amber becomes ink on a warm
    stock rather than a lamp behind it, or the backs turn into six dark holes in
    a light table. */
@@ -303,7 +406,7 @@ html,body{margin:0;height:100%;color:var(--txt);
 .action-tag.show{opacity:1}
 .tag-fold{background:rgba(0,0,0,.6);color:var(--dim);border:1px solid var(--line)}
 .tag-raise{background:var(--raise);color:var(--needle-ink)}
-.tag-call{background:var(--call);color:var(--amber-ink)}
+.tag-call{background:var(--call);color:var(--call-ink)}
 .tag-post{background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
 .dealer{position:absolute;width:23px;height:23px;border-radius:50%;
   background:radial-gradient(circle at 35% 30%,#ffd074,var(--amber) 70%);color:var(--amber-ink);font-size:14px;font-weight:900;
@@ -351,8 +454,10 @@ html,body{margin:0;height:100%;color:var(--txt);
 .abtn:disabled{opacity:.32}
 /* fold is unlit, call is lit, raise is the needle — the same three
    intensities the range grid and play.html use. */
-.abtn.fold{background:transparent;border-color:#5a3c1e;color:var(--faint)}
-.abtn.call{background:var(--amber);color:var(--amber-ink);border-color:var(--amber);
+.abtn.fold{background:transparent;border-color:var(--line2);color:var(--faint)}
+/* --call, not --amber: at night they are the same lamp, but the day theme
+   splits them — Call is Steel with navy ink there */
+.abtn.call{background:var(--call);color:var(--call-ink);border-color:var(--call);
   box-shadow:0 0 26px -7px var(--glow)}
 .abtn.raise{background:var(--needle);color:var(--needle-ink);border-color:var(--needle);
   box-shadow:0 0 26px -7px rgba(195,58,38,.4)}
@@ -502,9 +607,6 @@ html,body{margin:0;height:100%;color:var(--txt);
 .swatch{width:22px;height:22px;border-radius:6px;border:1px solid var(--line);display:inline-block;vertical-align:middle}
 
 /* ---- Range Lab (equity & board-texture investigator) ---- */
-/* The % glyph is a text glyph like ▦ and ⚙, so it inherits the amber and
-   needs none of the emoji filter hack the clock and people icons carry. */
-#labBtn{font-family:var(--mono);font-weight:900;font-size:21px}
 .labnames{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);
   margin:0 4px 3px;font-weight:800;letter-spacing:.5px;text-transform:uppercase}
 .labeq{display:flex;align-items:center;gap:10px;margin:2px 0 0}
@@ -552,17 +654,30 @@ html,body{margin:0;height:100%;color:var(--txt);
   font-family:var(--mono);font-variant-numeric:tabular-nums}
 #labTop{width:100%;accent-color:var(--amber)}
 #labEditOverlay{z-index:64}
+/* card dressing picker */
+.backgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:8px;margin:4px 0 6px}
+.backsw{height:64px;border-radius:6px;border:2px solid var(--line);background:#181008;
+  position:relative;overflow:hidden;cursor:pointer;padding:0}
+.backsw.on{border-color:var(--amber);box-shadow:0 0 14px -4px var(--glow)}
+.backsw i{position:absolute;inset:0;display:block}
+.backsw b{position:absolute;left:0;right:0;bottom:0;font-size:8px;font-weight:700;text-align:center;
+  background:rgba(0,0,0,.55);color:#ffd9a8;padding:1px 2px;letter-spacing:.02em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cropRow{display:flex;gap:12px;align-items:center;margin-top:4px}
+.cropPrev{width:96px;height:135px;border-radius:8px;flex:0 0 auto;border:2px solid var(--line2);
+  background:#181008;cursor:grab;touch-action:none}
 .labminirow{display:flex;gap:12px;align-items:center;margin-top:4px}
 .labminirow .grow{flex:1;min-width:0}
 .labminiwrap{background:none;border:none;padding:0;flex:0 0 auto;cursor:pointer}
 /* the lab's mini matrix IS an .mgrid, held at tap-target size beside the button */
 #labMini{width:128px;height:128px;border-radius:4px}
-/* Five tools up top is one more than the bar was designed for; below 430px the
-   icons give back the pixels rather than squeezing the three stats to noise. */
+/* Below 430px the icons give back a few pixels so five pills and the suit
+   mark share the bar without crowding. */
 @media (max-width:430px){
   #top{gap:5px}
-  .iconbtn{width:36px;height:36px;font-size:19px}
-  #labBtn{font-size:17px}
+  .iconbtn{width:35px;height:35px;font-size:16px}
+  .iconbtn.txt{font-size:13.5px}
+  #labBtn{font-size:15px}
 }
 
 /* ---- wider screens: grow the felt instead of leaving a phone-shaped column ---- */
@@ -633,10 +748,13 @@ html,body{margin:0;height:100%;color:var(--txt);
   .action-tag{font-size:15px;top:-20px;padding:2px 10px}
   .bet{font-size:15px;padding:2px 9px}
   .eq{font-size:15px;padding:2px 10px}
-  .stat b{font-size:24px}
-  .stat span{font-size:12px}
-  .iconbtn{width:52px;height:52px;font-size:27px}
-  .iconbtn.nav{padding:0 18px}
+  .stat b{font-size:22px}
+  .stat span{font-size:11px}
+  #brand{font-size:17px}
+  #brand .g{font-size:22px}
+  .iconbtn{width:46px;height:46px;font-size:20px}
+  .iconbtn.txt{font-size:18px}
+  #labBtn{font-size:20px}
   #feedback{font-size:20px}
   #feedback .sub{font-size:16px}
   #feedback .fbl li{font-size:15px}
@@ -669,22 +787,21 @@ html,body{margin:0;height:100%;color:var(--txt);
 <body>
 <div id="app">
   <div id="top">
+    <!-- The one page of the app, so the bar carries the name rather than a
+         mode switch. (A play-a-full-hand page existed and was retired before
+         release — one product surface to polish; git history holds it.) -->
+    <div id="brand"><span class="g">♠</span><i>Preflop Trainer</i></div>
+    <div class="grow"></div>
+    <button class="iconbtn" id="histBtn" title="Hand history">↺</button>
+    <button class="iconbtn txt" id="plBtn" title="Players' ranges">vs</button>
+    <button class="iconbtn" id="chartBtn" title="Show chart">▤</button>
+    <button class="iconbtn txt" id="labBtn" title="Range Lab — equity &amp; how ranges hit boards">%</button>
+    <button class="iconbtn" id="setBtn" title="Settings">⚙</button>
+  </div>
+  <div id="strip">
     <div class="stat"><b id="stHands">0</b><span>Hands</span></div>
     <div class="stat"><b id="stAcc">–</b><span>Accuracy</span></div>
     <div class="stat"><b id="stStreak">0</b><span>Streak</span></div>
-    <div class="grow"></div>
-    <!-- The other half of the app. This is a link and not a button because it
-         is a navigation, and because a middle-click or a long-press should be
-         able to open it the way any link can. It sits apart from the tool
-         icons and is the only lit control up here, so it reads as "go there"
-         rather than as a fifth setting. -->
-    <a class="iconbtn nav" id="playLink" href="./index.html"
-       title="Play a hand against the bot">♠<b>Play</b></a>
-    <button class="iconbtn" id="histBtn" title="Hand history">🕘</button>
-    <button class="iconbtn" id="plBtn" title="Players' ranges">👥</button>
-    <button class="iconbtn" id="chartBtn" title="Show chart">▦</button>
-    <button class="iconbtn" id="labBtn" title="Range Lab — equity &amp; how ranges hit boards">%</button>
-    <button class="iconbtn" id="setBtn" title="Settings">⚙</button>
   </div>
 
   <div id="tableWrap">
@@ -764,6 +881,11 @@ html,body{margin:0;height:100%;color:var(--txt);
   </div>
   <div class="settingsScroll">
     <div class="setgrp">
+      <h3>Theme</h3>
+      <div class="chips" id="themeChips"></div>
+      <div class="hintline"><b>Auto</b> follows your device.</div>
+    </div>
+    <div class="setgrp">
       <h3>Table Size</h3>
       <div class="chips" id="sizeChips"></div>
     </div>
@@ -795,11 +917,34 @@ html,body{margin:0;height:100%;color:var(--txt);
       <div class="hintline" id="chartMsg">Load your own <b>ranges.json</b>, or <b>Build / Edit</b> your own by painting each position. Stored only on this device — tap a set to switch, ✎ to edit.</div>
     </div>
     <div class="setgrp">
+      <h3>Cards</h3>
+      <div class="bld-sublab">Face style</div>
+      <div class="chips" id="faceChips"></div>
+      <div class="bld-sublab">Deck back</div>
+      <div class="backgrid" id="backGrid"></div>
+      <div id="backCropWrap" class="hidden">
+        <div class="bld-sublab">Frame the artwork — drag the preview</div>
+        <div class="cropRow">
+          <div class="cropPrev" id="backCropPrev"></div>
+          <div class="grow">
+            <label class="bld-note" style="display:block">Zoom
+              <input type="range" id="backCropZoom" min="100" max="250" value="118" style="width:100%"></label>
+            <div class="rowbtns"><button id="backCropReset">Reset framing</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="hintline">Applies to both Train and Play. The art backs are museum scans (Met &amp; Art Institute of Chicago, public domain — credits in NOTICE); they load as files beside the app, so a bare single-file copy shows the patterns only.</div>
+    </div>
+    <div class="setgrp">
       <h3>Stats</h3>
       <div class="hintline" id="statsLine"></div>
       <div class="rowbtns"><button class="danger" id="resetStats">Reset Stats</button></div>
     </div>
     <div class="hintline" id="srcLine"></div>
+    <!-- "Am I running the current build?" has been the most expensive question
+         of this project's development; the play page answered it with a footer
+         stamp and the trainer never had one. `build.py` fills it in. -->
+    <div class="hintline">build 2026-08-04 08:21 ce1102b</div>
   </div>
 </div>
 
@@ -10184,10 +10329,11 @@ const SUITS = [["s","♠","s"],["h","♥","h"],["d","♦","d"],["c","♣","c"]];
 const SEATS = DATA.meta.positions;            // UTG..BB (8)
 const SEAT_LABEL = {"UTG":"UTG","UTG+1":"UTG1","LJ":"LJ","HJ":"HJ","CO":"CO","BTN":"BTN","SB":"SB","BB":"BB"};
 const ACT_COL = {raise:0,call:1,fold:2};
-/* Must stay in step with --raise / --call / --fold in the stylesheet: the
-   grid mixes these three by weight, so an anchor that disagrees with the
-   legend produces cells in a colour the legend never explains. */
-const COL_RGB = [[195,58,38],[235,116,28],[74,57,34]]; // raise/call/fold
+/* Must stay in step with --raise / --call / --fold in the stylesheet — per
+   theme: the grid mixes these three by weight, so an anchor that disagrees
+   with the legend produces cells in a colour the legend never explains.
+   applyTheme() swaps it alongside the tokens. */
+let COL_RGB = [[195,58,38],[235,116,28],[74,57,34]]; // raise/call/fold
 const SCENARIOS = [
   {id:"rfi",     name:"RFI (open)"},
   {id:"vs_limp", name:"vs Limp (ISO)"},
@@ -10316,16 +10462,14 @@ function drawHandClass(deck,h){ // pick concrete 2 cards for a hand class from d
 }
 function shuffle(a){for(let i=a.length-1;i>0;i--){const j=rnd(i+1);[a[i],a[j]]=[a[j],a[i]];}return a;}
 /* ==================================================================== *
- * Playing cards — shared by poker-trainer.html and play.html.
+ * Playing cards — inlined into the trainer at build time.
  *
- * Inlined into both at build time. Each page keeps its own adapter from
- * whatever it stores a card as into `(rank, suitLetter)`:
- *
- *   play.html   a numeric id, `rank<<2 | suit`, matching `core::cards`
- *   the trainer a two-character string, "As"
- *
- * Everything downstream of that pair is here, so the deck looks the same
- * in both and a change to it is one edit.
+ * Written when two pages shared one deck (the retired play-vs-bot page
+ * held cards as `rank<<2 | suit`, matching `core::cards`; the trainer
+ * holds a two-character string, "As"), and kept as its own module so a
+ * future second page starts from the shared deck rather than a copy.
+ * The page adapts its card into `(rank, suitLetter)`; everything
+ * downstream of that pair is here.
  * ==================================================================== */
 const CARD_GLYPH = {s:"♠", h:"♥", d:"♦", c:"♣"};
 
@@ -10355,6 +10499,175 @@ function cardMini(rank, suit, extra){
   const p = cardParts(rank, suit);
   return '<div class="mini ' + p.cls + ' ' + (extra || "") + '">' +
          p.r + p.sym + '</div>';
+}
+
+/* ==================================================================== *
+ * Deck dressing — user-selectable card backs and face styles.
+ *
+ * Shared because the choice must hold across both apps: the pods'
+ * face-down cards are `.mini.back` in both, and the big faces share the
+ * `.pc` recipe above. The choice persists in one localStorage key; each
+ * page calls `applyCardPrefs()` at boot and after the picker changes it.
+ *
+ * Backs come in two kinds:
+ *  - wagara patterns: classic Japanese geometry drawn here as tiny SVG
+ *    data URIs — ours outright, tinted per theme;
+ *  - art backs: public-domain woodblock prints (Met / AIC open access,
+ *    see NOTICE) shipped as sibling files under backs/, downscaled from
+ *    the museums' own scans. The framing (zoom/pan) is user-adjustable
+ *    and stored with the choice. From a bare file:// copy the sibling
+ *    files are absent and those options simply do not render — the
+ *    patterns carry the offline case.
+ * ==================================================================== */
+const CARD_PREFS_LS = "preflopTrainer.cards.v1";
+
+/* One theme preference for both apps — a table that is night in one tab and
+   day in the other is two products. "auto" follows the OS. */
+const THEME_LS = "preflopTrainer.theme";
+function themePref(){
+  try{
+    const t = localStorage.getItem(THEME_LS);
+    if(t === "light" || t === "dark" || t === "auto") return t;
+  }catch(e){}
+  return "auto";
+}
+function saveThemePref(t){ try{ localStorage.setItem(THEME_LS, t); }catch(e){} }
+function resolvedTheme(){
+  const p = themePref();
+  if(p !== "auto") return p;
+  try{ return matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"; }
+  catch(e){ return "dark"; }
+}
+
+const wagaraSvg = svg =>
+  "url('data:image/svg+xml," + encodeURIComponent(svg).replace(/'/g, "%27") + "')";
+
+/* Each pattern: (stroke, bg) -> {css, size}. Geometry lives here once. */
+const WAGARA = {
+  kikko: {title:"Kikkō", make:(s,b)=>{
+    const hex=(ox,oy)=>"<path d='M"+(ox+9)+" "+oy+" l9 5 v10 l-9 5 l-9 -5 v-10 z' fill='none' stroke='"+s+"' stroke-width='1.8'/>";
+    return {css:wagaraSvg("<svg xmlns='http://www.w3.org/2000/svg' width='36' height='30'><rect width='36' height='30' fill='"+b+"'/>"+hex(0,5)+hex(18,-10)+hex(18,20)+"</svg>"), size:"36px 30px"};
+  }},
+  asanoha: {title:"Asanoha", make:(s,b)=>{
+    const st="stroke='"+s+"' stroke-width='1.5' fill='none'";
+    let p="";
+    const tri=(x0,y0,x1,y1,x2,y2)=>{
+      const cx=(x0+x1+x2)/3, cy=(y0+y1+y2)/3;
+      p+="<path d='M"+x0+" "+y0+" L"+x1+" "+y1+" L"+x2+" "+y2+" Z' "+st+"/>";
+      p+="<path d='M"+cx+" "+cy+" L"+x0+" "+y0+" M"+cx+" "+cy+" L"+x1+" "+y1+" M"+cx+" "+cy+" L"+x2+" "+y2+"' "+st+"/>";
+    };
+    tri(0,0,32,0,16,27.7); tri(0,0,16,27.7,0,55.4); tri(32,0,16,27.7,32,55.4);
+    tri(0,55.4,32,55.4,16,27.7); tri(-16,27.7,16,27.7,0,55.4); tri(16,27.7,48,27.7,32,55.4);
+    return {css:wagaraSvg("<svg xmlns='http://www.w3.org/2000/svg' width='32' height='55.4'><rect width='32' height='55.4' fill='"+b+"'/>"+p+"</svg>"), size:"32px 55.4px"};
+  }},
+  shippo: {title:"Shippō", make:(s,b)=>{
+    const c=(x,y)=>"<circle cx='"+x+"' cy='"+y+"' r='20' fill='none' stroke='"+s+"' stroke-width='1.7'/>";
+    return {css:wagaraSvg("<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><rect width='40' height='40' fill='"+b+"'/>"+c(0,0)+c(40,0)+c(0,40)+c(40,40)+c(20,20)+"</svg>"), size:"40px 40px"};
+  }},
+  uroko: {title:"Uroko", make:(s,b)=>({
+    css:wagaraSvg("<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28'><rect width='28' height='28' fill='"+b+"'/><path d='M0 14 L7 0 L14 14 Z M14 14 L21 0 L28 14 Z M-7 28 L0 14 L7 28 Z M7 28 L14 14 L21 28 Z M21 28 L28 14 L35 28 Z' fill='"+s+"'/></svg>"), size:"28px 28px"})},
+  seigaiha: {title:"Seigaiha", make:(s,b)=>{
+    const fan=(cx,cy)=>{
+      let g="<g><circle cx='"+cx+"' cy='"+cy+"' r='15' fill='"+b+"'/>";
+      [15,11,7,3].forEach(r=>{ g+="<circle cx='"+cx+"' cy='"+cy+"' r='"+r+"' fill='none' stroke='"+s+"' stroke-width='1.6'/>"; });
+      return g+"</g>";
+    };
+    return {css:wagaraSvg("<svg xmlns='http://www.w3.org/2000/svg' width='64' height='32'><rect width='64' height='32' fill='"+b+"'/>"+fan(16,32)+fan(48,32)+fan(-16,16)+fan(16,16)+fan(48,16)+fan(80,16)+fan(0,0)+fan(32,0)+fan(64,0)+"</svg>"), size:"64px 32px"};
+  }},
+  tatewaku: {title:"Tatewaku", make:(s,b)=>{
+    const col=(x,fl)=>"<path d='M"+x+" 0 C "+(x+(fl?7:-7))+" 8 "+(x+(fl?7:-7))+" 16 "+x+" 24 C "+(x+(fl?-7:7))+" 32 "+(x+(fl?-7:7))+" 40 "+x+" 48' fill='none' stroke='"+s+"' stroke-width='2'/>";
+    return {css:wagaraSvg("<svg xmlns='http://www.w3.org/2000/svg' width='28' height='48'><rect width='28' height='48' fill='"+b+"'/>"+col(7,true)+col(21,false)+"</svg>"), size:"28px 48px"};
+  }},
+  sakura: {title:"Sakura", make:(s,b)=>{
+    const bloom=(cx,cy,r,rot)=>{
+      let g="";
+      for(let i=0;i<5;i++){ const a=rot+i*72*Math.PI/180;
+        g+="<circle cx='"+(cx+Math.cos(a)*r).toFixed(1)+"' cy='"+(cy+Math.sin(a)*r).toFixed(1)+"' r='"+(r*0.62).toFixed(1)+"' fill='none' stroke='"+s+"' stroke-width='1.4'/>"; }
+      return g+"<circle cx='"+cx+"' cy='"+cy+"' r='1.4' fill='"+s+"'/>";
+    };
+    return {css:wagaraSvg("<svg xmlns='http://www.w3.org/2000/svg' width='52' height='52'><rect width='52' height='52' fill='"+b+"'/>"+bloom(14,14,5,0.3)+bloom(40,36,6,0.9)+bloom(44,8,3.5,1.6)+bloom(8,42,3.5,2.2)+"</svg>"), size:"52px 52px"};
+  }},
+  kumo: {title:"Kumo", make:(s,b)=>{
+    const cloud=(x,y)=>"<path d='M"+x+" "+y+" h14 a5 5 0 0 0 5 -5 a5 5 0 0 0 -5 -5 h-22 a4 4 0 0 1 -4 -4' fill='none' stroke='"+s+"' stroke-width='1.8'/>";
+    return {css:wagaraSvg("<svg xmlns='http://www.w3.org/2000/svg' width='48' height='40'><rect width='48' height='40' fill='"+b+"'/>"+cloud(18,32)+cloud(-6,12)+cloud(42,12)+"</svg>"), size:"48px 40px"};
+  }},
+};
+
+/* Per-theme pattern tints: the amber room inks in amber on near-black; the
+   printed day inks papaya or navy on its blues (sakura sits on molten red). */
+const WAGARA_TINTS = {
+  night: { stroke:"rgba(255,178,36,.45)", bg:"#241906",
+           per:{uroko:{stroke:"rgba(255,178,36,.28)"}, seigaiha:{stroke:"rgba(255,178,36,.5)"}, sakura:{stroke:"rgba(255,178,36,.5)"}} },
+  day:   { stroke:"rgba(253,240,213,.7)", bg:"#123c5b",
+           per:{kikko:{stroke:"rgba(0,48,73,.5)", bg:"#669bbc"},
+                uroko:{stroke:"rgba(0,48,73,.30)", bg:"#669bbc"},
+                kumo:{stroke:"rgba(0,48,73,.5)", bg:"#669bbc"},
+                seigaiha:{stroke:"rgba(253,240,213,.8)"},
+                sakura:{stroke:"rgba(253,240,213,.75)", bg:"#7c150e"}} },
+};
+
+/* The art registry. `fit` says which axis the image must fill so zoom can
+   never expose the card behind it: "w" for prints narrower than the card,
+   "h" for wider-than-tall sheets. Crops are the defaults; the picker lets
+   the user reframe and stores theirs alongside the choice. */
+const CARD_BACK_ART = [
+  {id:"whiteeye",   title:"White-eye on Flowering Branch", credit:"Hiroshige · AIC",  fit:"w", def:{z:1.18, ox:45, oy:18}},
+  {id:"foxfires",   title:"Fox Fires at Ōji",              credit:"Hiroshige · AIC",  fit:"w", def:{z:1.18, ox:50, oy:38}},
+  {id:"oumayagashi",title:"Oumayagashi",                   credit:"Hiroshige · AIC",  fit:"w", def:{z:1.18, ox:50, oy:45}},
+  {id:"ryogoku",    title:"Moon over Ryōgoku Bridge",      credit:"Hiroshige · AIC",  fit:"w", def:{z:1.18, ox:45, oy:28}},
+  {id:"redplum",    title:"Red Plum, Summer Moon",         credit:"Hiroshige · AIC",  fit:"h", def:{z:1.05, ox:64, oy:30}},
+  {id:"akiba",      title:"Precincts of the Akiba Shrine", credit:"Hiroshige · AIC",  fit:"w", def:{z:1.18, ox:50, oy:35}},
+  {id:"seikenji",   title:"Seikenji Fuji",                 credit:"Hiroshige · AIC",  fit:"w", def:{z:1.18, ox:50, oy:30}},
+  {id:"wave",       title:"The Great Wave",                credit:"Hokusai · Met",    fit:"h", def:{z:1.12, ox:48, oy:30}},
+  {id:"moonflame",  title:"Moon in the Flame",             credit:"Yoshitoshi · Met", fit:"w", def:{z:1.15, ox:50, oy:22}},
+];
+
+function cardPrefs(){
+  try{
+    const p = JSON.parse(localStorage.getItem(CARD_PREFS_LS));
+    if(p && typeof p === "object")
+      return {back:p.back||"circuit", face:p.face||"classic", crops:p.crops||{}};
+  }catch(e){}
+  return {back:"circuit", face:"classic", crops:{}};
+}
+function saveCardPrefs(p){
+  try{ localStorage.setItem(CARD_PREFS_LS, JSON.stringify(p)); }catch(e){}
+}
+
+/* CSS for one back choice, as a rule for `sel` (default: the pod cards).
+   "circuit" returns "" — the stylesheet's own back is the default. */
+function cardBackCss(id, crops, theme, sel){
+  sel = sel || ".mini.back";
+  if(!id || id === "circuit") return "";
+  if(WAGARA[id]){
+    const t = WAGARA_TINTS[theme === "light" ? "day" : "night"];
+    const o = (t.per && t.per[id]) || {};
+    const w = WAGARA[id].make(o.stroke || t.stroke, o.bg || t.bg);
+    return sel + "{background:" + w.css + " " + (o.bg || t.bg) + ";background-size:" + w.size + ";color:transparent;border-color:rgba(0,0,0,.35)}";
+  }
+  const art = CARD_BACK_ART.find(a => a.id === id);
+  if(!art) return "";
+  const c = (crops && crops[id]) || art.def;
+  const size = art.fit === "h" ? "auto " + (c.z*100) + "%" : (c.z*100) + "% auto";
+  return sel + "{background:#181008 url('backs/" + id + ".jpg') no-repeat;"
+    + "background-size:" + size + ";background-position:" + c.ox + "% " + c.oy + "%;"
+    + "color:transparent;border-color:rgba(0,0,0,.4)}";
+}
+
+function applyCardPrefs(){
+  if(!document.head || !document.head.appendChild) return;   // headless harness
+  const p = cardPrefs();
+  document.documentElement.setAttribute("data-face", p.face || "classic");
+  let st = document.getElementById("cardBackStyle");
+  if(!st){
+    st = document.createElement("style");
+    st.id = "cardBackStyle";
+    document.head.appendChild(st);
+  }
+  const theme = document.documentElement.getAttribute("data-theme") || "";
+  // :not(.backsw *): the picker's swatches each show their OWN back and must
+  // not be repainted by the table-wide choice
+  st.textContent = cardBackCss(p.back, p.crops, theme, ".mini.back:not(.backsw *)");
 }
 
 /* This page stores a card as a two-character string, "As"; the shared code
@@ -11646,33 +11959,39 @@ function storyFor(node){
   }
   return "";
 }
+/* The live actions for this spot, always in fold → call → raise order,
+   each tagged with the fixed slot it occupies. This used to return only the
+   live buttons in per-scenario order — RFI spots led with the raise — so
+   every scenario had its own geography and the finger memory a drill exists
+   to build was aimed at a moving target. Order is now an invariant of the
+   bar, not a property of the spot. */
 function buttonSpec(scen,chart){
   if(scen==="flop"){
     const toCall=Math.min(H.fBet-(H.fCommit[H.hero]||0), stackLeft(H.hero));
     const bet=flopBetSize();
-    // no fold button when checking is free — folding there is never right
+    // no live fold when checking is free — folding there is never right
     if(toCall>0){
-      const spec=[{l:"Fold",col:2,cls:"fold"},{l:"Call",col:1,cls:"call"}];
+      const spec=[{l:"Fold",col:2,slot:"fold"},{l:"Call",col:1,slot:"call"}];
       // you can always raise a bet; the cap only stops the bots re-raising forever
       if(flopRaiseTo()>H.fBet && H.fRaises<3)
-        spec.push({l:`Raise ${fmt(flopRaiseTo())}`,col:0,cls:"raise"});
+        spec.push({l:`Raise ${fmt(flopRaiseTo())}`,col:0,slot:"raise"});
       return spec;
     }
-    return bet>=0.5 ? [{l:"Check",col:1,cls:"call"},{l:`Bet ${fmt(bet)}`,col:0,cls:"raise"}]
-                    : [{l:"Check",col:1,cls:"call"}];
+    const spec=[{l:"Check",col:1,slot:"call"}];
+    if(bet>=0.5) spec.push({l:`Bet ${fmt(bet)}`,col:0,slot:"raise"});
+    return spec;
   }
   const rl=chart.raise_label||"Raise";
   // some open charts (notably the SB) have a limp/complete range -> offer Limp
   const hasLimp = Object.values(chart.grid).filter(f=>f[1]>0.15).length>=4;
+  const F={l:"Fold",col:2,slot:"fold"}, R={l:rl,col:0,slot:"raise"};
   switch(scen){
-    case "rfi": return hasLimp
-      ? [{l:"Fold",col:2,cls:"fold"},{l:"Limp",col:1,cls:"call"},{l:rl,col:0,cls:"raise"}]
-      : [{l:rl,col:0,cls:"raise"},{l:"Fold",col:2,cls:"fold"}];
-    case "vs_limp": return [{l:"Fold",col:2,cls:"fold"},{l:"Over-limp",col:1,cls:"call"},{l:rl,col:0,cls:"raise"}];
+    case "rfi":     return hasLimp ? [F,{l:"Limp",col:1,slot:"call"},R] : [F,R];
+    case "vs_limp": return [F,{l:"Over-limp",col:1,slot:"call"},R];
     case "vs_rfi":
-    case "vs_3bet": return [{l:"Fold",col:2,cls:"fold"},{l:"Call",col:1,cls:"call"},{l:rl,col:0,cls:"raise"}];
-    case "vs_4bet": return [{l:"Fold",col:2,cls:"fold"},{l:"Call",col:1,cls:"call"},{l:"All-In",col:0,cls:"raise"}];
-    case "vs_5bet": return [{l:"Fold",col:2,cls:"fold"},{l:"Call",col:1,cls:"call"}];
+    case "vs_3bet": return [F,{l:"Call",col:1,slot:"call"},R];
+    case "vs_4bet": return [F,{l:"Call",col:1,slot:"call"},{l:"All-In",col:0,slot:"raise"}];
+    case "vs_5bet": return [F,{l:"Call",col:1,slot:"call"}];
   }
   return [];
 }
@@ -11682,11 +12001,19 @@ function buildButtons(node){
   const toCall = node.scenario==="flop"
     ? Math.round((H.fBet-(H.fCommit[H.hero]||0))*10)/10
     : Math.round((maxCommitted()-(H.committed[H.hero]||0))*10)/10;
-  specs.forEach(sp=>{
-    const b=document.createElement("button"); b.className="abtn "+sp.cls;
-    // `sp.l` carries the file's own `raise_label` on the raise button — data.
-    b.innerHTML=esc(sp.l)+(sp.cls==="call"?`<small>${fmt(toCall)} bb</small>`:"");
-    b.onclick=()=>answerHero(sp.col); wrap.appendChild(b);
+  /* All three slots render every time; a spot that lacks one greys it out
+     rather than removing it, so no button ever moves. A dimmed button is the
+     same statement ("not offered here") the whole bar makes after you answer,
+     so the grammar is already established. */
+  [["fold","Fold"],["call","Call"],["raise","Raise"]].forEach(([slot,ghost])=>{
+    const sp=specs.find(s=>s.slot===slot);
+    const b=document.createElement("button"); b.className="abtn "+slot;
+    if(sp){
+      // `sp.l` carries the file's own `raise_label` on the raise button — data.
+      b.innerHTML=esc(sp.l)+(slot==="call"?`<small>${fmt(toCall)} bb</small>`:"");
+      b.onclick=()=>answerHero(sp.col);
+    }else{ b.disabled=true; b.textContent=ghost; }
+    wrap.appendChild(b);
   });
 }
 function clearButtons(){ document.querySelectorAll("#buttons .abtn").forEach(b=>b.disabled=true); }
@@ -12033,7 +12360,7 @@ function drillSetup(m){
     committed[hero]=24; committed[vs]=100; act[hero]={t:"raise",label:`4-Bet`}; act[vs]={t:"raise",label:`5-Bet ALL-IN`}; }
   const chart=resolveChart(m.size,hero,m.scenario,vs);
   const isoM=m.scenario==="vs_limp";
-  // the range the villain is repping, so 👥 works inside a drill too
+  // the range the villain is repping, so the vs button works inside a drill too
   const vr={}, vch={vs_rfi:["rfi",vs,null], vs_3bet:["vs_rfi",vs,hero],
                    vs_4bet:["vs_3bet",vs,hero], vs_5bet:["vs_4bet",vs,hero]}[m.scenario];
   if(vch){ const c=resolveChart(m.size,vch[1],vch[0],vch[2]); if(c) vr[vs]={chart:c,idx:0}; }
@@ -12059,7 +12386,7 @@ function exitDrill(){
   const remaining=Object.keys(MISTAKES).length;
   DRILL=null; if(drillSavedSize!=null) S.size=drillSavedSize; drillSavedSize=null; H=null;
   $("feedback").innerHTML= remaining
-    ? `Retrain round done — <b>${remaining}</b> still to master.<span class="sub">Tap 🕘 to retrain again.</span>`
+    ? `Retrain round done — <b>${remaining}</b> still to master.<span class="sub">Tap ↺ to retrain again.</span>`
     : `<span style="color:var(--good)">✓ All mistakes cleared! Nice.</span>`;
   $("buttons").innerHTML=""; $("nextBtn").classList.remove("hidden");
 }
@@ -12078,9 +12405,65 @@ function refreshStats(){
     + (fd?` · Flop reads ${Math.round(100*(S.stats.flopCorrect||0)/fd)}% of ${fd}`:"");
 }
 
+/* ---------- card dressing picker (backs + face styles; see cards.js) ---------- */
+const FACE_STYLES=[["classic","Classic"],["sumi","Sumi-e"],["hanafuda","Hanafuda"],
+  ["kasumi","Kasumi"],["enso","Ensō"],["kintsugi","Kintsugi"],["kinpaku","Kinpaku"]];
+function backOptions(){
+  return [{id:"circuit",title:"Circuit"}]
+    .concat(Object.keys(WAGARA).map(k=>({id:k,title:WAGARA[k].title})))
+    .concat(CARD_BACK_ART.map(a=>({id:a.id,title:a.title})));
+}
+/* the swatches and the crop preview are dressed by the SAME rule generator
+   the pods use, so what the picker shows is what the table deals */
+function renderBackSwatchStyles(){
+  if(!document.head || !document.head.appendChild) return;   // headless harness
+  let st=$("backSwatchStyles");
+  if(!st){ st=document.createElement("style"); st.id="backSwatchStyles"; document.head.appendChild(st); }
+  const p=cardPrefs(), theme=document.documentElement.getAttribute("data-theme")||"";
+  st.textContent=backOptions().map(o=>cardBackCss(o.id,p.crops,theme,'#backGrid [data-back="'+o.id+'"] i')).join("\n")
+    + "\n" + cardBackCss(p.back,p.crops,theme,"#backCropPrev");
+}
+function renderCardSettings(){
+  chipRow("faceChips",FACE_STYLES,cardPrefs().face,id=>{
+    const p=cardPrefs(); p.face=id; saveCardPrefs(p);
+    applyCardPrefs(); renderCardSettings();
+  });
+  const p=cardPrefs(), grid=$("backGrid"); grid.innerHTML="";
+  backOptions().forEach(o=>{
+    const b=document.createElement("button");
+    b.className="backsw"+(p.back===o.id?" on":""); b.dataset.back=o.id;
+    b.innerHTML='<i class="mini back" style="width:100%;height:100%"></i><b>'+esc(o.title)+"</b>";
+    b.onclick=()=>{
+      const q=cardPrefs(); q.back=o.id; saveCardPrefs(q);
+      applyCardPrefs(); renderCardSettings();
+    };
+    grid.appendChild(b);
+  });
+  const art=CARD_BACK_ART.find(a=>a.id===p.back);
+  $("backCropWrap").classList.toggle("hidden",!art);
+  if(art){
+    const c=(p.crops&&p.crops[art.id])||art.def;
+    $("backCropZoom").value=Math.round(c.z*100);
+  }
+  renderBackSwatchStyles();
+}
+function backCropUpdate(fn){
+  const p=cardPrefs();
+  const art=CARD_BACK_ART.find(a=>a.id===p.back);
+  if(!art) return;
+  const c={...((p.crops&&p.crops[art.id])||art.def)};
+  fn(c);
+  c.z=Math.max(1,Math.min(2.5,c.z));
+  c.ox=Math.max(0,Math.min(100,c.ox)); c.oy=Math.max(0,Math.min(100,c.oy));
+  p.crops=p.crops||{}; p.crops[art.id]=c;
+  saveCardPrefs(p); applyCardPrefs(); renderBackSwatchStyles();
+}
+
 /* ---------- settings UI ---------- */
 const SCEN_HINT=$("scenHint").innerHTML;
 function renderSettings(){
+  chipRow("themeChips",[["dark","Night"],["light","Day"],["auto","Auto"]],
+    themePref(),v=>{ saveThemePref(v); applyTheme(); renderSettings(); });
   // table sizes
   const sz=$("sizeChips"); sz.innerHTML="";
   [8,6,5,4,3,2].forEach(n=>{
@@ -12128,6 +12511,7 @@ function renderSettings(){
   });
   $("scenHint").innerHTML = avail.size ? SCEN_HINT
     : `<span style="color:var(--bad)">The loaded chart set has no spots for this table size and seat selection.</span>`;
+  renderCardSettings();
   renderChartList();
   $("srcLine").textContent="";
   refreshStats();
@@ -12207,8 +12591,8 @@ function pfPairCounts(){
   if(PF_NP||!PF_EQ) return PF_NP;
   // integer ids and the i<->j symmetry (disjointness is symmetric, so the
   // ordered count is too): ~10x cheaper than the string-compare double
-  // triangle this replaces, and this can run during first paint when the
-  // play page's %-link lands on trainer.html#lab with a cold localStorage
+  // triangle this replaces, and this can run during first paint when a
+  // #lab deep link arrives with a cold localStorage
   const n=PF_EQ.n, cs=PF_EQ.names.map(h=>handCombos(h).map(cc=>[PHE_ID[cc[0]],PHE_ID[cc[1]]]));
   PF_NP=new Uint16Array(n*n);
   for(let i=0;i<n;i++)for(let j=i;j<n;j++){
@@ -12742,12 +13126,15 @@ function labUsedCards(){
   LAB.sides.forEach(s=>{ if(s.mode==="hand") s.cards.forEach(c=>{ if(c) u.add(c); }); });
   return u;
 }
-/* One unlit→lit ramp with two destinations, indexed off COL_RGB so a retheme
-   stays one edit: amber (the call anchor) carries weight, and the needle (the
-   raise anchor) carries the filtered view so it can never be misread as
-   weight. */
+/* One unlit→lit ramp with two destinations per theme: weight ramps to the
+   LAMP and the filter to the NEEDLE, in the needle so it can never be
+   misread as weight. At night lamp and needle coincide with the call and
+   raise anchors; by day the lamp is Flag Red while Call is Steel — a steel
+   weight ramp would read as a measurement, not presence. */
 function labRamp(x,hot){
-  const a=[21,14,8], b=COL_RGB[hot?0:1];
+  const light=document.documentElement.getAttribute("data-theme")==="light";
+  const a=light?[253,240,213]:[21,14,8];
+  const b=light?(hot?[120,0,0]:[193,18,31]):(hot?[195,58,38]:[235,116,28]);
   const r=Math.round(a[0]+(b[0]-a[0])*x), g=Math.round(a[1]+(b[1]-a[1])*x),
         bl=Math.round(a[2]+(b[2]-a[2])*x);
   return {css:"rgb("+r+","+g+","+bl+")", ink:cellInk(r,g,bl)};
@@ -13143,6 +13530,49 @@ $("chartFile").onchange=e=>{ const f=e.target.files&&e.target.files[0]; if(!f) r
     if(err) $("chartMsg").innerHTML=`<span style="color:var(--bad)">${err}</span>`; };
   r.readAsText(f); };
 
+/* ---- theme ---- */
+function applyTheme(){
+  const root=document.documentElement;
+  if(!root || !root.setAttribute) return;   // headless harness
+  const t=resolvedTheme();
+  if(t==="light") root.setAttribute("data-theme","light");
+  else root.removeAttribute("data-theme");
+  COL_RGB = t==="light"
+    ? [[193,18,31],[102,155,188],[242,228,188]]
+    : [[195,58,38],[235,116,28],[74,57,34]];
+  const m=document.querySelector('meta[name=theme-color]');
+  if(m) m.setAttribute("content", t==="light"?"#fdf0d5":"#0a0604");
+  applyCardPrefs();                       // pattern backs retint per theme
+  if(typeof LAB!=="undefined" && LAB){ labRenderMain(); labRenderEditor(); }
+}
+applyTheme();
+try{
+  matchMedia("(prefers-color-scheme: light)").addEventListener("change",()=>{
+    if(themePref()==="auto") applyTheme();
+  });
+}catch(e){}
+
+/* ---- card dressing wiring ---- */
+$("backCropZoom").oninput=()=>backCropUpdate(c=>{ c.z=(+$("backCropZoom").value)/100; });
+$("backCropReset").onclick=()=>{
+  const p=cardPrefs(), art=CARD_BACK_ART.find(a=>a.id===p.back);
+  if(!art) return;
+  backCropUpdate(c=>Object.assign(c,art.def));
+  $("backCropZoom").value=Math.round(art.def.z*100);
+};
+(function(){
+  let d=null;
+  const prev=$("backCropPrev");
+  prev.addEventListener("pointerdown",e=>{ d={x:e.clientX,y:e.clientY}; e.preventDefault(); });
+  window.addEventListener("pointermove",e=>{
+    if(!d) return;
+    const dx=e.clientX-d.x, dy=e.clientY-d.y; d={x:e.clientX,y:e.clientY};
+    backCropUpdate(c=>{ c.ox-=dx*0.6; c.oy-=dy*0.6; });
+  });
+  window.addEventListener("pointerup",()=>d=null);
+  window.addEventListener("pointercancel",()=>d=null);
+})();
+
 /* ---- range lab wiring ---- */
 $("labBtn").onclick=labOpen;
 $("labClose").onclick=()=>hideOverlay("labOverlay");
@@ -13247,8 +13677,8 @@ loadHistory(); loadMistakes();
 ensureSeatValidity(); refreshStats();
 window.addEventListener("resize",resizeRefresh);
 newHand();
-/* #lab is the play page's Range Lab link keeping its promise: arriving here
-   opens the lab itself, not a different-looking app the lab is hidden in. */
+/* A #lab deep link (old bookmarks, shared URLs) opens the Range Lab on
+   arrival rather than leaving it a further, undiscoverable tap away. */
 if(location.hash==="#lab") labOpen();
 /* register service worker for offline (no-op on file:// / http) */
 if("serviceWorker" in navigator){ window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(()=>{}); }); }

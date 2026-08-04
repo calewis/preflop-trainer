@@ -1,7 +1,7 @@
 {
-  "name": "Poker Trainer",
-  "short_name": "Poker",
-  "description": "Play poker against a bot that explains itself, and drill your preflop ranges. Free, offline, no account.",
+  "name": "Preflop Trainer",
+  "short_name": "Preflop",
+  "description": "Drill your preflop ranges with coaching feedback, and explore range-vs-range equity in the Range Lab. Free, offline, no account.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
