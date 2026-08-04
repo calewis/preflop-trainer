@@ -76,6 +76,18 @@
 /* The night chrome that is written in literals rather than tokens (the pod
    gradient, the bar's fade, the pot's black pill, the grain and vignette)
    gets its day counterpart here — printed paper, not a lamp. */
+/* Three night literals that misrender on paper (the user's screenshots):
+   the app column's near-black shadow becomes a grey band beside the table's
+   left/right edges; the near-black inner vignette turns the felt's outer
+   inches into mud against the navy rail; and the amber rim-light ring floats
+   over that mud as a pale thread — worst where the ellipse flattens at the
+   sides and along the bottom. By day the shadow goes navy-soft, the vignette
+   stays steel, and the rim light simply is not lit: print has no lamp. */
+:root[data-theme="light"] #app{box-shadow:0 0 34px rgba(0,48,73,.14)}
+:root[data-theme="light"] #table{
+  box-shadow:0 0 0 1px rgba(0,48,73,.55), inset 0 0 60px rgba(0,26,42,.45),
+             inset 0 2px 0 rgba(255,255,255,.14), 0 14px 30px rgba(0,48,73,.25)}
+:root[data-theme="light"] #table::after{display:none}
 :root[data-theme="light"] body::after{opacity:.06;mix-blend-mode:multiply}
 :root[data-theme="light"] body::before{
   background:radial-gradient(125% 78% at 50% 36%,transparent 55%,rgba(72,52,20,.14) 100%)}
@@ -97,10 +109,15 @@
 :root[data-theme="light"] .labrow .bar i{background:#669bbc}
 :root[data-theme="light"] .labeq b{text-shadow:none}
 :root{--u:1}
-@media (min-width:700px)  and (min-height:720px){ :root{--u:1.15} }
-@media (min-width:900px)  and (min-height:860px){ :root{--u:1.3}  }
-@media (min-width:1150px) and (min-height:1000px){ :root{--u:1.45} }
-@media (min-width:1500px) and (min-height:1200px){ :root{--u:1.6} }
+/* A wider window gets a bigger table. Height still appears in every tier —
+   the bar must never leave the screen — but only as the floor the tier
+   actually needs (felt is vh-capped), not the near-desktop heights that used
+   to keep a 1600×900 laptop at phone scale with dead margins either side. */
+@media (min-width:700px)  and (min-height:680px){ :root{--u:1.15} }
+@media (min-width:900px)  and (min-height:720px){ :root{--u:1.3}  }
+@media (min-width:1150px) and (min-height:780px){ :root{--u:1.45} }
+@media (min-width:1500px) and (min-height:840px){ :root{--u:1.6} }
+@media (min-width:1900px) and (min-height:920px){ :root{--u:1.8} }
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
 /* Fine grain and a vignette, identical to play.html. The grain is what keeps
    large dark gradients from banding on an OLED phone; the vignette pulls the
@@ -175,8 +192,15 @@ html,body{margin:0;height:100%;color:var(--txt);
 /* Same inset and rail width as play.html, so the felt is pixel-identical
    between the two modes rather than merely similar. */
 #table{position:absolute;inset:8px;border-radius:48% / 46%;
-  background:radial-gradient(ellipse 60% 44% at 50% 30%,rgba(235,116,28,.11),transparent 72%),
-             radial-gradient(ellipse at 50% 40%,var(--felt1),var(--felt2) 58%,var(--felt3) 100%);
+  /* The felt layers clip to the padding box and a rail-coloured layer fills
+     the whole border box beneath the border. A thick border on this flat an
+     ellipse antialiases with sub-pixel cracks at the extreme left/right, and
+     the felt used to paint under the border (default border-box clip) — so
+     every crack leaked a sliver of steel through the navy rail by day. Now a
+     crack reveals rail-on-rail: invisible, both themes, no geometry change. */
+  background:radial-gradient(ellipse 60% 44% at 50% 30%,rgba(235,116,28,.11),transparent 72%) padding-box,
+             radial-gradient(ellipse at 50% 40%,var(--felt1),var(--felt2) 58%,var(--felt3) 100%) padding-box,
+             linear-gradient(var(--rail),var(--rail)) border-box;
   border:calc(11px * var(--u)) solid var(--rail);
   box-shadow:0 0 0 1px #000, inset 0 0 60px rgba(0,0,0,.8),
              inset 0 2px 0 rgba(235,116,28,.09), 0 16px 34px rgba(0,0,0,.65),
@@ -353,10 +377,45 @@ html,body{margin:0;height:100%;color:var(--txt);
 }
 
 /* sizes are this page's; the recipe above is shared with play.html */
-.boardcard{width:46px;height:62px;border-radius:5px;animation:dealin .25s ease}
+.boardcard{width:46px;height:62px;border-radius:5px}
 .boardcard .ix{font-size:9px}
 .boardcard .r{font-size:27px}.boardcard .s{font-size:19px}
-@keyframes dealin{from{transform:translateY(-8px) scale(.8);opacity:0}to{transform:none;opacity:1}}
+
+/* ---- dealing & reveals ----
+   Cards arrive, they don't appear. A `.flyer` is a one-shot wrapper that
+   slides its card in from the middle of the felt (the deck) along a per-card
+   vector the JS writes into --fx/--fy; a `.flip` is a two-faced card that
+   turns over — face on the front, the player's chosen deck back (`.flipback`
+   is a `.mini.back`, so it wears the dressing) on the rear. The flop lands as
+   three backs and the three flip TOGETHER; hero's cards land last and flip as
+   the peek. Backs never flip — a villain's cards stay a villain's. */
+.flyer{flex:0 0 auto}
+.dealme{animation:dealfly .38s cubic-bezier(.22,.7,.25,1) both}
+@keyframes dealfly{
+  from{transform:translate(var(--fx,0px),var(--fy,-46px)) rotate(var(--fr,-7deg)) scale(.55);opacity:0}
+  45%{opacity:1}
+  to{transform:none;opacity:1}}
+.flip{position:relative;transform:perspective(640px);transform-style:preserve-3d;
+  transition:transform .42s cubic-bezier(.42,.05,.3,1)}
+.flip.down{transform:perspective(640px) rotateY(180deg)}
+.flip>.pc{-webkit-backface-visibility:hidden;backface-visibility:hidden}
+/* The rear face carries `.mini.back` (so it wears the chosen deck dressing)
+   AND the front's size class; the geometry below must out-rank `.mini`'s own
+   18-odd-px box, and the size class's radius is restated because `.mini`
+   comes later in this sheet and would win it back. */
+.flip>.flipback{position:absolute;inset:0;width:auto;height:auto;transform:rotateY(180deg);
+  -webkit-backface-visibility:hidden;backface-visibility:hidden}
+.flip>.flipback.boardcard{border-radius:5px}
+.flip>.flipback.bigcard{border-radius:7px}
+.flip>.flipback::before{content:none}   /* face-style overlays stay on faces */
+/* equity badges wait for the flip they explain (delay set inline, once) */
+.eqbox{animation:eqin .3s both}
+@keyframes eqin{from{opacity:0;transform:translateX(-50%) translateY(4px)}
+  to{opacity:1;transform:translateX(-50%)}}
+@media (prefers-reduced-motion:reduce){
+  .dealme,.eqbox{animation:none}
+  .flip{transition:none}
+}
 /* revealed villain cards at showdown — big & readable */
 .cards.reveal{height:auto;gap:3px}
 .vcard{width:32px;height:44px;border-radius:4px}
@@ -389,12 +448,27 @@ html,body{margin:0;height:100%;color:var(--txt);
 .seat.folded{opacity:.42}
 .seat .pos{font-size:14px;font-weight:800;letter-spacing:.5px}
 .seat .stack{font-size:11px;color:var(--dim);font-family:var(--mono);font-variant-numeric:tabular-nums}
-.seat .cards{display:flex;gap:2px;justify-content:center;margin-top:2px;height:26px}
-.mini{width:18px;height:25px;border-radius:2.5px;
+.seat .cards{display:flex;gap:0;justify-content:center;margin-top:3px;height:37px}
+/* Big enough that a chosen card back reads as artwork, not a speck: the pod
+   backs are the main place the deck dressing lives during a hand. */
+.mini{width:24px;height:33px;border-radius:3.5px;
   background:linear-gradient(160deg,var(--card),var(--card2));color:var(--card-blk);
-  font-size:14px;font-weight:800;display:flex;align-items:center;justify-content:center;
+  font-size:15px;font-weight:800;display:flex;align-items:center;justify-content:center;
   box-shadow:0 1px 2px rgba(0,0,0,.4);line-height:1}
+/* the two backs sit fanned like a real pocket pair; the overlap is on the
+   container so it holds whether the minis are bare or riding deal flyers */
+.seat .cards>*+*{margin-left:-5px}
+.mini.fanl{transform:rotate(-5deg) translateY(1px)}
+.mini.fanr{transform:rotate(5deg) translateY(1px)}
 .seat.folded .cards{visibility:hidden}
+/* Hero's fold mucks hero's cards too. Ghosting them at seat opacity left two
+   pale card-shapes dissolving the bottom rail into the page (worst on paper,
+   where ghost and background are near in tone) and smearing into the verdict
+   right below. display:none, not visibility — the empty card box otherwise
+   keeps propping the pod and its equity badge a card-height up into the
+   board when a tall flop verdict has squeezed the felt to its minimum.
+   The fold line itself still names the hand. */
+.seat.hero.folded #heroCards{display:none}
 .bet{position:absolute;font-size:12px;font-weight:700;color:var(--amber);
   background:rgba(0,0,0,.7);border:1px solid rgba(235,116,28,.3);
   font-family:var(--mono);font-variant-numeric:tabular-nums;
@@ -429,7 +503,7 @@ html,body{margin:0;height:100%;color:var(--txt);
    small one. Real cards are 2.5x3.5; every .bigcard tier keeps that ratio
    and the row is allowed to overhang the seat box symmetrically instead. */
 #heroCards{display:flex;gap:6px;justify-content:center}
-#heroCards .pc{flex:0 0 auto}
+#heroCards>*{flex:0 0 auto}
 .bigcard{width:54px;height:76px;border-radius:7px}
 .bigcard .ix{font-size:11px;top:4px;left:5px}
 .bigcard .r{font-size:32px}.bigcard .s{font-size:23px}
@@ -462,7 +536,9 @@ html,body{margin:0;height:100%;color:var(--txt);
 .abtn.raise{background:var(--needle);color:var(--needle-ink);border-color:var(--needle);
   box-shadow:0 0 26px -7px rgba(195,58,38,.4)}
 .abtn small{display:block;font-size:12px;font-weight:600;opacity:.85;margin-top:1px}
-#nextBtn{width:100%;border:1px solid var(--amber);border-radius:13px;padding:15px;font-size:20px;
+/* display:block — a <button> is inline-block by default, which ignores the
+   auto margins the wide tiers use to centre it once max-width bites */
+#nextBtn{display:block;width:100%;border:1px solid var(--amber);border-radius:13px;padding:15px;font-size:20px;
   font-weight:800;color:var(--amber-ink);background:var(--amber);min-height:56px;
   box-shadow:0 0 26px -7px var(--glow)}
 .hidden{display:none!important}
@@ -643,6 +719,8 @@ html,body{margin:0;height:100%;color:var(--txt);
 .labrow{display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:8px;
   border:1px solid transparent}
 #labMade .labrow,#labDraws .labrow{cursor:pointer}   /* only breakdown rows filter */
+.labrow.nofx{cursor:default}          /* exact-hand odds rows are readouts, not filters */
+.labdrawline{font-size:13px;font-weight:700;padding:2px 8px 7px;color:var(--txt)}
 .labrow.zero{opacity:.35}
 .labrow.on{border-color:var(--amber);background:var(--panel2)}
 .labrow .nm{flex:0 0 122px;font-size:13px;font-weight:700}
@@ -691,8 +769,9 @@ html,body{margin:0;height:100%;color:var(--txt);
   .seat .pod{border-radius:13px;padding:6px 3px 5px}
   .seat .pos{font-size:16px}
   .seat .stack{font-size:12px}
-  .seat .cards{height:32px;gap:3px}
-  .mini{width:22px;height:31px;font-size:16px}
+  .seat .cards{height:45px}
+  .mini{width:30px;height:41px;font-size:17px}
+  .seat .cards>*+*{margin-left:-6px}
   .action-tag{font-size:13px;top:-17px;padding:2px 8px}
   .eq{font-size:13px;padding:2px 9px}
   .eqr{font-size:10px}
@@ -718,7 +797,8 @@ html,body{margin:0;height:100%;color:var(--txt);
   .boardcard .r{font-size:37px}.boardcard .s{font-size:27px}
   .bigcard{width:74px;height:104px}
   .bigcard .r{font-size:44px}.bigcard .s{font-size:34px}
-  .mini{width:24px;height:34px;font-size:17px}
+  .seat .cards{height:49px}
+  .mini{width:33px;height:45px;font-size:18px}
   #feedback{font-size:18px}
   .abtn{font-size:21px;min-height:62px;padding:17px 4px}
   #nextBtn{font-size:22px;min-height:62px}
@@ -728,7 +808,7 @@ html,body{margin:0;height:100%;color:var(--txt);
    query as well as width: growing the table on a short landscape window
    pushes the action buttons off the bottom, which is the one thing that
    must not happen. */
-@media (min-width:1420px) and (min-height:1000px){
+@media (min-width:1420px) and (min-height:840px){
   #center{max-width:400px}
   #feltLabel{font-size:42px;letter-spacing:7px}
   #pot{font-size:22px;padding:5px 18px}
@@ -737,8 +817,9 @@ html,body{margin:0;height:100%;color:var(--txt);
   .seat .pod{border-radius:15px;padding:8px 4px 6px}
   .seat .pos{font-size:19px}
   .seat .stack{font-size:14px}
-  .seat .cards{height:40px;gap:4px}
-  .mini{width:29px;height:40px;font-size:20px}
+  .seat .cards{height:61px}
+  .mini{width:41px;height:56px;font-size:21px}
+  .seat .cards>*+*{margin-left:-8px}
   .boardcard{width:74px;height:100px}
   .boardcard .r{font-size:44px}.boardcard .s{font-size:32px}
   .bigcard{width:88px;height:124px}
@@ -767,12 +848,14 @@ html,body{margin:0;height:100%;color:var(--txt);
   .cell{font-size:17px}
   .mgrid{width:118px;height:118px}
 }
-@media (min-width:1750px) and (min-height:1200px){
+@media (min-width:1750px) and (min-height:940px){
   .seat{width:164px}
   .boardcard{width:84px;height:114px}
   .boardcard .r{font-size:50px}.boardcard .s{font-size:36px}
   .bigcard{width:100px;height:141px}
   .bigcard .r{font-size:60px}.bigcard .s{font-size:46px}
+  .seat .cards{height:69px}
+  .mini{width:46px;height:63px;font-size:23px}
   #rangeGrid{max-width:760px}
   .overlay{max-width:1080px}
 }
@@ -944,7 +1027,7 @@ html,body{margin:0;height:100%;color:var(--txt);
     <!-- "Am I running the current build?" has been the most expensive question
          of this project's development; the play page answered it with a footer
          stamp and the trainer never had one. `build.py` fills it in. -->
-    <div class="hintline">build 2026-08-04 08:21 ce1102b</div>
+    <div class="hintline">build 2026-08-04 12:35 d57fa80</div>
   </div>
 </div>
 
@@ -10666,8 +10749,13 @@ function applyCardPrefs(){
   }
   const theme = document.documentElement.getAttribute("data-theme") || "";
   // :not(.backsw *): the picker's swatches each show their OWN back and must
-  // not be repainted by the table-wide choice
-  st.textContent = cardBackCss(p.back, p.crops, theme, ".mini.back:not(.backsw *)");
+  // not be repainted by the table-wide choice.
+  // The `:root` prefix is load-bearing: the day theme restyles the default
+  // back via `:root[data-theme="light"] .mini.back` (0,4,0), and without it
+  // this rule sits at (0,3,0) and silently loses — the chosen back showed
+  // only at night. `:root` ties the specificity and this <style> is appended
+  // after the page's, so the choice wins in both themes.
+  st.textContent = cardBackCss(p.back, p.crops, theme, ":root .mini.back:not(.backsw *)");
 }
 
 /* This page stores a card as a two-character string, "As"; the shared code
@@ -10705,6 +10793,11 @@ function sampleHand(chart,hard){
 function fmt(x){ return (Math.round(x*10)/10)+""; }
 const OPEN = seat => seat==="SB" ? (S.size===2?2.5:3) : 2.5;   // SB opens 2.5 HU (button) / 3 full-ring
 let H=null;                                       // current hand state
+let HAND_SEQ=0;                                   // monotone id per deal (lab seeding keys off it)
+let DEAL_MS=0;                                    // how long the pending deal animation runs
+let BOARD_EQ_AT=0;                                // when the pending board flip finishes (NOW() ms)
+/* the node test harness has no `performance` */
+const NOW=(typeof performance!=="undefined"&&performance.now)?()=>performance.now():()=>Date.now();
 let H_HISTORY=[];                                 // completed hands (most recent first), compact records
 let MISTAKES={};                                  // key -> {scenario,hero,vs,size,hand,cards} to retrain
 const HIST_LS="preflopTrainer.hist.v1", MIST_LS="preflopTrainer.mist.v1";
@@ -10964,7 +11057,7 @@ function setupDeepSpot(scen,hero,vs){
 
 function newHand(){
   if(H && !H.drill && H.decisions && H.decisions.length){ H_HISTORY.unshift(makeRecord(H)); if(H_HISTORY.length>120) H_HISTORY.pop(); saveHistory(); }
-  H=null;
+  H=null; BOARD_EQ_AT=0;
   $("feedback").innerHTML=""; $("board").innerHTML="";
   const play=inPlaySeats(), n=play.length, idx=s=>play.indexOf(s);
   if(!play.some(s=>S.seats[s])){ $("feedback").innerHTML="No seats selected.<span class='sub'>Open ⚙ Settings.</span>"; $("buttons").innerHTML=""; return; }
@@ -10984,6 +11077,7 @@ function newHand(){
      level:0,aggressor:null,opener:null,heroRole:null,villain:null,raiser:{},pot:1.5,vrange:{},
      limpers:null,limpVs:null,heroPrior:null,
      turn:null,playingFlop:false,revealEq:false,flopGrade:null,fBet:0,fCommit:{},fOrder:[],
+     seq:++HAND_SEQ,dealAnim:true,boardShown:0,eqShown:false,
      node:null,ended:false,result:"",heroHand:null,heroCards:null,reviewChart:null,reviewHand:null,decisions:[]};
   H.committed[sb]=0.5; H.committed[bb]=1;
   H.act[sb]={t:"post",label:"SB 0.5"}; H.act[bb]={t:"post",label:"BB 1"};
@@ -11487,9 +11581,11 @@ function startFlopPlay(){
   H.fIdx=0; H.fBet=0; H.fCommit={}; H.fActed=new Set(); H.fRaises=0; H.fDone=false;
   H.play.forEach(s=>{ if(H.remaining.includes(s)) H.act[s]=null; });   // clear preflop tags
   heroModelInit();                                     // what the bots think you hold
-  renderTable(); applyTags(); renderBoard();
+  renderBoard(); renderTable(); applyTags();
   $("story").textContent="Flop. You're first to read it.";
-  setTimeout(flopStep,350);
+  // the action waits for the flip — a bet tagged onto still-face-down cards
+  // would answer the board before you've seen it
+  setTimeout(flopStep, Math.max(350, Math.round(BOARD_EQ_AT-NOW())+150));
 }
 /* a player is done for the street once they've acted and either matched the bet
    or run out of chips */
@@ -11846,7 +11942,7 @@ function finishFlop(){
   else if(live.length<=1)         H.result="Everyone folds — you take it! 🎉";
   else { H.turn=H.deck.pop();     H.result="Turn dealt — the hand stops here."; }
   H.ended=true;
-  renderTable(); applyTags(); renderBoard();
+  renderBoard(); renderTable(); applyTags();
   $("story").textContent=H.result;
   $("nextBtn").classList.remove("hidden");
 }
@@ -11860,17 +11956,26 @@ function renderTable(){
   const showdown=H.showdown, inShow=s=> showdown && H.remaining && H.remaining.includes(s);
   // in flop play the numbers stay hidden until you've committed to an action
   const showEq = H.showdown || H.revealEq;
+  // one-shot: the fresh deal animates; every re-render after it is static
+  const dealing=!!H.dealAnim; H.dealAnim=false;
+  // the badges land WITH the flip that explains them, then re-render statically
+  const eqDelay = (showEq && !H.eqShown) ? Math.max(0, Math.round(BOARD_EQ_AT-NOW())) : 0;
+  if(showEq) H.eqShown=true;
   const btnSeat = play.includes("BTN")?"BTN":play[n-3]||play[0];
   for(let k=0;k<n;k++){
     const seat=play[(heroIdx+k)%n], {x,y}=seatXY(k,n), isHero=seat===hero;
     const a=H.act[seat];
     const folded=(a&&a.t==="fold") || (showdown && !inShow(seat) && !isHero);
     const el=document.createElement("div");
-    el.className="seat"+(isHero?" hero":"")+(folded?" folded":"");
+    // during the deal everyone is still in — the fold tags put seats away as
+    // the action replays (animateThenShow), the way the hand actually went
+    el.className="seat"+(isHero?" hero":"")+(folded&&!dealing?" folded":"");
     // the hero column is CSS-anchored to the felt bottom; only villains ride the ellipse
     if(!isHero){ el.style.left=x+"%"; el.style.top=y+"%"; }
     el.dataset.seat=seat;
-    const cards=isHero?"":`<div class="cards"><div class="mini back"></div><div class="mini back"></div></div>`;
+    const backs=['<div class="mini back fanl"></div>','<div class="mini back fanr"></div>'];
+    const cards=isHero?"":`<div class="cards">${
+      dealing ? backs.map(b=>`<div class="flyer">${b}</div>`).join("") : backs.join("")}</div>`;
     // hand equity is yours alone (a villain's would leak the cards they hold);
     // range equity is public study information, so show it for everyone
     const chips=[];
@@ -11878,15 +11983,47 @@ function renderTable(){
       chips.push(`<div class="eq" title="Your exact hand vs the other players' ranges">${Math.round(H.equity[seat]*100)}%<span class="eqr">hand</span></div>`);
     if(showEq && H.eqRange && H.eqRange[seat]!=null)
       chips.push(`<div class="eq rng" title="${isHero?"The whole range your line reps, vs theirs":"This player's range vs the others"}">${Math.round(H.eqRange[seat]*100)}%<span class="eqr">range</span></div>`);
-    const eq = chips.length ? `<div class="eqbox">${chips.join("")}</div>` : "";
+    const eq = chips.length
+      ? `<div class="eqbox"${eqDelay?` style="animation-delay:${eqDelay}ms"`:""}>${chips.join("")}</div>` : "";
     const dchip = seat===btnSeat ? '<div class="dchip">D</div>' : '';
     const bigCards=isHero
-      ? `<div id="heroCards">${H.heroCards.map(c=>cardFace(c[0],c[1],"bigcard")).join("")}</div>` : "";
+      ? `<div id="heroCards">${H.heroCards.map(c=> dealing
+          ? `<div class="flyer"><div class="flip down">${cardFace(c[0],c[1],"bigcard")}<div class="flipback mini back bigcard"></div></div></div>`
+          : cardFace(c[0],c[1],"bigcard")).join("")}</div>` : "";
     el.innerHTML=`<span class="action-tag" data-tag></span><div class="pod">${dchip}<div class="pos">${SEAT_LABEL[seat]}</div><div class="stack">100 bb</div>${cards}</div>${bigCards}${eq}`;
     el.onclick=()=>openSeatRange(seat);
     seatsEl.appendChild(el);
   }
   $("pot").textContent="Pot "+H.pot+" bb";
+  if(dealing) animateDeal();
+}
+/* Pitch every card from the middle of the felt to its seat, two rounds in
+   real deal order (SB first), hero's peek — both big cards flipping together —
+   at the end. Writes the per-card vector and delay inline; the CSS `dealfly`
+   keyframes do the motion. Leaves DEAL_MS for animateThenShow to wait on. */
+function animateDeal(){
+  const tblEl=$("table");
+  const r=tblEl.getBoundingClientRect && tblEl.getBoundingClientRect();
+  if(!r || !r.width){ DEAL_MS=0; return; }          // headless / display:none
+  const n=H.n, heroIdx=H.play.indexOf(H.hero);
+  const order=H.play.slice(n-2).concat(H.play.slice(0,n-2));   // SB, BB, UTG…
+  const per=Math.max(36, Math.min(64, Math.round(560/(2*n)))), fly=380;
+  const seatEls={}; document.querySelectorAll("#seats .seat").forEach(e=>seatEls[e.dataset.seat]=e);
+  const mySeq=H.seq;
+  order.forEach((seat,oi)=>{
+    const el=seatEls[seat]; if(!el) return;
+    const k=(H.play.indexOf(seat)-heroIdx+n)%n, p=seatXY(k,n);
+    const dx=Math.round((50-p.x)/100*r.width), dy=Math.round((46-p.y)/100*r.height);
+    el.querySelectorAll(".flyer").forEach((f,ci)=>{
+      f.className="flyer dealme";
+      f.style.cssText=`--fx:${dx}px;--fy:${dy}px;--fr:${(oi%2?1:-1)*(5+ci*4)}deg;`
+        +`animation-delay:${(ci*n+oi)*per}ms`;
+    });
+  });
+  DEAL_MS=2*n*per+fly;
+  setTimeout(()=>{ if(!H||H.seq!==mySeq) return;
+    document.querySelectorAll("#heroCards .flip.down").forEach(e=>e.classList.remove("down"));
+  }, DEAL_MS-120);
 }
 function setActingNone(){document.querySelectorAll(".seat").forEach(e=>e.classList.remove("acting"));}
 function animateThenShow(){
@@ -11899,10 +12036,14 @@ function animateThenShow(){
     if(i>=seq.length){ showControls(); return; }
     const s=seq[i++], t=H.act[s], el=seatEls[s];
     if(el){ const tg=el.querySelector("[data-tag]"); tg.textContent=t.label;
-      tg.className="action-tag show "+({fold:"tag-fold",raise:"tag-raise",call:"tag-call"}[t.t]||"tag-post"); }
+      tg.className="action-tag show "+({fold:"tag-fold",raise:"tag-raise",call:"tag-call"}[t.t]||"tag-post");
+      // on a fresh deal the seats start un-folded; each fold puts its cards
+      // away as its tag lands, so the replay reads like the hand happened
+      if(t.t==="fold") el.classList.add("folded"); }
     setTimeout(step, t.t==="fold"?130:320);
   };
-  setTimeout(step,140);
+  // if cards are still in the air, the narration waits for the deal
+  setTimeout(step, DEAL_MS?DEAL_MS+140:140); DEAL_MS=0;
 }
 function showControls(){
   if(H.node){ $("story").textContent=storyFor(H.node);
@@ -11919,22 +12060,47 @@ function applyTags(){
   H.play.forEach(s=>{ const t=H.act[s]; if(t&&t.t!=="post"&&seatEls[s]){ const tg=seatEls[s].querySelector("[data-tag]");
     tg.textContent=t.label; tg.className="action-tag show "+({fold:"tag-fold",raise:"tag-raise",call:"tag-call"}[t.t]||"tag-post"); } });
 }
+/* The board arrives like a real street: each NEW card slides in face down,
+   then every card of the street flips at once — three for the flop, one for
+   the turn. `H.boardShown` is how many are already face up, so re-renders
+   (resize, tag refreshes) draw those statically instead of replaying the
+   reveal. BOARD_EQ_AT tells renderTable when the flip lands, so the equity
+   badges can wait for the cards they describe. */
 function renderBoard(){
   const board=$("board"); board.innerHTML="";
   const cards=(H.flop||[]).concat(H.turn?[H.turn]:[]);
+  const shown=Math.min(H.boardShown||0, cards.length);
+  const fresh=[];
   cards.forEach((c,i)=>{
-    // Built through the shared renderer, then unwrapped, because the stagger
-    // is this page's own: the board deals left to right.
     const tmp=document.createElement("div");
-    tmp.innerHTML=cardFace(c[0], c[1], "boardcard");
-    const el=tmp.firstChild;
-    el.style.animationDelay=(i*90)+"ms";
-    board.appendChild(el); });
+    if(i<shown){
+      tmp.innerHTML=cardFace(c[0], c[1], "boardcard");
+      board.appendChild(tmp.firstChild);
+      return;
+    }
+    tmp.innerHTML='<div class="flyer dealme"><div class="flip down">'
+      +cardFace(c[0], c[1], "boardcard")
+      +'<div class="flipback mini back boardcard"></div></div></div>';
+    const fl=tmp.firstChild;
+    fl.style.cssText="--fx:0px;--fy:-52px;--fr:-7deg;animation-delay:"+((i-shown)*110)+"ms";
+    board.appendChild(fl);
+    fresh.push(fl.firstChild);
+  });
+  if(fresh.length){
+    H.boardShown=cards.length;
+    const wait=(fresh.length-1)*110+380+220;      // last card lands, a beat, then the turn-over
+    const mySeq=H.seq;
+    setTimeout(()=>{ if(!H||H.seq!==mySeq) return;
+      fresh.forEach(e=>e.classList.remove("down")); }, wait);
+    BOARD_EQ_AT=NOW()+wait+300;
+  }
 }
 function revealFlop(){
   if(H.playingFlop){ startFlopPlay(); return; }     // the flop is played, not just shown
-  H.showdown=true; renderTable(); $("story").textContent=H.result;
-  applyTags(); renderBoard();                        // keep the betting story beside the equities
+  H.showdown=true;
+  renderBoard();                                     // first, so the flip time is known…
+  renderTable(); $("story").textContent=H.result;    // …and the equity badges wait for it
+  applyTags();                                       // keep the betting story beside the equities
   $("nextBtn").classList.remove("hidden");
 }
 function resizeRefresh(){
@@ -12367,6 +12533,7 @@ function drillSetup(m){
   H={play,n,hero,sb,bb,deck:[],committed,folded,cards:{[hero]:m.cards},act,level:0,aggressor:isoM?bb:(vs||bb),
      opener:(m.scenario==="vs_rfi"?vs:hero),heroRole:null,villain:isoM?null:vs,raiser:{},pot:1.5,vrange:vr,
      limpers:dLimpers,limpVs:isoM?vs:null,
+     seq:++HAND_SEQ,dealAnim:true,boardShown:0,eqShown:false,
      node:makeNode(m.scenario,chart,vs),ended:false,result:"",heroHand:m.hand,heroCards:m.cards,
      reviewChart:null,reviewHand:null,decisions:[],drill:true};
   recalcPot();
@@ -13011,6 +13178,23 @@ function labBreakdown(side, board, dead){
     ? LAB_DRAWS.map(([id,name])=>({id,name,pct:100*(draws[id]||0)/live})) : [];
   return {live, mrows, drows, cellCat, cellLive};
 }
+/* What ONE exact hand holds at showdown: every remaining runout enumerated
+   (990 turn+river pairs on a flop, 44 rivers on a turn — cheap, exact, no
+   interval) and the FINAL seven cards classified by the same categoriser the
+   made rows use, so "top pair" means top pair of the finished board. */
+function labImproveDist(cards2, board){
+  if(board.length!==3 && board.length!==4) return null;
+  const dead=new Set([...cards2, ...board]);
+  const rest=freshDeck().filter(c=>!dead.has(c));
+  const counts={}; let total=0;
+  const tally=b=>{ const cat=labMadeCatOf(tierOf(cards2,b),cards2,b);
+    counts[cat]=(counts[cat]||0)+1; total++; };
+  if(board.length===3){
+    for(let i=0;i<rest.length;i++) for(let j=i+1;j<rest.length;j++)
+      tally(board.concat([rest[i],rest[j]]));
+  } else for(const c of rest) tally(board.concat([c]));
+  return {counts, total};
+}
 
 /* ---- range text notation ---- */
 const VRANK={}; RANKS.forEach(r=>VRANK[RVAL[r]]=r);
@@ -13103,7 +13287,14 @@ function labRangeText(grid){
    the active breakdown filter. */
 let labGen=0, labJob=null, labDeb=null, labTarget=null, labBd=null, labGridCells=null;
 let labBrushW=1, labImp="play";
-function labSideName(i,n){ return i===0?"Hero":(n===2?"Villain":"V"+(i+1)); }
+function labSideName(i,n){
+  // sides seeded from the table carry their seat name; hand-made ones keep
+  // the generic labels. Guarded on LAB because the equity maker also runs
+  // against synthetic states in the test harness.
+  const s=(typeof LAB!=="undefined")&&LAB&&LAB.sides&&LAB.sides[i];
+  if(s&&s.name) return s.name;
+  return i===0?"Hero":(n===2?"Villain":"V"+(i+1));
+}
 /* per-seat dead cards: the board plus every OTHER seat's exact cards. Takes
    the state as an argument so the equity maker (which the tests drive with a
    synthetic state) and the UI (which passes the live LAB) share one copy. */
@@ -13403,11 +13594,18 @@ function labRenderBreakdown(reuse){
     return;
   }
   $("labHitTitle").innerHTML="How "+nm+" hits "+b.map(glyph).join("");
+  const side=LAB.sides[LAB.focus];
   if(bd.empty){
     $("labDrawLab").classList.add("hidden");
-    $("labHitNote").textContent="No live combos on this board.";
+    $("labHitNote").textContent=
+      side.mode==="hand" && side.cards.filter(Boolean).length<2
+        ? "Pick both of "+nm+"’s cards — tap its chip above to edit."
+        : "No live combos on this board.";
     return;
   }
+  /* An exact hand gets its own layout: what it is now in the title, its
+     draws first, then the exact odds of what it holds at showdown. */
+  if(side.mode==="hand"){ labRenderHandHits(side,b,bd,made,draws,nm); return; }
   const row=(r,showCum)=>{
     const el=labBarRow(r.name, r.pct,
       (r.pct<0.05?" zero":"")+(LAB.filter===r.id?" on":""));
@@ -13428,6 +13626,36 @@ function labRenderBreakdown(reuse){
     +"“≥” is the running total from the top. Draw rows can overlap. "
     +"Tap a row to light its combos up in the matrix"
     +(LAB.filter?" — tap again to go back":"")+".";
+}
+/* The exact-hand version of the block above: draws lead, then the enumerated
+   showdown distribution — "what are the odds I end up with two pair?". */
+function labRenderHandHits(side,b,bd,made,draws,nm){
+  const cards=side.cards.filter(Boolean);
+  const nowId=(bd.mrows.find(r=>r.pct>0)||{}).id;
+  const nowName=(LAB_MADE.find(([id])=>id===nowId)||[])[1]||"";
+  if(nowName) $("labHitTitle").innerHTML+=" — <b>"+nowName.toLowerCase()+"</b>";
+  const have=bd.drows.filter(r=>r.pct>0).map(r=>r.name);
+  const dl=document.createElement("div");
+  dl.className="labdrawline";
+  dl.textContent="Draws: "+(have.length?have.join(" · "):(b.length<5?"none":"—"));
+  made.appendChild(dl);
+  const imp=labImproveDist(cards,b);
+  if(!imp){                                        // river: nothing to come
+    $("labDrawLab").classList.add("hidden");
+    $("labHitNote").textContent="Final board — "+nm+" shows down "+nowName.toLowerCase()+".";
+    return;
+  }
+  $("labDrawLab").classList.remove("hidden");
+  $("labDrawLab").textContent=b.length===3?"At showdown this hand is…":"After the river this hand is…";
+  LAB_MADE.forEach(([id,name])=>{
+    const ct=imp.counts[id]||0; if(!ct) return;
+    const el=labBarRow(name, 100*ct/imp.total, (id===nowId?" on":"")+" nofx");
+    draws.appendChild(el);
+  });
+  $("labHitNote").textContent=
+    "Exact — all "+imp.total+" remaining "+(b.length===3?"turn-and-river runouts":"rivers")
+    +" enumerated for "+cards.join(" ")+". Categories read on the final five-card board; "
+    +"the lit row is what the hand is right now.";
 }
 /* heads-up keeps the big two-ended bar; three players and up get a row per
    player, because a single split bar stops meaning anything at N=3 */
@@ -13500,8 +13728,51 @@ function labRecompute(){
   labRenderEqProgress(mk);
   labPump(gen);
 }
-function labOpen(){
-  if(!LAB) LAB=labLoad();
+/* ---- seeding the lab from the live table ----
+   Opening the lab lands you in the hand you are looking at: your exact cards,
+   every live opponent with the range their line is repping (the same
+   chart-column ranges the equity engine uses), and the board as far as it has
+   been dealt. Keyed by (hand, street) so reopening on the SAME street keeps
+   whatever you tweaked, while a new deal or a new card reseeds. */
+function labVillainGrid(sig){
+  const g={};
+  if(sig && sig.chart) for(const h in sig.chart.grid){
+    const w=sig.chart.grid[h][sig.idx]||0;
+    if(w>0.004) g[h]=round3(w);
+  }
+  return Object.keys(g).length?g:labAllGrid();     // no read on them = any two
+}
+function labTableKey(){
+  if(!H || !H.heroCards) return null;
+  return H.seq+"|"+(H.flop?H.flop.join(""):"")+"|"+(H.turn||"");
+}
+function labFromTable(){
+  const st={board:[], focus:0, filter:null, sides:[], _seed:labTableKey()};
+  const hero=labBlankSide();
+  hero.name="Hero · "+(SEAT_LABEL[H.hero]||H.hero);
+  hero.mode="hand"; hero.cards=[H.heroCards[0],H.heroCards[1]];
+  st.sides.push(hero);
+  // opponents still in the hand; after a flop, exactly who saw it
+  let live=H.play.filter(s=>s!==H.hero && !H.folded.has(s));
+  if(H.remaining) live=H.remaining.filter(s=>s!==H.hero);
+  live.slice(0,LAB_MAX_SIDES-1).forEach(s=>{
+    const side=labBlankSide();
+    side.name=SEAT_LABEL[s]||s;
+    side.grid=labVillainGrid(H.vrange[s]);
+    st.sides.push(side);
+  });
+  if(st.sides.length<2){                            // hand ended folds-through
+    const side=labBlankSide(); side.grid=labAllGrid(); st.sides.push(side);
+  }
+  (H.flop||[]).forEach(c=>st.board.push(c));
+  if(H.turn) st.board.push(H.turn);
+  return st;
+}
+function labOpen(fromTable){
+  const key=(fromTable!==false) && labTableKey();
+  if(key && !(LAB && LAB._seed===key)){
+    LAB=labFromTable(); labTarget=null; labSave();
+  } else if(!LAB) LAB=labLoad();
   labFillChartSel();
   labRenderMain(); labRenderEditor();
   showOverlay("labOverlay");
@@ -13633,8 +13904,9 @@ $("rangeToLab").onclick=()=>{
   if(!LAB) LAB=labLoad();
   LAB.focus=0;
   labImportChart(LAB_LAST_CHART,"play");
+  LAB._seed=null;              // hand-picked chart, no longer the table's state
   hideOverlay("rangeOverlay");
-  labOpen();
+  labOpen(false);              // explicit import wins over the table seed
 };
 
 /* ---- range builder wiring ---- */

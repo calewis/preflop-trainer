@@ -22,7 +22,7 @@
    for instance, may be absent from a bare copy), so each file is added
    independently and a miss is tolerated. */
 
-const CACHE = 'preflop-v28';
+const CACHE = 'preflop-v29';
 
 /* Everything the page needs offline. `./` is the directory index, which is
    what a bookmark to the site root asks for; it and `trainer.html` are the
