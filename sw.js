@@ -30,7 +30,7 @@
    worker down with it. Each file is added independently and a miss is
    tolerated. */
 
-const CACHE = 'preflop-v24';
+const CACHE = 'preflop-v25';
 
 /* Everything either app needs offline. `./` is the directory index, which is
    what a bookmark to the site root asks for. */
@@ -60,13 +60,14 @@ const SHELL = [
   './sw.js',
 ];
 
-/* **`trainer.html` is deliberately not here.** It is 156 KB gzipped, nothing in
-   the product links to it, and precaching it made a first visit ~715 KB rather
-   than ~560 KB — 30% of the transfer for a page no visitor can reach. It stays
-   deployed for a direct link and is cached on demand by the fetch handler if
-   anyone follows one. `poker-trainer.html` is gone from the list too: `build.py`
-   never stages it, so it was a guaranteed 404 at install and a dead arm in the
-   offline fallback below. */
+/* **`trainer.html` is deliberately not here.** It is large (the Range Lab's
+   exact equity table lives in it), and precaching it would put ~30% more on
+   the wire for a first visit that may never leave the play page. The play
+   page's `%` link reaches it; the fetch handler caches it on demand the first
+   time someone follows that link, which is the right trade for a second page.
+   `poker-trainer.html` is gone from the list too: `build.py` never stages it,
+   so it was a guaranteed 404 at install and a dead arm in the offline
+   fallback below. */
 
 self.addEventListener('install', e => e.waitUntil((async () => {
   const c = await caches.open(CACHE);

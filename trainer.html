@@ -13251,6 +13251,9 @@ loadHistory(); loadMistakes();
 ensureSeatValidity(); refreshStats();
 window.addEventListener("resize",resizeRefresh);
 newHand();
+/* #lab is the play page's Range Lab link keeping its promise: arriving here
+   opens the lab itself, not a different-looking app the lab is hidden in. */
+if(location.hash==="#lab") labOpen();
 /* register service worker for offline (no-op on file:// / http) */
 if("serviceWorker" in navigator){ window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(()=>{}); }); }
 </script>

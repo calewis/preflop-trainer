@@ -296,6 +296,7 @@ body::before{
   border-radius:999px;width:38px;height:38px;font-size:16px;cursor:pointer;
   display:flex;align-items:center;justify-content:center;flex:0 0 auto;
   transition:color .15s,border-color .15s,box-shadow .15s}
+#labLink{text-decoration:none;font-family:var(--mono);font-weight:900;font-size:17px}
 .iconbtn:hover{color:var(--amber);border-color:var(--amber-dim);
   box-shadow:0 0 18px -4px var(--glow)}
 
@@ -1193,6 +1194,12 @@ summary .m{font-size:calc(11px * var(--u))}
       <button id="mPlay" aria-pressed="false"><span class="g">♠</span>Play</button>
       <button id="mTrain" class="on" aria-pressed="true"><span class="g">▦</span>Train preflop</button>
     </div>
+    <!-- An <a>, unlike the mode switch beside it: the Range Lab lives on the
+         trainer page, so this navigates. #lab opens the lab overlay on
+         arrival — without it the destination looks like a different app and
+         the thing you tapped for is a further, undiscoverable tap away. -->
+    <a class="iconbtn" id="labLink" href="./trainer.html#lab"
+       title="Range Lab — equity &amp; how ranges hit boards">%</a>
     <button class="iconbtn" id="setBtn" title="Settings" aria-label="Settings">⚙</button>
   </div>
 
@@ -2689,7 +2696,7 @@ function fail(m){
    "which ranges am I playing and being marked against" is a fact about the
    session, not a transient confirmation. */
 /* Injected by `build.py`. See there for why this is worth a line of screen. */
-const BUILD_ID = "2026-08-03 21:57 8d9d66a";
+const BUILD_ID = "2026-08-03 22:00 e0c8685";
 function footNote(){
   const src = chartEntries
     ? " · ranges: <code>"+esc(chartName)+"</code> ("+chartEntries+")"
