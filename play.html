@@ -295,8 +295,8 @@ body::before{
 .iconbtn{background:var(--panel);border:1px solid var(--line);color:var(--amber-mid);
   border-radius:999px;width:38px;height:38px;font-size:16px;cursor:pointer;
   display:flex;align-items:center;justify-content:center;flex:0 0 auto;
-  transition:color .15s,border-color .15s,box-shadow .15s}
-#labLink{text-decoration:none;font-family:var(--mono);font-weight:900;font-size:17px}
+  transition:color .15s,border-color .15s,box-shadow .15s;text-decoration:none}
+#labLink{font-family:var(--mono);font-weight:900;font-size:17px}
 .iconbtn:hover{color:var(--amber);border-color:var(--amber-dim);
   box-shadow:0 0 18px -4px var(--glow)}
 
@@ -406,10 +406,10 @@ body::before{
    too — clubs sit well below hearts, spades below both — and the suit glyph
    carries the meaning regardless. Colour here is reinforcement, never the
    only cue. */
-.pc.s,.mini.s{color:var(--card-blk)}
-.pc.h,.mini.h{color:var(--card-red)}
-.pc.d,.mini.d{color:var(--card-blue)}
-.pc.c,.mini.c{color:var(--card-green)}
+.pc.s,.mini.s,.labpick button.s{color:var(--card-blk)}
+.pc.h,.mini.h,.labpick button.h{color:var(--card-red)}
+.pc.d,.mini.d,.labpick button.d{color:var(--card-blue)}
+.pc.c,.mini.c,.labpick button.c{color:var(--card-green)}
 
 /* ---- the back ----
    A face-down card is a *card*, and on this table it is a lit one: the back is
@@ -2696,7 +2696,7 @@ function fail(m){
    "which ranges am I playing and being marked against" is a fact about the
    session, not a transient confirmation. */
 /* Injected by `build.py`. See there for why this is worth a line of screen. */
-const BUILD_ID = "2026-08-03 22:00 e0c8685";
+const BUILD_ID = "2026-08-03 22:38 1be2bd5";
 function footNote(){
   const src = chartEntries
     ? " · ranges: <code>"+esc(chartName)+"</code> ("+chartEntries+")"

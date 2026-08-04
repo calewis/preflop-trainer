@@ -188,10 +188,10 @@ html,body{margin:0;height:100%;color:var(--txt);
    too — clubs sit well below hearts, spades below both — and the suit glyph
    carries the meaning regardless. Colour here is reinforcement, never the
    only cue. */
-.pc.s,.mini.s{color:var(--card-blk)}
-.pc.h,.mini.h{color:var(--card-red)}
-.pc.d,.mini.d{color:var(--card-blue)}
-.pc.c,.mini.c{color:var(--card-green)}
+.pc.s,.mini.s,.labpick button.s{color:var(--card-blk)}
+.pc.h,.mini.h,.labpick button.h{color:var(--card-red)}
+.pc.d,.mini.d,.labpick button.d{color:var(--card-blue)}
+.pc.c,.mini.c,.labpick button.c{color:var(--card-green)}
 
 /* ---- the back ----
    A face-down card is a *card*, and on this table it is a lit one: the back is
@@ -314,8 +314,19 @@ html,body{margin:0;height:100%;color:var(--txt);
   display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.6);z-index:4}
 
 /* hero cards big */
-#heroCards{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);
-  display:flex;gap:6px;z-index:6}
+/* The hero column is ONE box — tag, pod, then the big cards — anchored to the
+   felt bottom, so the seam between pod and cards is ordinary flow. It used to
+   be two sibling absolutes (pod on the seat ellipse, cards at bottom:8px)
+   measured back together in JS, and every size tier that grew the cards
+   buried the pod's name and stack a little deeper. */
+.seat.hero{top:auto;bottom:8px;left:50%;transform:translateX(-50%);z-index:6}
+.seat.hero .pod{margin-bottom:4px}
+/* flex:none — the row is narrower than two cards (the seat's width), and a
+   card that flex-shrinks loses width but not height: a narrow card, not a
+   small one. Real cards are 2.5x3.5; every .bigcard tier keeps that ratio
+   and the row is allowed to overhang the seat box symmetrically instead. */
+#heroCards{display:flex;gap:6px;justify-content:center}
+#heroCards .pc{flex:0 0 auto}
 .bigcard{width:54px;height:76px;border-radius:7px}
 .bigcard .ix{font-size:11px;top:4px;left:5px}
 .bigcard .r{font-size:32px}.bigcard .s{font-size:23px}
@@ -521,8 +532,6 @@ html,body{margin:0;height:100%;color:var(--txt);
   font-size:11px;font-weight:800;line-height:1.2;
   background:linear-gradient(160deg,var(--card),var(--card2));
   text-align:center;font-family:inherit}
-.labpick button.s{color:var(--card-blk)} .labpick button.h{color:var(--card-red)}
-.labpick button.d{color:var(--card-blue)} .labpick button.c{color:var(--card-green)}
 .labpick button.used{opacity:.18;pointer-events:none}
 .labside{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:9px}
 .labside .chip{flex:1 1 30%;min-width:30%;text-align:center;line-height:1.25;padding:7px 6px}
@@ -530,7 +539,8 @@ html,body{margin:0;height:100%;color:var(--txt);
   font-family:var(--mono);font-variant-numeric:tabular-nums}
 .labrows{display:flex;flex-direction:column;gap:3px}
 .labrow{display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:8px;
-  border:1px solid transparent;cursor:pointer}
+  border:1px solid transparent}
+#labMade .labrow,#labDraws .labrow{cursor:pointer}   /* only breakdown rows filter */
 .labrow.zero{opacity:.35}
 .labrow.on{border-color:var(--amber);background:var(--panel2)}
 .labrow .nm{flex:0 0 122px;font-size:13px;font-weight:700}
@@ -545,9 +555,8 @@ html,body{margin:0;height:100%;color:var(--txt);
 .labminirow{display:flex;gap:12px;align-items:center;margin-top:4px}
 .labminirow .grow{flex:1;min-width:0}
 .labminiwrap{background:none;border:none;padding:0;flex:0 0 auto;cursor:pointer}
-.labmini{display:grid;grid-template-columns:repeat(13,1fr);gap:1px;width:128px;height:128px;
-  background:#0d0906;padding:1px;border-radius:4px}
-.labmini i{display:block;border-radius:1px}
+/* the lab's mini matrix IS an .mgrid, held at tap-target size beside the button */
+#labMini{width:128px;height:128px;border-radius:4px}
 /* Five tools up top is one more than the bar was designed for; below 430px the
    icons give back the pixels rather than squeezing the three stats to noise. */
 @media (max-width:430px){
@@ -684,7 +693,6 @@ html,body{margin:0;height:100%;color:var(--txt);
       <div id="center"><div id="board"></div><div id="pot">Pot 1.5 bb</div><div id="story"></div></div>
       <div id="seats"></div>
       <div id="dealer" class="dealer hidden">D</div>
-      <div id="heroCards"></div>
     </div>
   </div>
 
@@ -881,7 +889,7 @@ html,body{margin:0;height:100%;color:var(--txt);
       <div class="labside" id="labSideChips"></div>
       <div class="chips" id="labPlayerChips" style="margin-bottom:9px"></div>
       <div class="labminirow">
-        <button class="labminiwrap" id="labMiniWrap"><div class="labmini" id="labMini"></div></button>
+        <button class="labminiwrap" id="labMiniWrap"><div class="mgrid" id="labMini"></div></button>
         <div class="grow">
           <button class="hbtn" id="labEditBtn" style="width:100%">✎ Edit range…</button>
           <div class="hintline">The matrix mirrors the selected player. Tap it — or the lit chip — to paint the range; tap a row below to light up where a category lives.</div>
@@ -9967,7 +9975,7 @@ const BRUSHES=[
   {id:"mix",  lab:"Mix…", f:null},
 ];
 let BUILDER=null, origName=null, bScen="rfi", bHero="CO", bVs="BTN";
-let brushId="raise", brush=[1,0,0], painting=false, gridWired=false;
+let brushId="raise", brush=[1,0,0];
 
 function ckey(scen,hero,vs){ return `${scen}|${hero}|${vs||""}`; }
 function parseSize(v){ v=String(v==null?"":v).trim(); if(v==="") return null; const n=parseFloat(v); return isFinite(n)?n:null; }
@@ -10019,7 +10027,8 @@ function startBuilder(b,orig){
   $("bldTitle").textContent=origName?("Edit: "+origName):"Range Builder";
   bmsg(""); renderBuilder(); showOverlay("bldOverlay");
 }
-function bmsg(t,bad){ $("bldMsg").innerHTML=bad?`<span style="color:var(--bad)">${t}</span>`:(t||""); }
+function msgInto(id,t,bad){ $(id).innerHTML=bad?`<span style="color:var(--bad)">${t}</span>`:(t||""); }
+function bmsg(t,bad){ msgInto("bldMsg",t,bad); }
 
 function chipRow(id,items,active,cb){
   const el=$(id); el.innerHTML="";
@@ -10119,10 +10128,9 @@ function renderBGrid(){
     const h=handName(i,j), f=(c&&c.grid[h])||[0,0,1];
     const cell=document.createElement("div"); cell.className="bcell"; cell.dataset.hand=h;
     paintCellColor(cell,f);
-    cell.textContent=h.length===2?h:(h.slice(0,2)+(h.endsWith("s")?"s":"o"));
+    cell.textContent=cellLabel(h);
     wrap.appendChild(cell);
   }
-  if(!gridWired) wireGridPaint();
 }
 function applyBrushToHand(h){
   const c=ensureCurChart(); if(!c || !c.grid[h]) return;
@@ -10130,13 +10138,27 @@ function applyBrushToHand(h){
   const cell=$("bldGrid").querySelector('[data-hand="'+h+'"]'); if(cell) paintCellColor(cell,brush);
   updateBStats();
 }
-function wireGridPaint(){
-  const wrap=$("bldGrid"); gridWired=true;
+/* One owner for the paint gesture — tap, drag via elementFromPoint, released
+   by pointerup AND pointercancel — shared by the builder grid and the lab
+   grid. The release pair is the subtle part and must not live twice. `before`
+   runs on the initial press and may swallow it (the lab uses it to put a lit
+   breakdown filter away instead of painting through it). */
+function wireGridPaint(wrapId, apply, commit, before){
+  const wrap=$(wrapId);
   const handOf=t=>t&&t.dataset?t.dataset.hand:null;
-  wrap.addEventListener("pointerdown",e=>{ painting=true; const h=handOf(e.target); if(h){ applyBrushToHand(h); e.preventDefault(); } });
-  wrap.addEventListener("pointermove",e=>{ if(!painting) return; const h=handOf(document.elementFromPoint(e.clientX,e.clientY)); if(h) applyBrushToHand(h); });
-  window.addEventListener("pointerup",()=>{ if(painting){ painting=false; saveDraft(); } });
-  window.addEventListener("pointercancel",()=>{ if(painting){ painting=false; saveDraft(); } });
+  let painting=false;
+  wrap.addEventListener("pointerdown",e=>{
+    if(before && before()) return;
+    painting=true;
+    const h=handOf(e.target); if(h){ apply(h); e.preventDefault(); }
+  });
+  wrap.addEventListener("pointermove",e=>{
+    if(!painting) return;
+    const h=handOf(document.elementFromPoint(e.clientX,e.clientY)); if(h) apply(h);
+  });
+  const up=()=>{ if(painting){ painting=false; commit(); } };
+  window.addEventListener("pointerup",up);
+  window.addEventListener("pointercancel",up);
 }
 function updateBStats(){
   const c=curChart();
@@ -10273,6 +10295,7 @@ function idxOfHand(h){ /* returns [row,col] in 13x13 */
   return h.endsWith("s")?[a,b]:[b,a];
 }
 function combosOf(h){ return h.length===2?6:(h.endsWith("s")?4:12); }
+function cellLabel(h){ return h.length===2?h:(h.slice(0,2)+(h.endsWith("s")?"s":"o")); }
 function entropy(f){let e=0;f.forEach(p=>{if(p>0)e-=p*Math.log2(p);});return e;}
 
 /* ---------- deck / dealing ---------- */
@@ -10420,17 +10443,6 @@ const PHE_ID={};                       // "As" -> 0..51
 const toIds=cards=>cards.map(c=>PHE_ID[c]);
 function rank7(id){ return PHE.evaluate7(id[0],id[1],id[2],id[3],id[4],id[5],id[6]); }
 function rank5(id){ return PHE.evaluate5(id[0],id[1],id[2],id[3],id[4]); }
-function equities(playerCards, board3, deck){
-  const hands=playerCards.map(toIds), b3=toIds(board3), rem=toIds(deck);
-  const N=hands.length, eq=new Array(N).fill(0); let total=0;
-  for(let i=0;i<rem.length;i++) for(let j=i+1;j<rem.length;j++){
-    const board=[b3[0],b3[1],b3[2],rem[i],rem[j]];
-    let best=1e9, win=[];
-    for(let p=0;p<N;p++){ const v=rank7(hands[p].concat(board)); if(v<best){best=v;win=[p];} else if(v===best) win.push(p); }
-    const sh=1/win.length; for(const p of win) eq[p]+=sh; total++;
-  }
-  return eq.map(e=>e/total);
-}
 /* all concrete 2-card combos of a hand type (pair=6, suited=4, offsuit=12) */
 function handCombos(h){
   const su=["s","h","d","c"], out=[];
@@ -11529,7 +11541,7 @@ function finishFlop(){
 /* ---------- render / animate ---------- */
 function present(){ renderTable(); animateThenShow(); }
 function renderTable(){
-  const seatsEl=$("seats"); seatsEl.innerHTML=""; $("heroCards").innerHTML=""; $("dealer").classList.add("hidden");
+  const seatsEl=$("seats"); seatsEl.innerHTML=""; $("dealer").classList.add("hidden");
   if(!H){ $("pot").textContent="Pot 1.5 bb"; $("story").textContent=""; return; }
   const {play,hero}=H, n=play.length, heroIdx=play.indexOf(hero);
   const showdown=H.showdown, inShow=s=> showdown && H.remaining && H.remaining.includes(s);
@@ -11542,10 +11554,10 @@ function renderTable(){
     const folded=(a&&a.t==="fold") || (showdown && !inShow(seat) && !isHero);
     const el=document.createElement("div");
     el.className="seat"+(isHero?" hero":"")+(folded?" folded":"");
-    el.style.left=x+"%"; el.style.top=(isHero?84:y)+"%"; el.dataset.seat=seat;
-    let cards;
-    if(isHero) cards=`<div class="cards"></div>`;
-    else cards=`<div class="cards"><div class="mini back"></div><div class="mini back"></div></div>`;
+    // the hero column is CSS-anchored to the felt bottom; only villains ride the ellipse
+    if(!isHero){ el.style.left=x+"%"; el.style.top=y+"%"; }
+    el.dataset.seat=seat;
+    const cards=isHero?"":`<div class="cards"><div class="mini back"></div><div class="mini back"></div></div>`;
     // hand equity is yours alone (a villain's would leak the cards they hold);
     // range equity is public study information, so show it for everyone
     const chips=[];
@@ -11555,13 +11567,13 @@ function renderTable(){
       chips.push(`<div class="eq rng" title="${isHero?"The whole range your line reps, vs theirs":"This player's range vs the others"}">${Math.round(H.eqRange[seat]*100)}%<span class="eqr">range</span></div>`);
     const eq = chips.length ? `<div class="eqbox">${chips.join("")}</div>` : "";
     const dchip = seat===btnSeat ? '<div class="dchip">D</div>' : '';
-    el.innerHTML=`<span class="action-tag" data-tag></span><div class="pod">${dchip}<div class="pos">${SEAT_LABEL[seat]}</div><div class="stack">100 bb</div>${cards}</div>${eq}`;
+    const bigCards=isHero
+      ? `<div id="heroCards">${H.heroCards.map(c=>cardFace(c[0],c[1],"bigcard")).join("")}</div>` : "";
+    el.innerHTML=`<span class="action-tag" data-tag></span><div class="pod">${dchip}<div class="pos">${SEAT_LABEL[seat]}</div><div class="stack">100 bb</div>${cards}</div>${bigCards}${eq}`;
     el.onclick=()=>openSeatRange(seat);
     seatsEl.appendChild(el);
   }
   $("pot").textContent="Pot "+H.pot+" bb";
-  const hc=$("heroCards");
-  H.heroCards.forEach(c=>{ hc.innerHTML += cardFace(c[0], c[1], "bigcard"); });
 }
 function setActingNone(){document.querySelectorAll(".seat").forEach(e=>e.classList.remove("acting"));}
 function animateThenShow(){
@@ -11702,7 +11714,7 @@ function renderGrid(chart,highlightHand){
     const cell=document.createElement("div");
     cell.className="cell"+(h===highlightHand?" hl":"");
     paintCellColor(cell,f);
-    cell.textContent=h.length===2?h:(h.slice(0,2)+(h.endsWith("s")?"s":"o"));
+    cell.textContent=cellLabel(h);
     // Hover for a pointer, tap for a touch screen — a phone never hovers, so
     // binding only `mouseenter` would put the numbers out of reach on the
     // device this app is mainly used on.
@@ -12218,11 +12230,15 @@ function pfRanking(){
 
 /* ---- lab state ---- */
 function labBlankSide(){ return {mode:"range", grid:{}, cards:[null,null]}; }
+function labAllGrid(){
+  const g={};
+  for(let i=0;i<13;i++)for(let j=0;j<13;j++) g[handName(i,j)]=1;
+  return g;
+}
 function labDefault(){
   const s0=labBlankSide(), s1=labBlankSide();
-  const g=labTopPct(15);
-  if(g) s0.grid=g; else for(let i=0;i<13;i++)for(let j=0;j<13;j++) s0.grid[handName(i,j)]=1;
-  for(let i=0;i<13;i++)for(let j=0;j<13;j++) s1.grid[handName(i,j)]=1;
+  s0.grid=labTopPct(15)||labAllGrid();
+  s1.grid=labAllGrid();
   return {board:[], focus:0, filter:null, sides:[s0,s1]};
 }
 function labLoad(){
@@ -12231,6 +12247,7 @@ function labLoad(){
        && s.sides.length>=2 && s.sides.length<=LAB_MAX_SIDES
        && s.sides.every(x=>x && x.grid && Array.isArray(x.cards))){
       if(!(s.focus>=0 && s.focus<s.sides.length)) s.focus=0;
+      delete s._bd;    // a derived cache once leaked into old saves
       return s;
     }
   }catch(e){}
@@ -12260,7 +12277,6 @@ function labSideCombos(side, dead){
   }
   return out;
 }
-function labClash(a,b){ return a[0]===b[0]||a[0]===b[1]||a[1]===b[0]||a[1]===b[1]; }
 
 /* ---- equity ----
    labEquityMake returns {err}, {done:true,...result}, or a job with
@@ -12276,24 +12292,22 @@ function labEquityMake(st, forceMC){
   const b=st.board.filter(Boolean);
   if(b.length===1||b.length===2)
     return {err:"Add "+(3-b.length)+" more board card"+(b.length===2?"":"s")+" — a board is 0, 3, 4 or 5 cards."};
-  const S=st.sides, N=S.length;
-  const deads=S.map((s,i)=>{
-    const d=new Set(b);
-    S.forEach((o,j)=>{ if(j!==i && o.mode==="hand") o.cards.forEach(c=>{ if(c) d.add(c); }); });
-    return d;
-  });
+  const N=st.sides.length, S=st.sides;
+  const deads=labDeads(st);
   const Ls=S.map((s,i)=>labSideCombos(s,deads[i]));
   for(let i=0;i<N;i++){
     if(!Ls[i]) return {err:"Pick both of "+labSideName(i,N)+"’s exact cards — tap its slot, then a card above."};
     if(!Ls[i].length) return {err:"No live combos for "+labSideName(i,N)+" — the board and the other hands block that whole range."};
   }
-  if(!forceMC && N===2 && b.length===0 && S.every(s=>s.mode==="range") && PF_EQ)
-    return labExactPre(S[0],S[1]);
-  const rem=52-b.length-2*N;
-  const runouts=b.length===5?1 : b.length===4?rem : b.length===3?rem*(rem-1)/2
-               : rem*(rem-1)*(rem-2)*(rem-3)*(rem-4)/120;
-  const evals=Ls.reduce((a,l)=>a*l.length,1)*runouts*N;
-  if(!forceMC && evals<=LAB_EXACT_CAP) return labJobExact(Ls,b,runouts);
+  if(!forceMC){
+    if(N===2 && b.length===0 && S.every(s=>s.mode==="range") && PF_EQ)
+      return labExactPre(S[0],S[1]);
+    const rem=52-b.length-2*N;
+    const runouts=b.length===5?1 : b.length===4?rem : b.length===3?rem*(rem-1)/2
+                 : rem*(rem-1)*(rem-2)*(rem-3)*(rem-4)/120;
+    if(Ls.reduce((a,l)=>a*l.length,1)*runouts*N<=LAB_EXACT_CAP)
+      return labJobExact(Ls,b,runouts);
+  }
   return labJobMC(Ls,b);
 }
 function labExactPre(s0,s1){
@@ -12688,76 +12702,76 @@ function labRangeText(grid){
    screen and a range is one tap away when you want to change it. A small
    read-only matrix in the main view mirrors the focused player's range and
    the active breakdown filter. */
-let labGen=0, labJob=null, labDeb=null, labTarget=null, labPainting=false;
-let labBrushW=1, labImp="play", labWired=false;
+let labGen=0, labJob=null, labDeb=null, labTarget=null, labBd=null;
+let labBrushW=1, labImp="play";
 function labSideName(i,n){ return i===0?"Hero":(n===2?"Villain":"V"+(i+1)); }
-function labDeads(){
-  const b=LAB.board.filter(Boolean);
-  return LAB.sides.map((s,i)=>{
+/* per-seat dead cards: the board plus every OTHER seat's exact cards. Takes
+   the state as an argument so the equity maker (which the tests drive with a
+   synthetic state) and the UI (which passes the live LAB) share one copy. */
+function labDeads(st){
+  st=st||LAB;
+  const b=st.board.filter(Boolean);
+  return st.sides.map((s,i)=>{
     const d=new Set(b);
-    LAB.sides.forEach((o,j)=>{ if(j!==i && o.mode==="hand") o.cards.forEach(c=>{ if(c) d.add(c); }); });
+    st.sides.forEach((o,j)=>{ if(j!==i && o.mode==="hand") o.cards.forEach(c=>{ if(c) d.add(c); }); });
     return d;
   });
+}
+function labComboCount(grid){
+  let tot=0;
+  for(const h in grid) if(grid[h]>0.004) tot+=grid[h]*combosOf(h);
+  return tot;
 }
 function labUsedCards(){
   const u=new Set(LAB.board.filter(Boolean));
   LAB.sides.forEach(s=>{ if(s.mode==="hand") s.cards.forEach(c=>{ if(c) u.add(c); }); });
   return u;
 }
-function labWeightBg(x){
-  const a=[21,14,8], b=[235,116,28];
+/* One unlit→lit ramp with two destinations, indexed off COL_RGB so a retheme
+   stays one edit: amber (the call anchor) carries weight, and the needle (the
+   raise anchor) carries the filtered view so it can never be misread as
+   weight. */
+function labRamp(x,hot){
+  const a=[21,14,8], b=COL_RGB[hot?0:1];
   const r=Math.round(a[0]+(b[0]-a[0])*x), g=Math.round(a[1]+(b[1]-a[1])*x),
         bl=Math.round(a[2]+(b[2]-a[2])*x);
   return {css:"rgb("+r+","+g+","+bl+")", ink:cellInk(r,g,bl)};
 }
-/* the filtered view paints in the needle so it can never be misread as weight */
-function labFilterBg(x){
-  const a=[21,14,8], b=[195,58,38];
-  const r=Math.round(a[0]+(b[0]-a[0])*x), g=Math.round(a[1]+(b[1]-a[1])*x),
-        bl=Math.round(a[2]+(b[2]-a[2])*x);
-  return {css:"rgb("+r+","+g+","+bl+")", ink:cellInk(r,g,bl)};
-}
-function labRenderBoard(){
-  const el=$("labBoard"); el.innerHTML="";
-  for(let i=0;i<5;i++){
-    const c=LAB.board[i], slot=document.createElement("button");
-    slot.className="labslot"+(i>=3?" gap":"")
-      +((labTarget&&labTarget.zone==="board"&&labTarget.i===i)?" tgt":"");
+function labWeightBg(x){ return labRamp(x,false); }
+function labFilterBg(x){ return labRamp(x,true); }
+/* one slot recipe for the board row and the exact-hand pair; tapping a filled
+   slot clears it and takes the target */
+function labRenderSlots(elId, zone){
+  const el=$(elId); el.innerHTML="";
+  const hand=zone==="hand", side=LAB.sides[LAB.focus];
+  const arr=hand?side.cards:LAB.board, n=hand?2:5;
+  for(let i=0;i<n;i++){
+    const c=arr[i], slot=document.createElement("button");
+    slot.className="labslot"+(!hand&&i>=3?" gap":"")
+      +((labTarget&&labTarget.zone===zone&&labTarget.i===i)?" tgt":"");
     slot.innerHTML=c?cardMini(c[0],c[1]):"+";
     slot.onclick=()=>{
-      if(LAB.board[i]){ LAB.board[i]=null;
-        // a board is a prefix — clearing the flop's middle card shifts later
-        // cards down rather than leaving a hole no street can mean
-        LAB.board=LAB.board.filter(Boolean);
+      if(hand){
+        if(side.cards[i]) side.cards[i]=null;
+        labTarget={zone,i};
+      }else{
+        if(LAB.board[i]){ LAB.board[i]=null;
+          // a board is a prefix — clearing the flop's middle card shifts later
+          // cards down rather than leaving a hole no street can mean
+          LAB.board=LAB.board.filter(Boolean);
+        }
+        labTarget={zone,i:Math.min(i,LAB.board.filter(Boolean).length)};
       }
-      labTarget={zone:"board",i:Math.min(i,LAB.board.filter(Boolean).length)};
-      labAfterBoardEdit();
+      labAfterEdit();
     };
     el.appendChild(slot);
   }
 }
-function labRenderHand(){
-  const el=$("labHand"); el.innerHTML="";
-  const side=LAB.sides[LAB.focus];
-  for(let i=0;i<2;i++){
-    const c=side.cards[i], slot=document.createElement("button");
-    slot.className="labslot"
-      +((labTarget&&labTarget.zone==="hand"&&labTarget.i===i)?" tgt":"");
-    slot.innerHTML=c?cardMini(c[0],c[1]):"+";
-    slot.onclick=()=>{
-      if(side.cards[i]) side.cards[i]=null;
-      labTarget={zone:"hand",i};
-      labAfterBoardEdit();
-    };
-    el.appendChild(slot);
-  }
-}
-/* one picker recipe, two instances: the board's (main view) and the exact-
-   hand slots' (editor popup). Both show the same used-card state. */
-function labRenderPickers(){
-  labRenderPickerInto($("labPicker"),"board");
-  labRenderPickerInto($("labEditPicker"),"hand");
-}
+function labRenderBoard(){ labRenderSlots("labBoard","board"); }
+function labRenderHand(){ labRenderSlots("labHand","hand"); }
+/* one picker recipe, two instances: the board's (main view, always) and the
+   exact-hand slots' (editor popup, hand mode only — labRenderEditor owns it).
+   Both show the same used-card state. */
 function labRenderPickerInto(el,zone){
   el.innerHTML="";
   const used=labUsedCards();
@@ -12785,24 +12799,27 @@ function labPickCard(card,zone){
   const t=(labTarget && labTarget.zone===zone) ? labTarget : labNextTarget(zone);
   if(!t) return;
   if(t.zone==="board"){
-    // fill as a prefix regardless of which slot was tapped
+    // fill as a prefix regardless of which slot was tapped; labNextTarget is
+    // the one gate on a full board
     const b=LAB.board.filter(Boolean);
-    if(b.length>=5) return;
     b.push(card); LAB.board=b;
   } else LAB.sides[LAB.focus].cards[t.i]=card;
   labTarget=labNextTarget(zone);
-  labAfterBoardEdit();
+  labAfterEdit();
 }
-function labAfterBoardEdit(){
+/* The one edit chain: every lab mutation — a painted cell, a board card, a
+   preset, a mode or focus switch — clears the filter, persists, re-renders
+   both surfaces (the hidden one is cheap and stays in step), and recomputes. */
+function labAfterEdit(){
   LAB.filter=null;
   labSave();
   labRenderMain();
-  labRenderEditor();          // keeps the popup in step when it is open
+  labRenderEditor();
   labRecomputeSoon();
 }
 function labRenderMain(){
-  labRenderBoard(); labRenderPickers(); labRenderSides();
-  labRenderBreakdown(); labRenderMini();
+  labRenderBoard(); labRenderPickerInto($("labPicker"),"board");
+  labRenderSides(); labRenderBreakdown(); labRenderMini();
 }
 function labSideSummary(i){
   const s=LAB.sides[i];
@@ -12810,8 +12827,7 @@ function labSideSummary(i){
     const c=s.cards.filter(Boolean);
     return c.length===2 ? c[0]+" "+c[1] : "pick 2 cards";
   }
-  let tot=0;
-  for(const h in s.grid) if(s.grid[h]>0.004) tot+=s.grid[h]*combosOf(h);
+  const tot=labComboCount(s.grid);
   return Math.round(tot)+" combos · "+(100*tot/1326).toFixed(1)+"%";
 }
 function labRenderSides(){
@@ -12823,8 +12839,8 @@ function labRenderSides(){
     c.innerHTML=esc(labSideName(i,N))+"<small>"+esc(labSideSummary(i))+"</small>";
     c.onclick=()=>{
       if(LAB.focus===i){ labEditOpen(); return; }   // tap the lit chip to edit it
-      LAB.focus=i; LAB.filter=null; labTarget=null;
-      labRenderMain(); labRenderEditor(); labRecomputeSoon();
+      LAB.focus=i; labTarget=null;
+      labAfterEdit();
     };
     el.appendChild(c);
   });
@@ -12834,9 +12850,9 @@ function labRenderSides(){
   if(N>=LAB_MAX_SIDES) add.style.opacity=".35";
   else add.onclick=()=>{
     const s=labBlankSide();
-    for(let i=0;i<13;i++)for(let j=0;j<13;j++) s.grid[handName(i,j)]=1;
+    s.grid=labAllGrid();
     LAB.sides.push(s); LAB.focus=LAB.sides.length-1; labTarget=null;
-    labAfterBoardEdit();
+    labAfterEdit();
   };
   pc.appendChild(add);
   const rm=document.createElement("div");
@@ -12846,48 +12862,42 @@ function labRenderSides(){
     LAB.sides.pop();
     if(LAB.focus>=LAB.sides.length) LAB.focus=0;
     labTarget=null;
-    labAfterBoardEdit();
+    labAfterEdit();
   };
   pc.appendChild(rm);
   $("labEditBtn").textContent="✎ Edit "+labSideName(LAB.focus,N)+"…";
 }
-/* the read-only mini matrix beside the edit button: the focused range as a
-   weight map, or the active breakdown filter when one is lit */
+/* The one place that decides a lab cell's colour, shared by the big painting
+   grid and the read-only mini matrix so the two views cannot disagree: the
+   focused range as a weight map, or — when a breakdown row is lit — that
+   category's share of the cell's live combos, in the needle. */
+function labCellStyle(h){
+  const bd=labBd;
+  if(LAB.filter && bd && !bd.empty){
+    const lv=bd.cellLive[h]||0, cw=(bd.cellCat[LAB.filter]||{})[h]||0;
+    const f=lv>0?cw/lv:0;
+    return {...labFilterBg(f), filt:true, label: cw>0?String(Math.round(100*f)):""};
+  }
+  const w=LAB.sides[LAB.focus].grid[h]||0;
+  return {...labWeightBg(w), filt:false, label:cellLabel(h)};
+}
 function labRenderMini(){
   const side=LAB.sides[LAB.focus];
   $("labMiniWrap").classList.toggle("hidden", side.mode==="hand");
   if(side.mode==="hand") return;
   const el=$("labMini"); el.innerHTML="";
-  const bd=LAB._bd;
-  const filt=(LAB.filter && bd && !bd.empty) ? bd : null;
   for(let i=0;i<13;i++)for(let j=0;j<13;j++){
-    const h=handName(i,j), c=document.createElement("i");
-    let st;
-    if(filt){
-      const lv=filt.cellLive[h]||0, cw=(filt.cellCat[LAB.filter]||{})[h]||0;
-      st=labFilterBg(lv>0?cw/lv:0);
-    } else st=labWeightBg(side.grid[h]||0);
-    c.style.background=st.css;
+    const c=document.createElement("i");
+    c.style.background=labCellStyle(handName(i,j)).css;
     el.appendChild(c);
   }
 }
 function labRenderBrushes(){
-  const el=$("labBrushes"); el.innerHTML="";
-  [[1,"100%"],[0.75,"75%"],[0.5,"50%"],[0.25,"25%"],[0,"Off"]].forEach(([wv,l])=>{
-    const c=document.createElement("div");
-    c.className="chip mini2"+(labBrushW===wv?" on":"");
-    c.textContent=l;
-    c.onclick=()=>{ labBrushW=wv; labRenderBrushes(); };
-    el.appendChild(c);
-  });
-  const ic=$("labImpChips"); ic.innerHTML="";
-  [["play","Play"],["raise","Raise"],["call","Call"]].forEach(([id,l])=>{
-    const c=document.createElement("div");
-    c.className="chip mini2"+(labImp===id?" on":"");
-    c.textContent=l; c.title="Which action’s weights a loaded chart contributes";
-    c.onclick=()=>{ labImp=id; labRenderBrushes(); };
-    ic.appendChild(c);
-  });
+  chipRow("labBrushes",[[1,"100%"],[0.75,"75%"],[0.5,"50%"],[0.25,"25%"],[0,"Off"]],
+          labBrushW, w=>{ labBrushW=w; labRenderBrushes(); });
+  chipRow("labImpChips",[["play","Play"],["raise","Raise"],["call","Call"]],
+          labImp, id=>{ labImp=id; labRenderBrushes(); });
+  $("labImpChips").title="Which action’s weights a loaded chart contributes";
 }
 /* the editor popup. Rendering it while hidden is cheap and keeps it always
    in step, so opening it is just showOverlay. */
@@ -12895,29 +12905,23 @@ function labRenderEditor(){
   const side=LAB.sides[LAB.focus], N=LAB.sides.length;
   $("labEditTitle").textContent=labSideName(LAB.focus,N);
   $("labEditSub").textContent=labSideSummary(LAB.focus);
-  const mc=$("labModeChips"); mc.innerHTML="";
-  [["range","Range"],["hand","Exact hand"]].forEach(([id,l])=>{
-    const c=document.createElement("div");
-    c.className="chip mini2"+(side.mode===id?" on":"");
-    c.textContent=l;
-    c.onclick=()=>{
-      if(side.mode===id) return;
-      side.mode=id; LAB.filter=null;
-      labTarget = id==="hand" ? {zone:"hand",i:side.cards[0]?1:0} : null;
-      labAfterBoardEdit();
-    };
-    mc.appendChild(c);
+  chipRow("labModeChips",[["range","Range"],["hand","Exact hand"]],side.mode,id=>{
+    if(side.mode===id) return;
+    side.mode=id;
+    labTarget = id==="hand" ? {zone:"hand",i:side.cards[0]?1:0} : null;
+    labAfterEdit();
   });
   $("labHandWrap").classList.toggle("hidden", side.mode!=="hand");
   $("labRangeWrap").classList.toggle("hidden", side.mode==="hand");
-  labRenderBrushes(); labRenderHand(); labRenderGrid(); labRenderCombosLine();
+  labRenderBrushes(); labRenderHand();
+  if(side.mode==="hand") labRenderPickerInto($("labEditPicker"),"hand");
+  labRenderGrid(); labRenderCombosLine();
   labUpdateText();
 }
 function labRenderCombosLine(){
   const side=LAB.sides[LAB.focus];
   if(side.mode!=="range"){ $("labCombos").textContent=""; return; }
-  let tot=0;
-  for(const h in side.grid) if(side.grid[h]>0.004) tot+=side.grid[h]*combosOf(h);
+  const tot=labComboCount(side.grid);
   let txt=Math.round(tot)+" of 1326 combos · "+(100*tot/1326).toFixed(1)+"%";
   const b=LAB.board.filter(Boolean);
   if(b.length>=3){
@@ -12930,26 +12934,15 @@ function labEditOpen(){ labRenderEditor(); showOverlay("labEditOverlay"); }
 function labEditClose(){ hideOverlay("labEditOverlay"); labRenderMain(); }
 function labRenderGrid(){
   const wrap=$("labGrid");
-  const side=LAB.sides[LAB.focus], bd=LAB._bd;
-  const filt=(LAB.filter && bd && !bd.empty) ? bd : null;
   wrap.innerHTML="";
   for(let i=0;i<13;i++)for(let j=0;j<13;j++){
-    const h=handName(i,j), w=side.grid[h]||0;
+    const h=handName(i,j), st=labCellStyle(h);
     const cell=document.createElement("div");
     cell.className="bcell"; cell.dataset.hand=h;
-    if(filt){
-      const lv=filt.cellLive[h]||0, cw=(filt.cellCat[LAB.filter]||{})[h]||0;
-      const f=lv>0?cw/lv:0, st=labFilterBg(f);
-      cell.style.background=st.css; cell.style.color=st.ink;
-      cell.textContent = cw>0 ? Math.round(f*100) : "";
-    } else {
-      const st=labWeightBg(w);
-      cell.style.background=st.css; cell.style.color=st.ink;
-      cell.textContent=h.length===2?h:(h.slice(0,2)+(h.endsWith("s")?"s":"o"));
-    }
+    cell.style.background=st.css; cell.style.color=st.ink;
+    cell.textContent=st.label;
     wrap.appendChild(cell);
   }
-  if(!labWired) labWireGrid();
 }
 function labPaintCell(h){
   const side=LAB.sides[LAB.focus];
@@ -12958,39 +12951,13 @@ function labPaintCell(h){
   if(cell){ const st=labWeightBg(labBrushW);
     cell.style.background=st.css; cell.style.color=st.ink; }
 }
-function labWireGrid(){
-  const wrap=$("labGrid"); labWired=true;
-  const handOf=t=>t&&t.dataset?t.dataset.hand:null;
-  wrap.addEventListener("pointerdown",e=>{
-    if(LAB.filter){ LAB.filter=null; labRenderGrid(); labRenderBreakdown(); return; }
-    labPainting=true;
-    const h=handOf(e.target); if(h){ labPaintCell(h); e.preventDefault(); }
-  });
-  wrap.addEventListener("pointermove",e=>{
-    if(!labPainting) return;
-    const h=handOf(document.elementFromPoint(e.clientX,e.clientY));
-    if(h) labPaintCell(h);
-  });
-  const up=()=>{ if(labPainting){ labPainting=false; labAfterRangeEdit(); } };
-  window.addEventListener("pointerup",up);
-  window.addEventListener("pointercancel",up);
-}
-function labAfterRangeEdit(){
-  LAB.filter=null;
-  labSave();
-  labRenderSides(); labRenderBreakdown(); labRenderMini();
-  labRenderGrid(); labRenderCombosLine(); labUpdateText();
-  labRecomputeSoon();
-}
 function labUpdateText(){
   const el=$("labText");
   if(document.activeElement===el) return;
   const side=LAB.sides[LAB.focus];
   el.value = side.mode==="range" ? labRangeText(side.grid) : "";
 }
-function labMsg(t,bad){
-  $("labMsg").innerHTML = bad ? '<span style="color:var(--bad)">'+t+"</span>" : (t||"");
-}
+function labMsg(t,bad){ msgInto("labMsg",t,bad); }
 function labFillChartSel(){
   const sel=$("labChartSel");
   sel.innerHTML='<option value="">Load from a chart…</option>';
@@ -13018,7 +12985,7 @@ function labImportChart(chart, imp){
 function labRenderBreakdown(){
   const b=LAB.board.filter(Boolean);
   const bd=labBreakdown(LAB.sides[LAB.focus], b, labDeads()[LAB.focus]);
-  LAB._bd=bd;
+  labBd=bd;    // derived, so it lives beside labJob/labTarget — never in the saved state
   const made=$("labMade"), draws=$("labDraws");
   made.innerHTML=""; draws.innerHTML="";
   const nm=labSideName(LAB.focus,LAB.sides.length);
@@ -13034,23 +13001,21 @@ function labRenderBreakdown(){
     $("labHitNote").textContent="No live combos on this board.";
     return;
   }
-  const row=(r,kind,showCum)=>{
-    const el=document.createElement("div");
-    el.className="labrow"+(r.pct<0.05?" zero":"")+(LAB.filter===r.id?" on":"");
-    el.innerHTML='<span class="nm">'+r.name+'</span>'
-      +'<span class="bar"><i style="width:'+Math.min(100,r.pct).toFixed(1)+'%"></i></span>'
-      +"<b>"+r.pct.toFixed(1)+"%</b>"
-      +(showCum?'<span class="cum">≥ '+r.cum.toFixed(1)+"%</span>":"");
+  const row=(r,showCum)=>{
+    const el=labBarRow(r.name, r.pct,
+      (r.pct<0.05?" zero":"")+(LAB.filter===r.id?" on":""));
+    if(showCum) el.insertAdjacentHTML("beforeend",
+      '<span class="cum">≥ '+r.cum.toFixed(1)+"%</span>");
     el.onclick=()=>{
       LAB.filter = LAB.filter===r.id ? null : r.id;
       labRenderBreakdown(); labRenderMini(); labRenderGrid();
     };
     return el;
   };
-  bd.mrows.forEach(r=>made.appendChild(row(r,"made",true)));
+  bd.mrows.forEach(r=>made.appendChild(row(r,true)));
   const showDraws=bd.drows.length>0;
   $("labDrawLab").classList.toggle("hidden",!showDraws);
-  bd.drows.forEach(r=>draws.appendChild(row(r,"draw",false)));
+  bd.drows.forEach(r=>draws.appendChild(row(r,false)));
   $("labHitNote").innerHTML=
     "Made rows split the range by how the <b>hole cards</b> connect — each live combo counted once; "
     +"“≥” is the running total from the top. Draw rows can overlap. "
@@ -13072,14 +13037,16 @@ function labRenderEqValues(eqs){
     return;
   }
   const el=$("labEqRows"); el.innerHTML="";
-  eqs.forEach((e,i)=>{
-    const r=document.createElement("div"); r.className="labrow";
-    r.style.cursor="default";
-    r.innerHTML='<span class="nm">'+labSideName(i,N)+"</span>"
-      +'<span class="bar"><i style="width:'+Math.min(100,100*e).toFixed(1)+'%"></i></span>'
-      +"<b>"+(100*e).toFixed(1)+"%</b>";
-    el.appendChild(r);
-  });
+  eqs.forEach((e,i)=>el.appendChild(labBarRow(labSideName(i,N), 100*e)));
+}
+/* the one .labrow builder: name, filled bar, right-aligned percent */
+function labBarRow(name,pct,cls){
+  const el=document.createElement("div");
+  el.className="labrow"+(cls||"");
+  el.innerHTML='<span class="nm">'+name+'</span>'
+    +'<span class="bar"><i style="width:'+Math.min(100,pct).toFixed(1)+'%"></i></span>'
+    +"<b>"+pct.toFixed(1)+"%</b>";
+  return el;
 }
 function labRenderEqDone(res){
   if(res.err){
@@ -13158,29 +13125,30 @@ $("labClose").onclick=()=>hideOverlay("labOverlay");
 $("labOverlay").onclick=e=>{ if(e.target.id==="labOverlay") hideOverlay("labOverlay"); };
 $("labEditBtn").onclick=labEditOpen;
 $("labMiniWrap").onclick=labEditOpen;
+wireGridPaint("labGrid", labPaintCell, labAfterEdit,
+  ()=>{ if(LAB&&LAB.filter){ LAB.filter=null; labRenderBreakdown(); labRenderMini(); labRenderGrid(); return true; } });
 $("labEditClose").onclick=labEditClose;
 $("labEditDone").onclick=labEditClose;
 $("labEditOverlay").onclick=e=>{ if(e.target.id==="labEditOverlay") labEditClose(); };
-$("labBoardClear").onclick=()=>{ LAB.board=[]; labTarget={zone:"board",i:0}; labAfterBoardEdit(); };
+$("labBoardClear").onclick=()=>{ LAB.board=[]; labTarget={zone:"board",i:0}; labAfterEdit(); };
 $("labBoardRandom").onclick=()=>{
   // a fresh 3-card flop from whatever the exact hands have not used
   const used=new Set(); LAB.sides.forEach(s=>{ if(s.mode==="hand") s.cards.forEach(c=>{ if(c) used.add(c); }); });
   const avail=freshDeck().filter(c=>!used.has(c));
   shuffle(avail);
   LAB.board=avail.slice(0,3); labTarget=null;
-  labAfterBoardEdit();
+  labAfterEdit();
 };
-$("labClearR").onclick=()=>{ LAB.sides[LAB.focus].grid={}; labAfterRangeEdit(); };
+$("labClearR").onclick=()=>{ LAB.sides[LAB.focus].grid={}; labAfterEdit(); };
 $("labAllR").onclick=()=>{
-  const g={}; for(let i=0;i<13;i++)for(let j=0;j<13;j++) g[handName(i,j)]=1;
-  LAB.sides[LAB.focus].grid=g; labAfterRangeEdit();
+  LAB.sides[LAB.focus].grid=labAllGrid(); labAfterEdit();
 };
 $("labTop").oninput=()=>{
   const p=+$("labTop").value; $("labTopLab").textContent=p;
   const g=labTopPct(p);
   if(!g){ labMsg("The exact preflop table is missing from this build, so Top-% has no ranking.",true); return; }
   LAB.sides[LAB.focus].grid=g; labMsg("");
-  labAfterRangeEdit();
+  labAfterEdit();
 };
 $("labChartSel").onchange=()=>{
   const v=$("labChartSel").value; if(!v) return;
@@ -13190,7 +13158,7 @@ $("labChartSel").onchange=()=>{
   labImportChart(chart, labImp);
   labMsg("Loaded <b>"+esc(chartTitle(chart))+"</b> — "
     +(labImp==="play"?"raise + call":labImp)+" weights.");
-  labAfterRangeEdit(); labRenderEditor();
+  labAfterEdit();
 };
 $("labTextApply").onclick=()=>{
   const r=labParseRange($("labText").value);
@@ -13199,7 +13167,7 @@ $("labTextApply").onclick=()=>{
   LAB.sides[LAB.focus].grid=r.grid;
   labMsg("");
   $("labText").blur();
-  labAfterRangeEdit(); labRenderEditor();
+  labAfterEdit();
 };
 $("labText").addEventListener("keydown",e=>{ if(e.key==="Enter") $("labTextApply").onclick(); });
 $("rangeToLab").onclick=()=>{
@@ -13209,7 +13177,6 @@ $("rangeToLab").onclick=()=>{
   labImportChart(LAB_LAST_CHART,"play");
   hideOverlay("rangeOverlay");
   labOpen();
-  labMsg("Loaded <b>"+esc(chartTitle(LAB_LAST_CHART))+"</b> as Hero — raise + call weights.");
 };
 
 /* ---- range builder wiring ---- */
@@ -13221,6 +13188,7 @@ $("bldStack").oninput=()=>{ BUILDER.stack=parseFloat($("bldStack").value)||100; 
 $("bldLabel").oninput=()=>{ const c=curChart(); if(c){ c.raise_label=$("bldLabel").value; saveDraft(); } };
 $("bldSize").oninput =()=>{ const c=curChart(); if(c){ c.raise_size=parseSize($("bldSize").value); saveDraft(); } };
 $("bldMixR").oninput=$("bldMixC").oninput=()=>{ if(brushId==="mix") brush=currentMix(); };
+wireGridPaint("bldGrid", applyBrushToHand, saveDraft);
 $("bldClear").onclick=()=>{ const c=ensureCurChart(); if(!c) return; Object.keys(c.grid).forEach(h=>c.grid[h]=[0,0,1]); renderBGrid(); updateBStats(); saveDraft(); };
 $("bldFill").onclick =()=>{ const c=ensureCurChart(); if(!c) return; Object.keys(c.grid).forEach(h=>c.grid[h]=[1,0,0]); renderBGrid(); updateBStats(); saveDraft(); };
 $("bldExport").onclick=()=>{
