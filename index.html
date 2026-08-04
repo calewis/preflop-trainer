@@ -84,9 +84,19 @@
    sides and along the bottom. By day the shadow goes navy-soft, the vignette
    stays steel, and the rim light simply is not lit: print has no lamp. */
 :root[data-theme="light"] #app{box-shadow:0 0 34px rgba(0,48,73,.14)}
+/* Two inset layers, not one: the felt's radial gradient is sized to the
+   box's corners, so the oval rim crosses it at ~64% of the ramp at three
+   o'clock but 100% at the diagonals — a lighter arc of felt hugging the rail
+   at the flat sides. Box-shadows follow the border-radius exactly, so a
+   snug strong ring (26px blur + 10px spread) evens the rim tone into the
+   rail everywhere, and the broad soft layer keeps the felt's depth without
+   the near-black mud the night vignette would print here. */
 :root[data-theme="light"] #table{
-  box-shadow:0 0 0 1px rgba(0,48,73,.55), inset 0 0 60px rgba(0,26,42,.45),
-             inset 0 2px 0 rgba(255,255,255,.14), 0 14px 30px rgba(0,48,73,.25)}
+  box-shadow:0 0 0 1px rgba(0,48,73,.55),
+             inset 0 0 26px 10px rgba(0,26,42,.5),
+             inset 0 0 70px rgba(0,26,42,.22),
+             inset 0 2px 0 rgba(255,255,255,.14),
+             0 14px 30px rgba(0,48,73,.25)}
 :root[data-theme="light"] #table::after{display:none}
 :root[data-theme="light"] body::after{opacity:.06;mix-blend-mode:multiply}
 :root[data-theme="light"] body::before{
@@ -160,6 +170,11 @@ html,body{margin:0;height:100%;color:var(--txt);
   font-size:15px;font-weight:800;letter-spacing:1.1px;color:var(--txt);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #brand .g{color:var(--amber);text-shadow:0 0 13px var(--glow);font-size:19px}
+/* the mark keeps its suit honest: amber spade by night; by day the accent is
+   Flag Red, and a red spade is a misprint — it becomes a heart */
+#brand .gheart{display:none}
+:root[data-theme="light"] #brand .gspade{display:none}
+:root[data-theme="light"] #brand .gheart{display:inline}
 #brand i{font-style:normal}
 .iconbtn{background:var(--panel);border:1px solid var(--line);color:var(--txt);
   border-radius:999px;width:38px;height:38px;font-size:17px;cursor:pointer;
@@ -408,31 +423,20 @@ html,body{margin:0;height:100%;color:var(--txt);
 .flip>.flipback.boardcard{border-radius:5px}
 .flip>.flipback.bigcard{border-radius:7px}
 .flip>.flipback::before{content:none}   /* face-style overlays stay on faces */
-/* equity badges wait for the flip they explain (delay set inline, once) */
-.eqbox{animation:eqin .3s both}
-@keyframes eqin{from{opacity:0;transform:translateX(-50%) translateY(4px)}
-  to{opacity:1;transform:translateX(-50%)}}
 @media (prefers-reduced-motion:reduce){
-  .dealme,.eqbox{animation:none}
+  .dealme{animation:none}
   .flip{transition:none}
 }
-/* revealed villain cards at showdown — big & readable */
-.cards.reveal{height:auto;gap:3px}
+/* revealed villain cards (the post-decision peek) — big & readable.
+   Three classes on the height so the tiers' fixed .cards heights lose. */
+.seat .cards.reveal{height:auto;gap:0}
+.seat .cards.reveal>*+*{margin-left:3px}   /* faces sit apart, never fanned over */
 .vcard{width:32px;height:44px;border-radius:4px}
 .vcard .ix{display:none}
 .vcard .r{font-size:19px}.vcard .s{font-size:13px}
-.eqbox{position:absolute;left:50%;top:100%;transform:translateX(-50%);margin-top:3px;z-index:12;
-  display:flex;flex-direction:column;align-items:center;gap:2px}
-.seat.hero .eqbox{top:auto;bottom:100%;margin:0 0 5px}
-.eq{white-space:nowrap;font-size:12px;font-weight:800;color:var(--amber-ink);background:var(--gold);
-  font-variant-numeric:tabular-nums;
-  padding:1px 7px;border-radius:9px;box-shadow:0 1px 3px rgba(0,0,0,.5)}
-/* **Opaque, and above the action tag.** These sit directly over a seat pod on
-   the flop, and a translucent badge let the "3-Bets 12" tag underneath show
-   through the digits — two numbers occupying the same pixels, neither
-   readable. A readout that overlaps something else has to win outright. */
-.eq.rng{background:#1a1208;color:var(--amber);border:1px solid var(--amber-dim,#c2934e)}
-.eqr{font-size:9px;font-weight:700;opacity:.7;margin-left:3px}
+/* (The on-felt equity badges lived here; they blocked the pot, tags and
+   board and are gone — the Range Lab, seeded from the live hand, is the
+   home of those numbers now.) */
 
 /* seats */
 .seat{position:absolute;transform:translate(-50%,-50%);width:92px;text-align:center;
@@ -513,15 +517,6 @@ html,body{margin:0;height:100%;color:var(--txt);
 #feedback{min-height:34px;text-align:center;font-size:16px;font-weight:600;
   margin-bottom:6px;line-height:1.25}
 #feedback .sub{display:block;font-size:14px;font-weight:500;color:var(--dim);margin-top:2px}
-#feedback .fbl{list-style:none;padding:0;margin:5px auto 0;text-align:left;max-width:520px}
-#feedback .fbl li{font-size:13px;font-weight:500;line-height:1.3;color:var(--dim);
-  display:flex;gap:6px;align-items:flex-start;margin-top:3px}
-#feedback .fbl li b{color:var(--txt);font-weight:800}
-#feedback .fbl .m{flex:0 0 auto;font-weight:900;width:11px}
-#feedback .fbl .ok{color:var(--good)} #feedback .fbl .no{color:var(--bad)} #feedback .fbl .nu{color:var(--faint)}
-#feedback .fbl .note{font-style:italic;opacity:.85}
-#feedback .fbl .hdr{margin-top:7px;padding-top:6px;border-top:1px solid var(--line)}
-#feedback .fbl .hdr .m{visibility:hidden}
 #buttons{display:flex;gap:8px}
 .abtn{flex:1;border:1px solid transparent;border-radius:13px;padding:15px 4px;font-size:19px;
   font-weight:800;letter-spacing:.4px;position:relative;min-height:56px}
@@ -541,6 +536,13 @@ html,body{margin:0;height:100%;color:var(--txt);
 #nextBtn{display:block;width:100%;border:1px solid var(--amber);border-radius:13px;padding:15px;font-size:20px;
   font-weight:800;color:var(--amber-ink);background:var(--amber);min-height:56px;
   box-shadow:0 0 26px -7px var(--glow)}
+/* the post-decision row: doors to the numbers and the peek, quiet next to
+   the lit Deal button */
+#postRow{display:flex;gap:8px;margin-bottom:8px}
+#postRow button{flex:1;border:1px solid var(--line2);border-radius:13px;
+  padding:11px 6px;font-size:16px;font-weight:800;color:var(--txt);background:var(--panel);
+  min-height:46px}
+#postRow button:hover{color:var(--amber);border-color:var(--amber)}
 .hidden{display:none!important}
 
 /* ---- overlays ---- */
@@ -772,16 +774,16 @@ html,body{margin:0;height:100%;color:var(--txt);
   .seat .cards{height:45px}
   .mini{width:30px;height:41px;font-size:17px}
   .seat .cards>*+*{margin-left:-6px}
+  .vcard{width:36px;height:50px}
+  .vcard .r{font-size:21px}.vcard .s{font-size:15px}
   .action-tag{font-size:13px;top:-17px;padding:2px 8px}
-  .eq{font-size:13px;padding:2px 9px}
-  .eqr{font-size:10px}
   .dealer{width:27px;height:27px;font-size:16px}
   .boardcard{width:56px;height:76px}
   .boardcard .r{font-size:33px}.boardcard .s{font-size:24px}
   .bigcard{width:66px;height:93px}
   .bigcard .r{font-size:39px}.bigcard .s{font-size:30px}
   /* keep the controls a comfortable thumb-width rather than stretching them out */
-  #feedback,#buttons,#nextBtn{max-width:560px;margin-left:auto;margin-right:auto}
+  #feedback,#buttons,#nextBtn,#postRow{max-width:560px;margin-left:auto;margin-right:auto}
   #buttons{gap:10px}
   .overlay{max-width:720px}
   #rangeGrid{max-width:min(88vw,540px)}
@@ -820,6 +822,8 @@ html,body{margin:0;height:100%;color:var(--txt);
   .seat .cards{height:61px}
   .mini{width:41px;height:56px;font-size:21px}
   .seat .cards>*+*{margin-left:-8px}
+  .vcard{width:46px;height:63px}
+  .vcard .r{font-size:27px}.vcard .s{font-size:19px}
   .boardcard{width:74px;height:100px}
   .boardcard .r{font-size:44px}.boardcard .s{font-size:32px}
   .bigcard{width:88px;height:124px}
@@ -828,7 +832,6 @@ html,body{margin:0;height:100%;color:var(--txt);
   .dchip{width:24px;height:24px;font-size:15px}
   .action-tag{font-size:15px;top:-20px;padding:2px 10px}
   .bet{font-size:15px;padding:2px 9px}
-  .eq{font-size:15px;padding:2px 10px}
   .stat b{font-size:22px}
   .stat span{font-size:11px}
   #brand{font-size:17px}
@@ -838,11 +841,10 @@ html,body{margin:0;height:100%;color:var(--txt);
   #labBtn{font-size:20px}
   #feedback{font-size:20px}
   #feedback .sub{font-size:16px}
-  #feedback .fbl li{font-size:15px}
   .abtn{font-size:23px;min-height:68px;padding:19px 4px;border-radius:15px}
   .abtn small{font-size:14px}
   #nextBtn{font-size:24px;min-height:68px;border-radius:15px}
-  #feedback,#buttons,#nextBtn{max-width:660px}
+  #feedback,#buttons,#nextBtn,#postRow{max-width:660px}
   .overlay{max-width:980px}
   #rangeGrid{max-width:680px}
   .cell{font-size:17px}
@@ -873,7 +875,7 @@ html,body{margin:0;height:100%;color:var(--txt);
     <!-- The one page of the app, so the bar carries the name rather than a
          mode switch. (A play-a-full-hand page existed and was retired before
          release — one product surface to polish; git history holds it.) -->
-    <div id="brand"><span class="g">♠</span><i>Preflop Trainer</i></div>
+    <div id="brand"><span class="g"><span class="gspade">♠</span><span class="gheart">♥</span></span><i>Preflop Trainer</i></div>
     <div class="grow"></div>
     <button class="iconbtn" id="histBtn" title="Hand history">↺</button>
     <button class="iconbtn txt" id="plBtn" title="Players' ranges">vs</button>
@@ -899,6 +901,10 @@ html,body{margin:0;height:100%;color:var(--txt);
   <div id="bar">
     <div id="feedback"></div>
     <div id="buttons"></div>
+    <div id="postRow" class="hidden">
+      <button id="labQuick">Range Lab — this hand ▸</button>
+      <button id="showVBtn">Show villain hand</button>
+    </div>
     <button id="nextBtn" class="hidden">Deal Next Hand ▸</button>
   </div>
 </div>
@@ -1027,7 +1033,7 @@ html,body{margin:0;height:100%;color:var(--txt);
     <!-- "Am I running the current build?" has been the most expensive question
          of this project's development; the play page answered it with a footer
          stamp and the trainer never had one. `build.py` fills it in. -->
-    <div class="hintline">build 2026-08-04 12:35 d57fa80</div>
+    <div class="hintline">build 2026-08-04 14:01 25abf74</div>
   </div>
 </div>
 
@@ -11077,7 +11083,7 @@ function newHand(){
      level:0,aggressor:null,opener:null,heroRole:null,villain:null,raiser:{},pot:1.5,vrange:{},
      limpers:null,limpVs:null,heroPrior:null,
      turn:null,playingFlop:false,revealEq:false,flopGrade:null,fBet:0,fCommit:{},fOrder:[],
-     seq:++HAND_SEQ,dealAnim:true,boardShown:0,eqShown:false,
+     seq:++HAND_SEQ,dealAnim:true,boardShown:0,showV:false,
      node:null,ended:false,result:"",heroHand:null,heroCards:null,reviewChart:null,reviewHand:null,decisions:[]};
   H.committed[sb]=0.5; H.committed[bb]=1;
   H.act[sb]={t:"post",label:"SB 0.5"}; H.act[bb]={t:"post",label:"BB 1"};
@@ -11257,7 +11263,8 @@ function gradeAndFeedback(node,col){
   if(!correct) MISTAKES[mk]={scenario:node.scenario, hero:H.hero, vs:node.vs, size:H.n, hand:H.heroHand, cards:H.heroCards.slice()};
   else if(MISTAKES[mk]) delete MISTAKES[mk];
   saveMistakes();
-  if(!correct) flashChart(chart,H.heroHand,col);
+  // No auto-flash of the chart on a mistake — it covered the table and the
+  // animations mid-hand. The verdict line names the hand; ▤ shows the chart.
 }
 
 /* ================= flop play (optional mode) =================
@@ -11267,7 +11274,6 @@ function gradeAndFeedback(node,col){
    not to model good postflop poker. The training signal is your own equity
    against their ranges and the price the pot is laying you. */
 const FLOP_BET=0.6;                       // bet / raise sizing as a share of the pot
-const pctS=x=>Math.round(x*100)+"%";
 /* postflop the blinds act first, then it runs round to the button */
 function postflopOrder(){ const p=H.play, n=p.length; return p.slice(n-2).concat(p.slice(0,n-2)); }
 function flopLive(){ return H.fOrder.filter(s=>!H.folded.has(s)); }
@@ -11734,22 +11740,6 @@ function heroOOP(){
   const live=flopLive(), hi=live.indexOf(H.hero);
   return hi>=0 && hi<live.length-1;
 }
-/* ---- bluff analysis: none of this needs the bots, it's your cards vs the
-   board vs the range they repped ---- */
-function boardTexture(board){
-  const suit={}; board.forEach(c=>suit[c[1]]=(suit[c[1]]||0)+1);
-  const maxSuit=Math.max(...Object.values(suit));
-  const rk=board.map(c=>RVAL[c[0]]).sort((a,b)=>b-a);
-  const paired=new Set(rk).size<rk.length;
-  const span=rk[0]-rk[rk.length-1];
-  const connected=span<=4;
-  const wet=(maxSuit>=2 && connected) || maxSuit>=3 || (connected && span<=3);
-  return {wet, paired, maxSuit, hiCard:rk[0],
-    label: wet?"wet":paired?"paired":"dry",
-    note: wet ? "lots of draws and made hands connect with it"
-        : paired ? "most hands miss a paired board"
-        : "their range misses it often"};
-}
 /* A value bet is one that beats the hands which CALL it, not their whole range.
    So filter their range down to what continues — top pair or better, plus live
    draws — and measure equity against that. No arbitrary buffer, and it explains
@@ -11782,45 +11772,19 @@ function valueEquity(vseat, board, heroCards){
   }
   return n? win/n : null;
 }
-/* how much of their STRONG range your exact cards remove from the deck */
-function blockerPct(vseats, board, heroCards){
-  let strongTot=0, strongBlocked=0;
-  vseats.forEach(v=>{
-    rangeCombos(H.vrange[v]).forEach(it=>{
-      if(it.cards.some(c=>board.includes(c))) return;        // impossible, on the board
-      if(!topPairPlusOn(it.cards,board)) return;             // only their real hands matter
-      strongTot+=it.w;
-      if(it.cards.some(c=>heroCards.includes(c))) strongBlocked+=it.w;
-    });
-  });
-  return strongTot? strongBlocked/strongTot : 0;
-}
-/* would bluffing have been a reasonable idea here? */
-function bluffCheck(live, rangeEq, fair, heroEq){
-  const oop=heroOOP(), tex=boardTexture(H.flop);
-  const block=blockerPct(live, H.flop, H.cards[H.hero]);
-  const backdoor=heroEq>0.12;                                // not stone dead if called
-  // range advantage is the biggest factor, so it counts double either way
-  let score=0;
-  if(rangeEq!=null && rangeEq>fair+0.04) score+=2;
-  else if(rangeEq!=null && rangeEq<fair-0.04) score-=2;
-  score += oop ? -1 : 1;
-  score += tex.wet ? -1 : 1;
-  if(block>0.10) score++;
-  if(backdoor) score++;
-  const facts=[
-    oop?"out of position":"in position",
-    rangeEq!=null?`your range ${pctS(rangeEq)}`:null,
-    `blocks ${pctS(block)} of their strong hands`,
-    `${tex.label} board, ${tex.note}`
-  ].filter(Boolean);
-  return {score, facts, ok:score>=3,
-    verdict: score>=3 ? "Reasonable spot to bluff."
-           : score<=0 ? "Poor spot to bluff — give it up."
-                      : "Marginal; a bluff here at low frequency at most."};
+/* the post-decision row: the lab always; the peek only while there is still
+   something unseen to show */
+function showPostRow(){
+  $("postRow").classList.remove("hidden");
+  const peekable = H && !H.showV
+    && H.play.some(s=>s!==H.hero && !H.folded.has(s) && H.cards[s]);
+  // add/remove, not toggle — the engine test harness stubs only those two
+  if(peekable) $("showVBtn").classList.remove("hidden");
+  else $("showVBtn").classList.add("hidden");
 }
 function presentFlopDecision(){
   H.node={scenario:"flop", chart:null, vs:null};
+  $("postRow").classList.add("hidden");         // a fresh decision is pending
   renderTable(); applyTags(); renderBoard(); showControls();
 }
 /* grade the flop decision on the two things that are objectively computable:
@@ -11835,13 +11799,12 @@ function gradeFlop(col, toCall){
   const rq=sig ? mcEquities({sig}, H.flop, live, 8000) : null;
   H.equity={}; H.equity[H.hero]=eq[0]; live.forEach((s,i)=>H.equity[s]=eq[i+1]);
   if(rq){ H.eqRange={}; H.eqRange[H.hero]=rq[0]; live.forEach((s,i)=>H.eqRange[s]=rq[i+1]); }
-  H.revealEq=true;
+  H.revealEq=true;               // you have committed — ranges may be inspected now
   const heroEq=eq[0], drawShare=eq.drawShare||0, rangeEq=rq?rq[0]:null, n=live.length+1, fair=1/n;
-  const acts=toCall>0 ? ["raised","called","folded"] : ["bet","checked"];
-  const B=[];                                   // {m:"ok"|"no"|"nu", t} — one line per thing judged
-  let bluffBet=false;                           // bet with no value: judged on maths, explained as a bluff
   let correct, close=false;
-
+  /* The grade is still computed and counted (stats, history) — it just no
+     longer prints an essay under the table. The user's call: the felt stays
+     clean and the Range Lab button carries the post-decision analysis. */
   if(toCall>0){
     const needRaw=toCall/(H.pot+toCall);
     const ev = live.length===1 ? simulateCall(live[0], toCall, 4000) : null;
@@ -11854,18 +11817,6 @@ function gradeFlop(col, toCall){
       correct = heroEq>=needRaw-M ? (col!==2) : (col===2);
       if(Math.abs(heroEq-needRaw)<0.03){ correct=true; close=true; }
     }
-    B.push({m:"nu",
-      t:`<b>${pctS(heroEq)} equity</b> by the river${eq.exact?"":" (sampled)"} vs `
-       +`<b>${pctS(needRaw)} pot odds</b> — ${fmt(toCall)} to call into ${fmt(H.pot)}.`});
-    B.push({m:correct?"ok":"no",
-      t: ev!=null
-        ? `<b>Pure maths: ${ev>=0?"calling":"folding"} is +EV</b> (calling runs ${ev>=0?"+":""}${fmt(Math.round(ev*10)/10)}bb `
-          +`over 4,000 played-out runouts; folding is 0).`
-        : `<b>Pure maths: ${heroEq>=needRaw?"calling":"folding"} is +EV</b> — ${pctS(heroEq)} against the ${pctS(needRaw)} you need.`});
-    if(ev!=null && heroEq<needRaw && ev>0.15) B.push({m:"nu",
-      t:`Below the pot odds yet still profitable — that gap is your <b>implied odds</b>, the extra you win when the draw lands.`});
-    else if(ev!=null && heroEq>needRaw && ev<-0.15) B.push({m:"nu",
-      t:`Above the pot odds yet still losing — <b>reverse implied odds</b>: you pay off when you improve and are still second best.`});
   } else {
     // a value bet has to beat the hands that CALL, not their whole range
     const oop=heroOOP();
@@ -11874,43 +11825,10 @@ function gradeFlop(col, toCall){
     const isValue = vEq!=null ? vEq>=bar : heroEq>=fair+0.10;
     correct = isValue ? (col===0) : (col===1);
     close   = !isValue && col===0;                 // betting light isn't "wrong", just not value
-    B.push({m:"nu",
-      t:`<b>${pctS(heroEq)} equity</b> by the river${eq.exact?"":" (sampled)"} against their whole range.`});
-    if(vEq!=null) B.push({m:"nu",
-      t:`Against just the hands that would <b>call</b> a bet you're <b>${pctS(vEq)}</b> — that's the number `
-       +`that decides a value bet${oop?", and out of position the bar is a shade higher since they act after you":""}.`});
-    B.push({m: (isValue===(col===0)) ? "ok" : "no",
-      t: isValue ? `<b>Pure maths: betting for value is +EV</b> — you're called by worse often enough.`
-                 : `<b>Pure maths: no value bet here.</b> Checking is the +EV action; betting would be a bluff.`});
-    if(!isValue && col===0) bluffBet=true;
-  }
-  if(rangeEq!=null){
-    const edge=rangeEq-fair;
-    B.push({m:"nu", t:`Your whole range is at <b>${pctS(rangeEq)}</b> on this board — `
-      +(edge>0.04?"the texture favours you.":edge<-0.04?"the texture favours them.":"neither range is ahead.")});
-  }
-  // ---- bluff analysis, deliberately kept out of the grade above ----
-  const valueish = heroEq >= fair+0.12;
-  if(!valueish && live.length){
-    const bc=bluffCheck(live, rangeEq, fair, heroEq);
-    const passive = (toCall>0 && col!==0) || (toCall===0 && col===1);
-    B.push({m:"nu", cls:"hdr",
-      t: passive ? (toCall>0 ? `<b>Would raising as a bluff have been reasonable?</b>`
-                             : `<b>Would betting as a bluff have been reasonable?</b>`)
-                 : `<b>Was that a reasonable bluff?</b>`});
-    B.push({m:"nu", t: bc.facts.join(" · ")});
-    B.push({m:"nu", cls:"note", t:`→ ${bc.verdict}`});
   }
   S.stats.flopDecisions=(S.stats.flopDecisions||0)+1;
   if(correct) S.stats.flopCorrect=(S.stats.flopCorrect||0)+1;
   save(); refreshStats();
-  const grade = correct ? `<span style="color:var(--good)">✓ ${close?"Fine":"Correct"}</span>`
-                        : `<span style="color:var(--bad)">✗ ${bluffBet?"Not +EV":"Mistake"}</span>`;
-  const MARK={ok:"✓",no:"✗",nu:"•"};
-  $("feedback").innerHTML=`${grade} &nbsp; you ${acts[col]||"acted"}`
-    + `<ul class="fbl">`
-    + B.map(b=>`<li class="${b.cls||""}"><span class="m ${b.m}">${MARK[b.m]}</span><span>${b.t}</span></li>`).join("")
-    + `</ul>`;
   H.flopGrade={col, toCall, heroEq, rangeEq, drawShare, correct, close};
 }
 function heroFlopAction(col){
@@ -11933,6 +11851,8 @@ function heroFlopAction(col){
       H.act[H.hero]={t:"raise",label:"Bets "+fmt(b)}; }
   }
   renderTable(); applyTags(); renderBoard();
+  // the decision is made: the analysis and the peek are one tap away
+  showPostRow();
   setTimeout(flopStep,420);
 }
 function finishFlop(){
@@ -11944,6 +11864,7 @@ function finishFlop(){
   H.ended=true;
   renderBoard(); renderTable(); applyTags();
   $("story").textContent=H.result;
+  showPostRow();
   $("nextBtn").classList.remove("hidden");
 }
 
@@ -11954,13 +11875,8 @@ function renderTable(){
   if(!H){ $("pot").textContent="Pot 1.5 bb"; $("story").textContent=""; return; }
   const {play,hero}=H, n=play.length, heroIdx=play.indexOf(hero);
   const showdown=H.showdown, inShow=s=> showdown && H.remaining && H.remaining.includes(s);
-  // in flop play the numbers stay hidden until you've committed to an action
-  const showEq = H.showdown || H.revealEq;
   // one-shot: the fresh deal animates; every re-render after it is static
   const dealing=!!H.dealAnim; H.dealAnim=false;
-  // the badges land WITH the flip that explains them, then re-render statically
-  const eqDelay = (showEq && !H.eqShown) ? Math.max(0, Math.round(BOARD_EQ_AT-NOW())) : 0;
-  if(showEq) H.eqShown=true;
   const btnSeat = play.includes("BTN")?"BTN":play[n-3]||play[0];
   for(let k=0;k<n;k++){
     const seat=play[(heroIdx+k)%n], {x,y}=seatXY(k,n), isHero=seat===hero;
@@ -11974,23 +11890,21 @@ function renderTable(){
     if(!isHero){ el.style.left=x+"%"; el.style.top=y+"%"; }
     el.dataset.seat=seat;
     const backs=['<div class="mini back fanl"></div>','<div class="mini back fanr"></div>'];
-    const cards=isHero?"":`<div class="cards">${
-      dealing ? backs.map(b=>`<div class="flyer">${b}</div>`).join("") : backs.join("")}</div>`;
-    // hand equity is yours alone (a villain's would leak the cards they hold);
-    // range equity is public study information, so show it for everyone
-    const chips=[];
-    if(isHero && showEq && H.equity && H.equity[seat]!=null)
-      chips.push(`<div class="eq" title="Your exact hand vs the other players' ranges">${Math.round(H.equity[seat]*100)}%<span class="eqr">hand</span></div>`);
-    if(showEq && H.eqRange && H.eqRange[seat]!=null)
-      chips.push(`<div class="eq rng" title="${isHero?"The whole range your line reps, vs theirs":"This player's range vs the others"}">${Math.round(H.eqRange[seat]*100)}%<span class="eqr">range</span></div>`);
-    const eq = chips.length
-      ? `<div class="eqbox"${eqDelay?` style="animation-delay:${eqDelay}ms"`:""}>${chips.join("")}</div>` : "";
+    // the explicit post-decision peek: live villains' actual cards, face up
+    const peek = H.showV && !isHero && !folded && H.cards[seat];
+    const cards=isHero?"":(peek
+      ? `<div class="cards reveal">${H.cards[seat].map(c=>cardFace(c[0],c[1],"vcard")).join("")}</div>`
+      : `<div class="cards">${
+          dealing ? backs.map(b=>`<div class="flyer">${b}</div>`).join("") : backs.join("")}</div>`);
+    // No equity badges on the felt — they sat over the pot, the tags and the
+    // board (the user's screenshots). The numbers live in the Range Lab,
+    // seeded from this very hand, one tap away.
     const dchip = seat===btnSeat ? '<div class="dchip">D</div>' : '';
     const bigCards=isHero
       ? `<div id="heroCards">${H.heroCards.map(c=> dealing
           ? `<div class="flyer"><div class="flip down">${cardFace(c[0],c[1],"bigcard")}<div class="flipback mini back bigcard"></div></div></div>`
           : cardFace(c[0],c[1],"bigcard")).join("")}</div>` : "";
-    el.innerHTML=`<span class="action-tag" data-tag></span><div class="pod">${dchip}<div class="pos">${SEAT_LABEL[seat]}</div><div class="stack">100 bb</div>${cards}</div>${bigCards}${eq}`;
+    el.innerHTML=`<span class="action-tag" data-tag></span><div class="pod">${dchip}<div class="pos">${SEAT_LABEL[seat]}</div><div class="stack">100 bb</div>${cards}</div>${bigCards}`;
     el.onclick=()=>openSeatRange(seat);
     seatsEl.appendChild(el);
   }
@@ -12029,7 +11943,8 @@ function setActingNone(){document.querySelectorAll(".seat").forEach(e=>e.classLi
 function animateThenShow(){
   const seatEls={}; document.querySelectorAll(".seat").forEach(e=>seatEls[e.dataset.seat]=e);
   document.querySelectorAll("[data-tag]").forEach(t=>t.className="action-tag");
-  $("buttons").innerHTML=""; $("nextBtn").classList.add("hidden"); $("story").textContent=""; setActingNone();
+  $("buttons").innerHTML=""; $("nextBtn").classList.add("hidden");
+  $("postRow").classList.add("hidden"); $("story").textContent=""; setActingNone();
   const seq=H.play.filter(s=>H.act[s] && H.act[s].t!=="post");
   let i=0;
   const step=()=>{
@@ -12064,8 +11979,8 @@ function applyTags(){
    then every card of the street flips at once — three for the flop, one for
    the turn. `H.boardShown` is how many are already face up, so re-renders
    (resize, tag refreshes) draw those statically instead of replaying the
-   reveal. BOARD_EQ_AT tells renderTable when the flip lands, so the equity
-   badges can wait for the cards they describe. */
+   reveal. BOARD_EQ_AT records when the flip lands, so the flop action waits
+   for cards the player has actually seen. */
 function renderBoard(){
   const board=$("board"); board.innerHTML="";
   const cards=(H.flop||[]).concat(H.turn?[H.turn]:[]);
@@ -12098,9 +12013,10 @@ function renderBoard(){
 function revealFlop(){
   if(H.playingFlop){ startFlopPlay(); return; }     // the flop is played, not just shown
   H.showdown=true;
-  renderBoard();                                     // first, so the flip time is known…
-  renderTable(); $("story").textContent=H.result;    // …and the equity badges wait for it
-  applyTags();                                       // keep the betting story beside the equities
+  renderBoard(); renderTable();
+  $("story").textContent=H.result;
+  applyTags();
+  showPostRow();                                     // the flop is out — study or peek
   $("nextBtn").classList.remove("hidden");
 }
 function resizeRefresh(){
@@ -12148,11 +12064,14 @@ function buttonSpec(scen,chart){
     return spec;
   }
   const rl=chart.raise_label||"Raise";
-  // some open charts (notably the SB) have a limp/complete range -> offer Limp
-  const hasLimp = Object.values(chart.grid).filter(f=>f[1]>0.15).length>=4;
   const F={l:"Fold",col:2,slot:"fold"}, R={l:rl,col:0,slot:"raise"};
   switch(scen){
-    case "rfi":     return hasLimp ? [F,{l:"Limp",col:1,slot:"call"},R] : [F,R];
+    // Limp is always live in an open spot, chart or no chart — it is a legal
+    // action a player can take, and pressing it is graded against the call
+    // column like any other choice (usually 0%, and the verdict says so).
+    // It used to appear only when the chart carried a limp range, which
+    // read as a broken grey button everywhere else.
+    case "rfi":     return [F,{l:"Limp",col:1,slot:"call"},R];
     case "vs_limp": return [F,{l:"Over-limp",col:1,slot:"call"},R];
     case "vs_rfi":
     case "vs_3bet": return [F,{l:"Call",col:1,slot:"call"},R];
@@ -12429,7 +12348,6 @@ function openPlayerRanges(focusSeat){
     if(el) el.scrollIntoView({block:"center"});
   }
 }
-function flashChart(chart,hand,chosenCol){ showChartOverlay(chart,hand,true); }
 function chartTitle(c){
   if(c.scenario==="any") return `${SEAT_LABEL[c.hero]} — checks the option (any two)`;
   if(c.scenario==="rfi") return `${SEAT_LABEL[c.hero]} — RFI (open)`;
@@ -12533,7 +12451,7 @@ function drillSetup(m){
   H={play,n,hero,sb,bb,deck:[],committed,folded,cards:{[hero]:m.cards},act,level:0,aggressor:isoM?bb:(vs||bb),
      opener:(m.scenario==="vs_rfi"?vs:hero),heroRole:null,villain:isoM?null:vs,raiser:{},pot:1.5,vrange:vr,
      limpers:dLimpers,limpVs:isoM?vs:null,
-     seq:++HAND_SEQ,dealAnim:true,boardShown:0,eqShown:false,
+     seq:++HAND_SEQ,dealAnim:true,boardShown:0,
      node:makeNode(m.scenario,chart,vs),ended:false,result:"",heroHand:m.hand,heroCards:m.cards,
      reviewChart:null,reviewHand:null,decisions:[],drill:true};
   recalcPot();
@@ -13846,6 +13764,13 @@ $("backCropReset").onclick=()=>{
 
 /* ---- range lab wiring ---- */
 $("labBtn").onclick=labOpen;
+$("labQuick").onclick=()=>labOpen(true);
+$("showVBtn").onclick=()=>{
+  if(!H) return;
+  H.showV=true;
+  renderTable(); applyTags();
+  $("showVBtn").classList.add("hidden");
+};
 $("labClose").onclick=()=>hideOverlay("labOverlay");
 $("labOverlay").onclick=e=>{ if(e.target.id==="labOverlay") hideOverlay("labOverlay"); };
 $("labEditBtn").onclick=labEditOpen;
