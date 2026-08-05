@@ -1039,7 +1039,7 @@ html,body{margin:0;height:100%;color:var(--txt);
     <!-- "Am I running the current build?" has been the most expensive question
          of this project's development; the play page answered it with a footer
          stamp and the trainer never had one. `build.py` fills it in. -->
-    <div class="hintline">build 2026-08-04 15:52 fb55517</div>
+    <div class="hintline">build 2026-08-04 22:51 79da9c2</div>
   </div>
 </div>
 
@@ -10718,13 +10718,28 @@ const CARD_BACK_ART = [
   {id:"moonflame",  title:"Moon in the Flame",             credit:"Yoshitoshi · Met", fit:"w", def:{z:1.15, ox:50, oy:22}},
 ];
 
-function cardPrefs(){
+/* The unchosen back follows the theme: Hokusai's Great Wave prints well on
+   the day papaya; Oumayagashi's night river belongs to the amber room. An
+   explicit pick (Circuit included) is stored and holds in both themes. */
+function themeDefaultBack(){
+  try{
+    return document.documentElement.getAttribute("data-theme")==="light" ? "wave" : "oumayagashi";
+  }catch(e){ return "oumayagashi"; }   // headless harness: no DOM, night default
+}
+/* Raw = what the user actually chose ("" = never chose, resolved per theme).
+   Mutation goes through raw + saveCardPrefs, so editing one preference never
+   freezes another's theme-following default into storage. */
+function cardPrefsRaw(){
   try{
     const p = JSON.parse(localStorage.getItem(CARD_PREFS_LS));
     if(p && typeof p === "object")
-      return {back:p.back||"circuit", face:p.face||"classic", crops:p.crops||{}};
+      return {back:p.back||"", face:p.face||"", crops:p.crops||{}};
   }catch(e){}
-  return {back:"circuit", face:"classic", crops:{}};
+  return {back:"", face:"", crops:{}};
+}
+function cardPrefs(){
+  const p = cardPrefsRaw();
+  return {back:p.back||themeDefaultBack(), face:p.face||"sumi", crops:p.crops};
 }
 function saveCardPrefs(p){
   try{ localStorage.setItem(CARD_PREFS_LS, JSON.stringify(p)); }catch(e){}
@@ -12519,7 +12534,7 @@ function renderBackSwatchStyles(){
 }
 function renderCardSettings(){
   chipRow("faceChips",FACE_STYLES,cardPrefs().face,id=>{
-    const p=cardPrefs(); p.face=id; saveCardPrefs(p);
+    const p=cardPrefsRaw(); p.face=id; saveCardPrefs(p);
     applyCardPrefs(); renderCardSettings();
   });
   const p=cardPrefs(), grid=$("backGrid"); grid.innerHTML="";
@@ -12528,7 +12543,7 @@ function renderCardSettings(){
     b.className="backsw"+(p.back===o.id?" on":""); b.dataset.back=o.id;
     b.innerHTML='<i class="mini back" style="width:100%;height:100%"></i><b>'+esc(o.title)+"</b>";
     b.onclick=()=>{
-      const q=cardPrefs(); q.back=o.id; saveCardPrefs(q);
+      const q=cardPrefsRaw(); q.back=o.id; saveCardPrefs(q);
       applyCardPrefs(); renderCardSettings();
     };
     grid.appendChild(b);
@@ -12542,9 +12557,11 @@ function renderCardSettings(){
   renderBackSwatchStyles();
 }
 function backCropUpdate(fn){
-  const p=cardPrefs();
-  const art=CARD_BACK_ART.find(a=>a.id===p.back);
+  // which art is being cropped is the RESOLVED back (the theme default is
+  // croppable before it is ever picked); the save still goes through raw
+  const art=CARD_BACK_ART.find(a=>a.id===cardPrefs().back);
   if(!art) return;
+  const p=cardPrefsRaw();
   const c={...((p.crops&&p.crops[art.id])||art.def)};
   fn(c);
   c.z=Math.max(1,Math.min(2.5,c.z));
