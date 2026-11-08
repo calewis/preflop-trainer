@@ -1,0 +1,17 @@
+[package]
+name = "poker-trainer"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.87"
+license-file = "LICENSE"
+description = "Daily fundamentals drills for home-game no-limit hold'em players."
+
+[lib]
+name = "poker_trainer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "poker-trainer"
+path = "src/main.rs"
+
+[dependencies]

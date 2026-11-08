@@ -1,0 +1,38 @@
+# Frozen baseline, written once by the hidden gen-baseline command. Do not regenerate:
+# changing this file makes old runs incomparable. One question per line.
+b01 nuts seed=4014213020999146304 board=2h4h7c
+b02 nuts seed=1431985320396721114 board=6c5cJc
+b03 nuts seed=9251069297880625156 board=4s8s7c6sJh
+b04 nuts seed=941379579588300203 board=9sJd8s7c
+b05 nuts seed=3553243101568869010 board=5hTcAs8h
+b06 possible seed=7773917609817934883 board=TdAd2d
+b07 possible seed=3791781224018686422 board=4h9hKc8d
+b08 possible seed=8393884018831938184 board=7h5sTcKd
+b09 made seed=3669506011466544222 hero=4d4h board=8hQcQd5h4c
+b10 made seed=7269369009699422200 hero=3h3s board=3dTd3c
+b11 made seed=8900239517572621399 hero=Ts2h board=3s2d9s4s
+b12 made seed=5025986078795027832 hero=9c5c board=Qs4d8d8hQh
+b13 beats seed=719244818872805976 hero=KcJs board=QhAcJh2sAs
+b14 beats seed=11198526029102345231 hero=Kh6h board=Kc2h9h
+b15 beats seed=13868095872416835491 hero=Qh9c board=AhKsAc
+b16 beats seed=15020067295432681507 hero=Jd6h board=3c7c6c7d
+b17 outs seed=285277725961704279 hero=7s4c board=3dAs9d villain=Th6s
+b18 outs seed=13759705225635852914 hero=Ts2s board=8dQc7s4s villain=Jh7d
+b19 outs seed=1037152662949604187 hero=Ts7d board=3d2h5dAc villain=KcTc
+b20 outs seed=3458682726964455616 hero=7c3c board=2hQcAc villain=Ad7h
+b21 outs seed=12834471334086611488 hero=9c2s board=Td7d6d villain=KcJh
+b22 outs seed=11794092360696412539 hero=Ks9c board=3c6cQc villain=Qs2s
+b23 price seed=12369574122196166558 pot_before=600 bet=400 callers=0
+b24 price seed=5104142606952540643 pot_before=360 bet=540 callers=0
+b25 price seed=10344922107246184532 pot_before=360 bet=270 callers=2
+b26 price seed=3011133874660336949 pot_before=180 bet=180 callers=0
+b27 hit seed=6508803845714526553 outs=4 street=flop both=0
+b28 hit seed=13294004825974636166 outs=2 street=turn both=0
+b29 spot seed=12955954255671716583 hero=AsTd board=2dQcTh pot=80 call=20 mode=next:0 opponents=2p
+b30 spot seed=2039442483575508649 hero=9c9d board=9sTs8h pot=288 call=192 mode=allin opponents=set
+b31 spot seed=13187592492319708525 hero=4c4s board=9cTdQh pot=750 call=150 mode=allin opponents=over
+b32 spot seed=3987225427494502689 hero=KsQd board=2dAs9cKh pot=180 call=36 mode=next:0 opponents=top
+b33 spot seed=6895310238999892250 hero=Qd9d board=5hJc9c8h pot=180 call=60 mode=allin opponents=over
+b34 spot seed=4360306959449434540 hero=JhTh board=9s8s9c pot=216 call=72 mode=next:430 opponents=over
+b35 spot_mw seed=7064701992583142462 hero=7h7s board=Ad6hQs pot=1440 call=320 mode=allin opponents=2p,mid,top
+b36 spot_mw seed=2993837138922965222 hero=AdJs board=JcTh5d pot=1440 call=360 mode=allin opponents=2p,top,over

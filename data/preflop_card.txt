@@ -1,0 +1,23 @@
+# Preflop card for 100bb cash games, mostly 4-5 players. Deliberately tight: built for a player still
+# learning to read boards, so it avoids hands that make weak, hard-to-judge pairs.
+#
+# It favours pairs, big suited cards and suited connectors, which make strong hands
+# that are easy to recognise, and it cuts weak offsuit hands, which fall furthest
+# behind in multiway pots. Everything here is a rule of thumb, not a solved range:
+# no public solver numbers exist for multi-limper, no-rake home games.
+#
+# Notation: 77+ is 77 through AA. ATs+ is ATs through AKs. AQo+ is AQo and AKo.
+open.early = 22+ ATs+ KTs+ QTs+ JTs AQo+
+open.middle = 22+ A9s+ K9s+ Q9s+ J9s+ T9s 98s AJo+ KQo
+open.cutoff = 22+ A2s+ K9s+ Q9s+ J9s+ T8s+ 97s+ 87s 76s 65s 54s ATo+ KQo
+open.button = 22+ A2s+ K8s+ Q9s+ J9s+ T8s+ 97s+ 86s+ 75s+ 65s 54s ATo+ KTo+ QTo+ JTo
+open.small_blind = 22+ A2s+ K9s+ Q9s+ J9s+ T9s 98s 87s ATo+ KJo+ QJo
+iso.raise = 77+ ATs+ KJs+ QJs AJo+ KQo
+iso.limp = 22 33 44 55 66 A2s A3s A4s A5s A6s A7s A8s A9s KTs QTs JTs T9s 98s 87s 76s 65s 54s
+face_raise.reraise = JJ+ AKs AKo
+face_raise.call = 22 33 44 55 66 77 88 99 TT AQs AQo AJs ATs KQs KJs QJs JTs T9s
+note.seats = Count the players still to act behind you: 5 or more is early, 4 is middle, 3 is cutoff, 2 is button, 1 is small blind. At 5 players the first to act is middle. At 4 players the first to act is cutoff.
+note.open = Folded to you: raise to 3bb with your seat's range, otherwise fold.
+note.iso = One or more limpers: raise to 4bb plus 1bb per limper with iso.raise. Limp along with iso.limp only from the cutoff, button or small blind, or when two or more have limped. Fold the rest.
+note.face_raise = Someone raised: reraise, call or fold using the face_raise lines.
+note.big_blind = In the big blind with no raise, check. With limpers, raise iso.raise hands and check the rest.
