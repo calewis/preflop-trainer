@@ -1,0 +1,48 @@
+[package]
+name = "poker-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Grades hold'em decisions by best response against sampled non-GTO opponent models."
+
+[workspace]
+
+[dependencies]
+poker-trainer = { path = ".." }
+
+[features]
+prof = []
+
+[lib]
+name = "poker_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gen_order"
+path = "src/bin/gen_order.rs"
+
+[[bin]]
+name = "validate"
+path = "src/bin/validate.rs"
+
+[[bin]]
+name = "bench"
+path = "src/bin/bench.rs"
+
+[[bin]]
+name = "check_library"
+path = "src/bin/check_library.rs"
+
+[[bin]]
+name = "regrade"
+path = "src/bin/regrade.rs"
+
+[[bin]]
+name = "library"
+path = "src/bin/library.rs"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false
