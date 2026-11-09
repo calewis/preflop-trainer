@@ -23,6 +23,7 @@ pub mod log;
 pub mod money;
 pub mod preflop;
 pub mod progress;
+pub mod read_price;
 pub mod reflection;
 pub mod rng;
 pub mod schedule;

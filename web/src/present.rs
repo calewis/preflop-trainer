@@ -14,10 +14,11 @@ use poker_trainer::grade::{any_of_suit_text, AheadKind, BeatsMeReveal, EquityAna
 use poker_trainer::item::{
     BeatsMeAsk, BeatsMeQuestion,
     ChainHand, ChainQuestion, ChainStage, EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question,
-    Skill, SpotMode, SpotQuestion, CHAIN_STAGES,
+    ReadPriceAsk, ReadPriceQuestion, Skill, SpotMode, SpotQuestion, CHAIN_STAGES,
 };
 use poker_trainer::log::Confidence;
 use poker_trainer::progress::{ReliabilityRow, RELIABILITY_MIN_RATINGS};
+use poker_trainer::read_price;
 use poker_trainer::reflection::{Prompt, ReflectionComparison, ReflectionGroup, REFLECTION_MIN_MISSES};
 use poker_trainer::preflop::{action_label, why_line, Action, PreflopReason, Seat, Situation, CARD};
 use poker_trainer::table::{bb_text, ev_bb_text, TableAction, TableActionKind, TableGrade, TableQuestion, TableSeat, TableStreetName, Verdict, ASSUMPTION_NOTE};
@@ -42,6 +43,7 @@ pub fn skill_title(skill: Skill) -> &'static str {
         Skill::Table => "Table spots",
         Skill::Chain => "Whole hand",
         Skill::BeatsMe => "What beats you?",
+        Skill::ReadPrice => "Read the price",
     }
 }
 
@@ -139,6 +141,7 @@ pub fn question(q: &Question) -> V {
             obj! { "kind": "beats", "hero": holding(hero), "board": cards(board) }
         }
         Question::BeatsMe(q) => beats_me_question(q),
+        Question::ReadPrice(q) => read_price_question(q),
         Question::Outs { hero, board, villain } => obj! {
             "kind": "outs",
             "hero": holding(hero),
@@ -360,6 +363,20 @@ fn beats_me_question(q: &BeatsMeQuestion) -> V {
         "street": street_name(q.board.len()),
         "hands": hands,
         "prompt": prompt_text(q),
+    }
+}
+
+fn read_price_question(q: &ReadPriceQuestion) -> V {
+    let set_price = matches!(q.ask, ReadPriceAsk::SetPrice { .. });
+    let context: Vec<V> = read_price::context_lines(q).into_iter().map(V::from).collect();
+    obj! {
+        "kind": "read_price",
+        "rung": u32::from(q.rung()),
+        "pot_before": q.pot_before,
+        "bet": (!set_price).then_some(q.bet),
+        "callers": q.callers,
+        "context": context,
+        "prompt": read_price::prompt_text(q),
     }
 }
 
@@ -732,6 +749,11 @@ fn reveal(item: &Item, o: &Outcome, response_ms: u32) -> V {
         }
         Reveal::Table(graded) => table_reveal(graded),
         Reveal::BeatsMe(reveal) => beats_me_reveal(reveal),
+        Reveal::ReadPrice(r) => obj! {
+            "kind": "read_price",
+            "answer": r.answer.as_str(),
+            "lines": r.lines.iter().map(|l| V::from(l.as_str())).collect::<Vec<V>>(),
+        },
         Reveal::Equity { analysis, estimate_pct, signed_error, band, hit } => {
             equity_reveal(analysis, *estimate_pct, *signed_error, *band, *hit)
         }

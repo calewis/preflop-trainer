@@ -4,6 +4,7 @@ use crate::board_type::BoardCategory;
 use crate::cards::{Card, Holding};
 use crate::classes::{OppClass, OppMix, PlayerType};
 use crate::preflop::{Seat, Situation};
+use crate::read_price::DrawKind;
 use crate::table::TableQuestion;
 
 /// Bump whenever a generator's output for a given seed changes.
@@ -55,6 +56,22 @@ pub const fn beats_me_seed_with_rung(seed: u64, rung: u8) -> u64 {
     (seed & !BEATS_ME_RUNG_MASK) | ((rung as u64) << BEATS_ME_RUNG_SHIFT)
 }
 
+/// How many rungs the [`Skill::ReadPrice`] ladder has.
+pub const READ_PRICE_RUNGS: u8 = 5;
+const READ_PRICE_RUNG_SHIFT: u32 = 60;
+const READ_PRICE_RUNG_MASK: u64 = 0b111 << READ_PRICE_RUNG_SHIFT;
+
+/// The rung a `read_price` seed asks for, carried in its bits like `beats_me`.
+/// Three bits hold eight values and there are five rungs, so the extra values wrap.
+pub const fn read_price_rung_of_seed(seed: u64) -> u8 {
+    ((seed & READ_PRICE_RUNG_MASK) >> READ_PRICE_RUNG_SHIFT) as u8 % READ_PRICE_RUNGS
+}
+
+/// `seed` with its `read_price` rung set to `rung`.
+pub const fn read_price_seed_with_rung(seed: u64, rung: u8) -> u64 {
+    (seed & !READ_PRICE_RUNG_MASK) | ((rung as u64) << READ_PRICE_RUNG_SHIFT)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Skill {
     Preflop,
@@ -74,10 +91,11 @@ pub enum Skill {
     Table,
     Chain,
     BeatsMe,
+    ReadPrice,
 }
 
 impl Skill {
-    pub const ALL: [Skill; 16] = [
+    pub const ALL: [Skill; 17] = [
         Skill::Preflop,
         Skill::Nuts,
         Skill::Possible,
@@ -94,6 +112,7 @@ impl Skill {
         Skill::Table,
         Skill::Chain,
         Skill::BeatsMe,
+        Skill::ReadPrice,
     ];
 
     pub fn name(self) -> &'static str {
@@ -114,6 +133,7 @@ impl Skill {
             Skill::Table => "table",
             Skill::Chain => "chain",
             Skill::BeatsMe => "beats_me",
+            Skill::ReadPrice => "read_price",
         }
     }
 
@@ -124,7 +144,7 @@ impl Skill {
     /// The training step a skill belongs to. `preflop` is outside the steps.
     pub fn step(self) -> Option<u8> {
         match self {
-            Skill::Preflop => None,
+            Skill::Preflop | Skill::ReadPrice => None,
             Skill::Nuts | Skill::Possible | Skill::Made | Skill::Beats | Skill::BoardType | Skill::BeatsMe => Some(1),
             Skill::Outs | Skill::Price | Skill::Hit | Skill::Equity | Skill::Anchor => Some(2),
             Skill::Spot | Skill::SpotMw | Skill::Chain => Some(3),
@@ -369,6 +389,52 @@ impl BeatsMeQuestion {
     }
 }
 
+/// Hero's hand at the "Read the price" rungs that have one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PriceHand {
+    /// A named draw, with the one or two cards it may still see.
+    Draw { kind: DrawKind, street: HitStreet },
+    /// The player's own read of how often they are ahead, in percent.
+    Read { share_pct: u32 },
+}
+
+/// What a [`Skill::ReadPrice`] item asks.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ReadPriceAsk {
+    /// Rung 0: cheap, fair or expensive?
+    Band,
+    /// Rung 1: the exact percent needed.
+    Number,
+    /// Rung 2: easy call, close or fold, with the hand's share stated.
+    Stated(PriceHand),
+    /// Rung 3: the same for a draw, with its share left for the player to recall.
+    Recall { kind: DrawKind, street: HitStreet },
+    /// Rung 4: the smallest of four bets that makes an opponent's call a mistake.
+    SetPrice { kind: DrawKind, options: [u32; 4] },
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ReadPriceQuestion {
+    /// Pot before the bet; at rung 4, the pot hero is betting into.
+    pub pot_before: u32,
+    /// The bet faced. Unused at rung 4, where hero picks the bet.
+    pub bet: u32,
+    pub callers: u32,
+    pub ask: ReadPriceAsk,
+}
+
+impl ReadPriceQuestion {
+    pub fn rung(&self) -> u8 {
+        match self.ask {
+            ReadPriceAsk::Band => 0,
+            ReadPriceAsk::Number => 1,
+            ReadPriceAsk::Stated(_) => 2,
+            ReadPriceAsk::Recall { .. } => 3,
+            ReadPriceAsk::SetPrice { .. } => 4,
+        }
+    }
+}
+
 /// One stage of a chain, as a question.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ChainQuestion {
@@ -433,6 +499,8 @@ pub enum Question {
     Chain(ChainQuestion),
     /// A rung of the "What beats you?" ladder.
     BeatsMe(BeatsMeQuestion),
+    /// A rung of the "Read the price" ladder.
+    ReadPrice(ReadPriceQuestion),
 }
 
 impl Question {
@@ -464,7 +532,7 @@ impl Question {
                 board: board(b),
                 villain: holding(villain),
             },
-            Question::Price { .. } | Question::Hit { .. } | Question::Anchor { .. } => self.clone(),
+            Question::Price { .. } | Question::Hit { .. } | Question::Anchor { .. } | Question::ReadPrice(_) => self.clone(),
             Question::Equity(q) => Question::Equity(EquityQuestion {
                 hero: holding(&q.hero),
                 board: board(&q.board),

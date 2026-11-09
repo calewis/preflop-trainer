@@ -1,6 +1,6 @@
 """Confirms the browser tests fail when a fix is removed. Works on a scratch copy
 of the repo and leaves the checkout alone. Run with: python3 web/test/mutation_check.py"""
-import os, pathlib, re, shutil, subprocess, sys
+import os, pathlib, re, shutil, signal, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRATCH = pathlib.Path(os.environ.get("TRAINER_MUTATION_DIR", "/tmp/trainer-mutation-check"))
@@ -287,7 +287,7 @@ MUTATIONS = [
      "    outcome.tie_line ? h('p', { class: 'reveal-tie' }, outcome.tie_line) : null);", "    null);", "research", "no tie line"),
     # --- confidence
     ("confidence on the near-break-even decks", "src/log.rs",
-     "matches!(skill, Skill::Made | Skill::Outs | Skill::Price | Skill::Equity)", "matches!(skill, Skill::Made | Skill::Outs | Skill::Price | Skill::Equity | Skill::Spot)", "libresearch", "only_the_four_skills_ask"),
+     "matches!(skill, Skill::Made | Skill::Outs | Skill::Price | Skill::Equity | Skill::ReadPrice)", "matches!(skill, Skill::Made | Skill::Outs | Skill::Price | Skill::Equity | Skill::ReadPrice | Skill::Spot)", "libresearch", "only_skills_with_a_clear_answer_ask"),
     ("high is treated as sure", "src/log.rs",
      "            Confidence::High => 95.0,", "            Confidence::High => 99.0,", "libresearch", "levels_are_treated_as_55_75_95"),
     ("the table counts retries", "src/progress.rs",
@@ -342,11 +342,54 @@ MUTATIONS = [
     ("beats still gates step 1", "src/progress.rs",
      "&[Skill::Nuts, Skill::Possible, Skill::Made, Skill::BeatsMe, Skill::BoardType],", "&[Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats, Skill::BoardType],", "libresearch", "beats_is_in_no_step"),
     ("beats leaves the drills", "src/progress.rs",
-     "let mut out = vec![Skill::Preflop, Skill::Beats];", "let mut out = vec![Skill::Preflop];", "libresearch", "beats_is_in_no_step"),
+     "let mut out = vec![Skill::Preflop, Skill::Beats, Skill::ReadPrice];", "let mut out = vec![Skill::Preflop, Skill::ReadPrice];", "libresearch", "beats_is_in_no_step"),
     ("beats is dealt at full weight", "src/schedule.rs",
      "if s == Skill::Beats { weight * BEATS_WEIGHT_PER_MILLE / 1000 } else { weight }", "weight", "libresearch", "beats_is_dealt_at_about_half"),
     ("the random-hands note is gone", "app/reveal.js",
      "    p(r.random_note),\n", "", "research", "no random note"),
+    # --- read the price
+    ("cheap and fair move", "src/read_price.rs", "pub const CHEAP_BELOW_PCT: f64 = 20.0;", "pub const CHEAP_BELOW_PCT: f64 = 22.0;", "libreadprice", "rung_zero"),
+    ("the band gap shrinks", "src/read_price.rs", "pub const BAND_GAP_POINTS: f64 = 1.5;", "pub const BAND_GAP_POINTS: f64 = 0.5;", "libreadprice", "rung_zero_stays_clear"),
+    ("callers are left out of the pot", "src/read_price.rs", "f64::from(pot_with_bet(pot_before, bet, callers)), f64::from(bet)", "f64::from(pot_with_bet(pot_before, bet, 0)), f64::from(bet)", "libreadprice", "the_pot_is_stated_before"),
+    ("the number's tolerance widens", "src/grade.rs", "((guess - price).abs() <= PERCENT_TOLERANCE, format!(\"{guess}\"))", "((guess - price).abs() <= 2.0 * PERCENT_TOLERANCE, format!(\"{guess}\"))", "libreadprice", "rung_one_uses_the_price_tolerance"),
+    ("the gap is dealt", "src/read_price.rs", "} else if edge_points.abs() <= CLOSE_POINTS - DEAL_MARGIN_POINTS {", "} else if edge_points.abs() <= EASY_POINTS {", "libreadprice", "rung_two_never_deals"),
+    ("an all-in flop counts one card", "src/read_price.rs", "hit_chance(kind.outs(), street, street == HitStreet::Flop)", "hit_chance(kind.outs(), street, false)", "libreadprice", "rung_two_shows_the_share"),
+    ("the largest mistake is right", "src/read_price.rs", ".min_by_key(|&i| options[i])", ".max_by_key(|&i| options[i])", "libreadprice", "rung_four_has_exactly_one"),
+    ("options sit on break-even", "src/read_price.rs", "price(bet) <= share - OPTION_GAP_POINTS && price(bet) >= share - OPTION_BAND_POINTS", "price(bet) < share && price(bet) >= share - OPTION_BAND_POINTS", "libreadprice", "rung_four_has_exactly_one"),
+    ("promotion needs less", "src/read_price.rs", "pub const READ_PRICE_PROMOTE_PCT: f64 = 85.0;", "pub const READ_PRICE_PROMOTE_PCT: f64 = 79.0;", "libreadprice", "the_rung_rises"),
+    ("practice rungs count for the mark", "src/read_price.rs", "rung_of(attempt).is_some_and(|rung| rung >= 2)", "rung_of(attempt).is_some_and(|rung| rung >= 0)", "libreadprice", "only_the_decision_rungs"),
+    ("checkups take one rung", "src/checkup.rs", "read_price_seed_with_rung(seed, (i % usize::from(READ_PRICE_RUNGS)) as u8)", "read_price_seed_with_rung(seed, 0)", "libreadprice", "checkups_take_eight"),
+    ("the share cap is gone", "src/schedule.rs", "        if dealt * 100 >= (self.dealt.len() as u64 + 1) * READ_PRICE_MAX_PERCENT {\n", "        if false && dealt > u64::MAX {\n", "libreadprice", "the_default_drill_deals_it"),
+    ("new items ignore the player's rung", "src/schedule.rs", "            Skill::ReadPrice => seed = read_price_seed_with_rung(seed, self.read_price_rung),\n", "", "libreadprice", "a_new_item_is_dealt_at_the_players_rung"),
+    ("every rung gets the form", "src/reflection.rs", "matches!(q.rung(), 2 | 3) && !outcome.ok()", "!outcome.ok()", "libreadprice", "reflection_is_offered"),
+    ("read_price jumps ahead of an owed preflop", "src/schedule.rs",
+     "        let skill = if preflop_owed {\n            Skill::Preflop\n        } else if self.read_price_turn(blocked) {\n            Skill::ReadPrice\n        } else {",
+     "        let skill = if self.read_price_turn(blocked) {\n            Skill::ReadPrice\n        } else if preflop_owed {\n            Skill::Preflop\n        } else {",
+     "libreadprice", "preflop_never_falls_below_its_floor"),
+    ("sibling search ignores the rung", "src/family.rs",
+     "matches!(skill, Skill::Equity | Skill::BeatsMe | Skill::ReadPrice).then(", "matches!(skill, Skill::Equity | Skill::BeatsMe).then(",
+     "libreadprice", "the_sibling_search_targets_the_rung"),
+    ("a low wrong pick gets no explanation", "src/read_price.rs",
+     "    if asked > share {", "    if asked > 0.0 {", "libreadprice", "rung_four_explains_a_wrong_pick"),
+    ("the shortcut's first band changes", "src/read_price.rs", "Under a third of the pot is cheap", "Under a quarter of the pot is cheap", "libreadprice", "rung_zero_shortcut_always_matches"),
+    ("an all-in flop reveal says one card", "src/read_price.rs", "                HitStreet::Flop => \"two cards to come\",", "                HitStreet::Flop => \"one card to come\",", "libreadprice", "rung_two_shows_the_share"),
+    ("a stated draw is misquoted in the reveal", "src/read_price.rs", "PriceHand::Draw { .. } => format!(\"You have about {:.0}%\", hand_share_points(hand)),", "PriceHand::Draw { .. } => format!(\"You have about {:.0}%\", hand_share_points(hand) + 5.0),", "libreadprice", "the_verdict_sentence"),
+    ("one caller reads as callers", "src/read_price.rs", "if q.callers == 1 { \"the caller\".to_string() }", "if q.callers == 99 { \"the caller\".to_string() }", "libreadprice", "one_caller_reads_in_the_singular"),
+    ("the dealing margin is gone", "src/read_price.rs", "pub const DEAL_MARGIN_POINTS: f64 = 0.5;", "pub const DEAL_MARGIN_POINTS: f64 = 0.0;", "libreadprice", "rung_two_never_deals"),
+    ("callers don't change the answer", "src/read_price.rs", "pub const CALLERS_MATTER_PERCENT: u64 = 80;", "pub const CALLERS_MATTER_PERCENT: u64 = 0;", "libreadprice", "leaving_callers_out"),
+    ("rung 4 options stray from break-even", "src/read_price.rs", "pub const OPTION_BAND_POINTS: f64 = 10.0;", "pub const OPTION_BAND_POINTS: f64 = 100.0;", "libreadprice", "rung_four"),
+    ("a tiny price reads 0%", "src/read_price.rs", "    if pct < 0.5 {\n        \"under 1%\"", "    if pct < 0.0 {\n        \"under 1%\"", "libreadprice", "tiny_prices"),
+    ("retries count toward promotion", "src/read_price.rs", ".filter(|a| a.skill == Skill::ReadPrice && a.mode == Mode::Drill && rung_of(a) == Some(rung))", ".filter(|a| a.skill == Skill::ReadPrice && a.mode != Mode::Check && rung_of(a) == Some(rung))", "libreadprice", "retries_do_not_count"),
+    ("a third read_price in a row is dealt", "src/schedule.rs", "        if !self.read_price_by_share(Skill::ReadPrice) || blocked == Some(Skill::ReadPrice) {\n", "        let _ = blocked;\n        if !self.read_price_by_share(Skill::ReadPrice) {\n", "libreadprice", "no_skill_is_dealt_three_times"),
+    ("reviews can take every slot", "src/schedule.rs", "(self.read_price_reviews + 1) * READ_PRICE_REVIEW_SHARE_DIVISOR <= slots", "self.read_price_reviews < slots", "libreadprice", "reviews_take_at_most_half"),
+    ("the cost cue leaves out callers", "src/reflection.rs", "format!(\"You pay ${} to win ${}\", q.bet, pot_with_bet(q.pot_before, q.bet, q.callers))", "format!(\"You pay ${} to win ${}\", q.bet, pot_with_bet(q.pot_before, q.bet, 0))", "libreadprice", "the_reflection_cues_argue"),
+    ("the share cue is on the wrong side", "src/reflection.rs", "let shares_for_call = share_points >= price_needed;", "let shares_for_call = share_points < price_needed;", "libreadprice", "the_reflection_cues_argue"),
+    ("supported and against are swapped", "src/reflection.rs", "    let (supported, against) = if picked == PriceCall::Easy.code() {\n        (supports_call, supports_fold)\n    } else if picked == PriceCall::Fold.code() {\n        (supports_fold, supports_call)\n", "    let (supported, against) = if picked == PriceCall::Easy.code() {\n        (supports_fold, supports_call)\n    } else if picked == PriceCall::Fold.code() {\n        (supports_call, supports_fold)\n", "libreadprice", "the_reflection_cues_argue"),
+    ("the price cue can be trimmed", "src/reflection.rs", "    let mut supports_call = vec![price.clone()];\n    supports_call.extend(shares_for_call.then(|| share.clone()));\n    supports_call.push(hand.clone());\n    supports_call.extend(callers.clone());\n", "    let mut supports_call = vec![hand.clone()];\n    supports_call.extend(callers.clone());\n    supports_call.extend(shares_for_call.then(|| share.clone()));\n    supports_call.push(price.clone());\n", "libreadprice", "the_price_cue_survives"),
+    ("a wrong close is argued like a fold", "src/reflection.rs", "    } else if picked == PriceCall::Fold.code() {\n        (supports_fold, supports_call)\n    } else {", "    } else if picked != \"\" {\n        (supports_fold, supports_call)\n    } else {", "libreadprice", "a_wrong_close_gets_its_own"),
+    ("the Progress panel is gone", "app/screens.js", "    readPricePanel(data.read_price),\n", "", "readprice", "no read the price panel"),
+    ("the question hides its context", "app/reveal.js", "    q.context.map(line => h('p', { class: 'context' }, line)),\n", "", "readprice", "the context lines are not shown"),
+    ("rung 3 shows its share", "src/read_price.rs", "lines.push(format!(\"{}, {}. Assume your outs win and nothing else does.\", kind.label(), cards_to_come(street)));", "lines.push(format!(\"{}, {}: about 20%. Assume your outs win and nothing else does.\", kind.label(), cards_to_come(street)));", "readprice", "rung 3 shows the share", True),
     # --- the nuts
     ("the nuts are only the best rank", "src/grade.rs",
      "let is_nut = |h: &Holding| analysis.nuts.contains(h);", "let is_nut = |h: &Holding| rank_of(*h, board) == analysis.top;", "libresearch", "card_removal_makes_a_lesser_holding"),
@@ -472,9 +515,30 @@ def fresh_scratch():
     shutil.copytree(ROOT, SCRATCH, ignore=shutil.ignore_patterns("target", ".git"), copy_function=shutil.copyfile)
 
 
+# Seconds one section may take before its mutant counts as caught. A mutant can make
+# a generator's rejection loop spin forever, and it must not hold the machine.
+SECTION_TIMEOUTS = {"libreadprice": 300, "readprice": 600}
+DEFAULT_SECTION_TIMEOUT = 3600
+
+
+class TimedOut:
+    """Stands in for a finished process: the section was still running at its limit."""
+    def __init__(self, stdout):
+        self.stdout, self.returncode, self.timed_out = stdout, -signal.SIGKILL, True
+
+
 def run_section(section):
-    return subprocess.run([sys.executable, "-u", str(SCRATCH / "web/test/run.py"), section],
-                          capture_output=True, text=True, env=dict(os.environ, CARGO_TARGET_DIR=str(TARGET_CACHE)))
+    # Its own process group, so a timeout also stops cargo, the test binary and Chrome.
+    proc = subprocess.Popen([sys.executable, "-u", str(SCRATCH / "web/test/run.py"), section],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
+                            env=dict(os.environ, CARGO_TARGET_DIR=str(TARGET_CACHE)))
+    try:
+        stdout, stderr = proc.communicate(timeout=SECTION_TIMEOUTS.get(section, DEFAULT_SECTION_TIMEOUT))
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        stdout, _ = proc.communicate()
+        return TimedOut(stdout)
+    return subprocess.CompletedProcess(proc.args, proc.returncode, stdout, stderr)
 
 
 def patterns_apply(mutations):
@@ -491,13 +555,16 @@ def healthy(sections):
         done = run_section(section)
         if done.returncode != 0:
             lines = [l for l in done.stdout.splitlines() if l.startswith("FAIL:")]
-            print(f"ABORTED: section {section} fails with no mutation: {(lines or [done.stderr[-300:]])[0][:300]}", flush=True)
+            print(f"ABORTED: section {section} fails with no mutation: {(lines or [getattr(done, 'stderr', 'timed out')[-300:]])[0][:300]}", flush=True)
             return False
         print(f"healthy: {section}", flush=True)
     return True
 
 
 def judge(name, section, expected, done):
+    if getattr(done, "timed_out", False):
+        print(f"caught (timed out): {name} [{section}]", flush=True)
+        return True
     fails = [l for l in done.stdout.splitlines() if l.startswith("FAIL:")]
     # The expected message means the test really caught it; a later cascade timeout proves nothing.
     if done.returncode != 0 and expected in done.stdout:

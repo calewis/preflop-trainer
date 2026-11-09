@@ -5,7 +5,7 @@
 use crate::anchors;
 use crate::board_type::{seed_with_category, BoardCategory};
 use crate::generate::generate;
-use crate::item::{beats_me_seed_with_rung, chain_seed_for_stage, equity_seed_with_rung, ChainStage, BEATS_ME_RUNGS, GEN_VERSION, Item, Question, Skill, HELD_OUT_BIT};
+use crate::item::{beats_me_seed_with_rung, chain_seed_for_stage, equity_seed_with_rung, read_price_seed_with_rung, ChainStage, BEATS_ME_RUNGS, GEN_VERSION, Item, Question, Skill, HELD_OUT_BIT, READ_PRICE_RUNGS};
 use crate::log::{Attempt, CheckRef, Mode};
 use crate::progress::{meets_mark, pass_mark, window_metrics, PassMark, WindowMetrics};
 use crate::rng::Rng;
@@ -55,6 +55,8 @@ fn original_seeds(skill: Skill, form: u32, rng: &mut Rng) -> Vec<u64> {
                 Skill::Equity => equity_seed_with_rung(seed, (i % 2) as u8),
                 // Ten items per rung.
                 Skill::BeatsMe => beats_me_seed_with_rung(seed, (i % usize::from(BEATS_ME_RUNGS)) as u8),
+                // Eight items per rung.
+                Skill::ReadPrice => read_price_seed_with_rung(seed, (i % usize::from(READ_PRICE_RUNGS)) as u8),
                 Skill::BoardType => seed_with_category(seed, BoardCategory::ALL[i % BoardCategory::ALL.len()]),
                 Skill::Anchor => anchors::seed_with_card(seed, i % deck_len),
                 // A fixed robust and close mix, walking the reserved spots form by form.

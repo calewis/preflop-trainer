@@ -39,7 +39,7 @@ exhaustive 7-card count and regenerating the anchor deck with its full preflop s
   history, and how your equity estimates are biased once there are 30 of them.
 
 Skills are `preflop`, `nuts`, `possible`, `made`, `beats`, `beats_me`, `board_type`, `outs`, `price`,
-`hit`, `equity`, `anchor`, `spot`, `spot_mw`, `chain` and `table`. Type `q` at any question to quit; every
+`hit`, `equity`, `anchor`, `spot`, `spot_mw`, `chain`, `table` and `read_price`. Type `q` at any question to quit; every
 answer is already saved.
 
 Preflop drills are mostly 4-5 players with occasional 6-7. Your seat comes from how
@@ -138,6 +138,39 @@ for review.
   and comes back if a later answer is wrong or slower than 6 seconds. Pass mark: 95%
   correct, median at most 6 seconds.
 
+## Read the price
+
+`read_price` (web title "Read the price") is outside the steps and dealt from the first day,
+like `preflop`: in the default drill it is about 14% of the items (`READ_PRICE_DEAL_PER_MILLE`
+and `READ_PRICE_MAX_PERCENT` in `src/schedule.rs`), and asked-for skills use the normal
+weights. Amounts are whole dollars: the pot before the bet is $3 to $300, mostly $6 to $60,
+and bets run from $1 to two and a half times the pot, tiny stabs and overbets included.
+About 40% of items on rungs 0-3 have one or two callers, whose money goes in the pot, and on
+most of those the amounts are chosen so that leaving the callers out changes the answer. With a
+caller an expensive price can't be reached at these bet sizes, so at rung 0 callers appear only
+on the cheap and fair bands. No board or hole
+cards are shown, so its checkups have nothing to relabel. A five-rung ladder, by the seed:
+
+- Rung 0: cheap (under 20% needed), fair (20% to under 30%) or expensive (30% or more). Never
+  within 1.5 points of a line, and roughly a third each. The reveal shows the sum and the shortcut.
+- Rung 1: the percent needed, within 2 points (`PERCENT_TOLERANCE`, as `price`).
+- Rung 2: Easy call, Close or Fold with the hand's share stated: a named draw or a read in steps
+  of 5. Easy call is at least 8 points above the price, Fold at least 8 below, Close within 4.
+  Nothing between is dealt, and dealt hands are half a point further inside each line so
+  rounding a percent never changes the answer. Roughly a third each.
+- Rung 3: the same, draws only, without the share. Draws use the exact chance on the turn
+  (one card, n/46) or all-in on the flop (two cards).
+- Rung 4: hero bets into a pot against one opponent on a turn draw. Pick the smallest of four
+  bets that makes their call a mistake, ignoring later bets. No option is within 1.5 points of
+  break-even, wrong options stay within 10 points of it, and the right one is equally often
+  first, second, third or last.
+
+Later-day reviews take at most half of a session's `read_price` slots.
+A rung is passed by 20 straight attempts at it at 85% or better, and the ladder only goes up.
+The drill mark is 85% over the last 40 attempts at rungs 2-4; checkups take 8 items per rung
+from held-out seeds. Reflection forms appear on missed rung 2 and 3 decisions; confidence
+taps on any rung. Adding this skill doesn't change any existing seed's item.
+
 ## Table spots (step 4)
 
 `table` deals realistic decisions from `data/spots_v3.txt`: 3,000 spots already graded
@@ -219,8 +252,8 @@ within 1 counting. A checkup counts stages as items: 10 hands (40 stages) plus 1
 stages placed between hands. A missed stage is not retried or reviewed; the next chain is a
 new hand.
 
-Optional confidence tap (Home, default off): after answering `made`, `outs`, `price` or
-`equity` in a drill, one tap for Low, Medium or High (treated as 55%, 75%, 95%) comes before
+Optional confidence tap (Home, default off): after answering `made`, `outs`, `price`,
+`read_price` or `equity` in a drill, one tap for Low, Medium or High (treated as 55%, 75%, 95%) comes before
 the reveal. Progress shows a reliability table by level and skill once a row has 30 ratings.
 It is not asked on `spot`, `spot_mw` or `table`, whose decks are near break-even by design.
 

@@ -802,7 +802,7 @@ fn table_counts_as_step_four_and_does_not_disturb_the_baseline_steps() {
     assert_eq!(STEPS.len(), 4);
     assert_eq!(STEPS[3], &[Skill::Table]);
     assert_eq!(Skill::Table as u64, 13, "added last so existing seeds don't shift");
-    assert_eq!(Skill::ALL.last(), Some(&Skill::BeatsMe), "new skills go last");
+    assert_eq!(Skill::ALL.last(), Some(&Skill::ReadPrice), "new skills go last");
     assert_eq!(Skill::Chain as u64, 14);
     assert!(!step_passed(4, &all_stats(&forty(0.5))));
     let log = vec![baseline_row(1, "b01", Skill::Nuts), baseline_row(1, "b02", Skill::Price), baseline_row(1, "b03", Skill::Spot)];

@@ -1627,7 +1627,7 @@ fn steps_unlock_in_order() {
     assert_eq!(current_step(&all_stats(&[])), 1);
     assert_eq!(
         skills_up_to_step(1),
-        vec![Skill::Preflop, Skill::Beats, Skill::Nuts, Skill::Possible, Skill::Made, Skill::BeatsMe, Skill::BoardType]
+        vec![Skill::Preflop, Skill::Beats, Skill::ReadPrice, Skill::Nuts, Skill::Possible, Skill::Made, Skill::BeatsMe, Skill::BoardType]
     );
     let step_one = [Skill::Nuts, Skill::Possible, Skill::Made, Skill::BeatsMe, Skill::BoardType];
     let mut log = Vec::new();
@@ -1644,7 +1644,7 @@ fn steps_unlock_in_order() {
     assert!(step_passed(1, &stats));
     assert!(!step_passed(2, &stats));
     assert_eq!(current_step(&stats), 2);
-    assert_eq!(skills_up_to_step(2).len(), 12);
+    assert_eq!(skills_up_to_step(2).len(), 13);
 }
 
 /// Rows that passed one skill, logged under the old generator.
@@ -1791,7 +1791,7 @@ fn correct_answer(item: &Item) -> String {
         Skill::Preflop | Skill::Spot | Skill::SpotMw => "f",
         Skill::Equity | Skill::Anchor => "50",
         Skill::BoardType => "rp",
-        Skill::Table | Skill::Chain | Skill::BeatsMe => "fold",
+        Skill::Table | Skill::Chain | Skill::BeatsMe | Skill::ReadPrice => "fold",
     };
     let reveal = match &item.question {
         // Two ranks may name no unseen holding, so ask a generic exact holding.
@@ -1916,7 +1916,7 @@ fn reveal_key(skill: Skill) -> &'static str {
         Skill::Spot | Skill::SpotMw => "f",
         Skill::Equity | Skill::Anchor => "50",
         Skill::BoardType => "rp",
-        Skill::Table | Skill::Chain | Skill::BeatsMe => "fold",
+        Skill::Table | Skill::Chain | Skill::BeatsMe | Skill::ReadPrice => "fold",
     }
 }
 

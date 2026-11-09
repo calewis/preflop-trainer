@@ -44,6 +44,7 @@ export function questionView(q) {
     case 'table': return tableQuestion(q);
     case 'chain': return chainQuestion(q);
     case 'beats_me': return beatsMeQuestion(q);
+    case 'read_price': return readPriceQuestion(q);
     default: return h('p', {}, 'Unknown question');
   }
 }
@@ -154,6 +155,16 @@ function tableQuestion(q) {
     prompt(`You are ${q.seat_sentence}. What do you do?`));
 }
 
+function readPriceQuestion(q) {
+  return h('div', { class: 'stack' },
+    h('div', { class: 'chips' },
+      chip('Pot before the bet', money(q.pot_before)),
+      q.bet === null ? null : chip('Bet', money(q.bet)),
+      q.callers > 0 ? chip('Callers', q.callers) : null),
+    q.context.map(line => h('p', { class: 'context' }, line)),
+    prompt(q.prompt));
+}
+
 function beatsMeQuestion(q) {
   return h('div', { class: 'stack' }, hand(q.hero),
     labelled(`Board (${q.street})`, cardRow(q.board, 'board')),
@@ -202,6 +213,7 @@ function revealBody(r) {
     case 'made': return [answerLine(r.answer), p(r.description), p(`Your best five cards make ${r.rank}.`)];
     case 'beats': return beatsReveal(r);
     case 'beats_me': return beatsMeReveal(r);
+    case 'read_price': return [answerLine(r.answer), r.lines.map(line => p(line))];
     case 'outs': return outsReveal(r);
     case 'price': return [
       answerLine(r.required),

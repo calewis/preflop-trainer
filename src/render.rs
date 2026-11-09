@@ -146,6 +146,11 @@ pub fn question(item: &Item, style: Style) -> String {
             style.cards(board)
         ),
         Question::BeatsMe(q) => beats_me_question(q, style),
+        Question::ReadPrice(q) => {
+            let mut lines = poker_trainer::read_price::context_lines(q);
+            lines.push(poker_trainer::read_price::prompt_text(q));
+            lines.join("\n")
+        }
         Question::Beats { hero, board } => format!(
             "Your hand: {}\nBoard: {}\nWhat share of all unseen 2-card holdings are strictly ahead of you right now?",
             style.holding(*hero),
@@ -490,6 +495,10 @@ pub fn reveal(outcome: &Outcome, style: Style) -> String {
             lines.push(format!("Your best five cards make {}.", rank.describe()));
         }
         Reveal::BeatsMe(r) => beats_me_reveal(&mut lines, r, style),
+        Reveal::ReadPrice(r) => {
+            lines.push(format!("Answer: {}.", r.answer));
+            lines.extend(r.lines.iter().cloned());
+        }
         Reveal::Beats(a) => {
             lines.push(format!(
                 "Answer: {}. Strictly ahead right now: {} of {} unseen holdings, {:.1}%. You have {}.",
@@ -1207,6 +1216,59 @@ mod tests {
         });
         let text = super::question(&Item { skill: Skill::SpotMw, seed: 1, question }, super::Style { color: false });
         assert!(!text.contains("You are up against"), "{text}");
+    }
+
+    #[test]
+    fn read_price_prints_its_question_and_every_reveal_line() {
+        use poker_trainer::item::{HitStreet, PriceHand, ReadPriceAsk, ReadPriceQuestion};
+        use poker_trainer::read_price::DrawKind;
+        let at = |pot_before, bet, callers, ask| Item {
+            skill: Skill::ReadPrice,
+            seed: 1,
+            question: Question::ReadPrice(ReadPriceQuestion { pot_before, bet, callers, ask }),
+        };
+        let cases: [(Item, &str, Vec<&str>, Vec<&str>); 5] = [
+            (
+                at(10, 5, 2, ReadPriceAsk::Band),
+                "c",
+                vec!["The pot was $10. Someone bets $5. 2 players have already called the $5.", "Is the price cheap, fair or expensive?"],
+                vec!["Answer: Cheap.", "5 \u{f7} 30 = 17%.", "Under a third of the pot is cheap"],
+            ),
+            (
+                at(14, 5, 0, ReadPriceAsk::Number),
+                "21",
+                vec!["The pot was $14. Someone bets $5.", "What equity do you need to call?"],
+                vec!["Answer: 20.8%.", "Call $5 to win $19: 5 \u{f7} 24 = 20.8%."],
+            ),
+            (
+                at(14, 5, 0, ReadPriceAsk::Stated(PriceHand::Draw { kind: DrawKind::Flush, street: HitStreet::Turn })),
+                "c",
+                vec!["Flush draw, one card to come: about 20%.", "Assume your outs win and nothing else does.", "Easy call, close or fold?"],
+                vec!["Answer: Close.", "You have about 20%, within 4 points of what you need, so it's close."],
+            ),
+            (
+                at(14, 5, 0, ReadPriceAsk::Recall { kind: DrawKind::Flush, street: HitStreet::Flop }),
+                "c",
+                vec!["Flush draw, all-in on the flop, two cards to come."],
+                vec!["Flush draw: 9 outs, about 35% with two cards to come,"],
+            ),
+            (
+                at(28, 0, 0, ReadPriceAsk::SetPrice { kind: DrawKind::Flush, options: [4, 11, 13, 18] }),
+                "a",
+                vec!["You are betting into a pot of $28 against one opponent.", "They have a flush draw, one card to come.", "smallest of these bets"],
+                vec!["Answer: Bet $11.", "They call $11 to win $39: they need 22%.", "$4 only asks them for 11%", "Real opponents often call anyway"],
+            ),
+        ];
+        for (item, answer, in_question, in_reveal) in cases {
+            let asked = question(&item, PLAIN);
+            for expected in in_question {
+                assert!(asked.contains(expected), "{expected:?} missing from: {asked}");
+            }
+            let told = revealed(&item, answer);
+            for expected in in_reveal {
+                assert!(told.contains(expected), "{expected:?} missing from: {told}");
+            }
+        }
     }
 
     #[test]

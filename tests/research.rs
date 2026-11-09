@@ -993,11 +993,11 @@ fn a_chain_answer_changes_nothing_on_other_stages() {
 // ----- Confidence and the reliability table -----
 
 #[test]
-fn only_the_four_skills_ask_for_confidence() {
+fn only_skills_with_a_clear_answer_ask_for_confidence() {
     for skill in Skill::ALL {
         assert_eq!(
             asks_confidence(skill),
-            matches!(skill, Skill::Made | Skill::Outs | Skill::Price | Skill::Equity),
+            matches!(skill, Skill::Made | Skill::Outs | Skill::Price | Skill::Equity | Skill::ReadPrice),
             "{skill:?}"
         );
     }

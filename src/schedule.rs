@@ -11,10 +11,11 @@ use crate::equity_skill::{equity_band, equity_rung, next_band};
 use crate::family::{family_of, find_sibling};
 use crate::generate::generate;
 use crate::item::{
-    beats_me_seed_with_rung, chain_seed_for_stage, equity_rung_of_seed, CHAIN_STAGES, equity_seed_with_rung, is_held_out, ChainStage, Item, Question, Skill,
+    beats_me_seed_with_rung, chain_seed_for_stage, equity_rung_of_seed, CHAIN_STAGES, equity_seed_with_rung, is_held_out, read_price_seed_with_rung, ChainStage, Item, Question, Skill,
     GEN_VERSION, HELD_OUT_BIT,
 };
 use crate::log::{Attempt, ItemRef, Mode};
+use crate::read_price::read_price_rung;
 use crate::rng::Rng;
 use crate::table;
 
@@ -275,6 +276,18 @@ pub const BEATS_WEIGHT_PER_MILLE: u64 = 500;
 /// In the default drill, `preflop` is at least this share of the items dealt.
 pub const MIN_PREFLOP_PERCENT: u64 = 25;
 
+/// In the default drill, while `read_price` is under its share and `preflop` isn't
+/// owed, it is dealt at this rate per mille. It takes no part in the weighted
+/// choice, so its share doesn't depend on how many skills are in rotation.
+pub const READ_PRICE_DEAL_PER_MILLE: u64 = 300;
+/// Later-day reviews take at most one `read_price` slot in this many, so new
+/// items at the player's rung keep coming in a session. Starting guess.
+pub const READ_PRICE_REVIEW_SHARE_DIVISOR: u64 = 2;
+/// No new `read_price` item once it has reached this share of the items dealt;
+/// retries and reviews of it count toward the share. Starting guesses, chosen
+/// to hold it at about 12-15% of the deal.
+pub const READ_PRICE_MAX_PERCENT: u64 = 14;
+
 /// One drill session's dealing state. Cloning is cheap: a copy can look ahead
 /// without changing the real session.
 #[derive(Clone)]
@@ -295,6 +308,9 @@ pub struct Session {
     searches_siblings: bool,
     /// `beats_me`: the rung new items are dealt at.
     beats_me_rung: u8,
+    /// `read_price`: the rung new items are dealt at, and the reviews dealt so far.
+    read_price_rung: u8,
+    read_price_reviews: u64,
     /// `equity`: the rung new items are dealt at, and each rung's current band.
     equity_rung: u8,
     equity_bands: [u8; 2],
@@ -342,6 +358,8 @@ impl Session {
             preflop_floor: false,
             searches_siblings: true,
             beats_me_rung: beats_me_rung(attempts),
+            read_price_rung: read_price_rung(attempts),
+            read_price_reviews: 0,
             equity_rung: equity_rung(attempts),
             equity_bands: [equity_band(attempts, 0), equity_band(attempts, 1)],
             anchors_due: anchors_due(attempts, now_ms).into(),
@@ -381,6 +399,35 @@ impl Session {
         }
         let preflop = self.dealt.iter().filter(|s| **s == Skill::Preflop).count() as u64;
         preflop * 100 >= (self.dealt.len() as u64 + CHAIN_STAGES) * MIN_PREFLOP_PERCENT
+    }
+
+    /// True when `read_price` is dealt by its own share in this session: the
+    /// default drill, where the weighted choice would let its share follow how
+    /// many other skills are in rotation.
+    fn read_price_by_share(&self, skill: Skill) -> bool {
+        skill == Skill::ReadPrice && self.preflop_floor && self.allowed.contains(&Skill::ReadPrice)
+    }
+
+    /// False when `read_price` has given reviews enough of its slots already, so
+    /// the next slot goes to a new item at the player's rung.
+    fn review_slot_open(&self, skill: Skill) -> bool {
+        if skill != Skill::ReadPrice {
+            return true;
+        }
+        let slots = self.dealt.iter().filter(|s| **s == Skill::ReadPrice).count() as u64 + 1;
+        (self.read_price_reviews + 1) * READ_PRICE_REVIEW_SHARE_DIVISOR <= slots
+    }
+
+    /// True when this item should be `read_price`, by its roll and share limit.
+    fn read_price_turn(&mut self, blocked: Option<Skill>) -> bool {
+        if !self.read_price_by_share(Skill::ReadPrice) || blocked == Some(Skill::ReadPrice) {
+            return false;
+        }
+        let dealt = self.dealt.iter().filter(|s| **s == Skill::ReadPrice).count() as u64;
+        if dealt * 100 >= (self.dealt.len() as u64 + 1) * READ_PRICE_MAX_PERCENT {
+            return false;
+        }
+        self.rng.below(1000) < READ_PRICE_DEAL_PER_MILLE
     }
 
     /// The fully specified item for a plan from this session: an `equity` item
@@ -448,7 +495,13 @@ impl Session {
         }
         // The no-three-in-a-row rule can't apply with one dealable skill.
         let blocked = blocked.filter(|_| eligible.len() >= 2);
-        let mut skill = if preflop_owed { Skill::Preflop } else { self.choose_skill(&eligible, blocked) };
+        let mut skill = if preflop_owed {
+            Skill::Preflop
+        } else if self.read_price_turn(blocked) {
+            Skill::ReadPrice
+        } else {
+            self.choose_skill(&eligible, blocked)
+        };
         // A chain's stages come in a row, so it only starts if the floor survives them all.
         if skill == Skill::Chain && !self.chain_fits_preflop_floor() {
             if blocked == Some(Skill::Preflop) {
@@ -458,7 +511,7 @@ impl Session {
                 skill = Skill::Preflop;
             }
         }
-        if let Some(index) = self.due.iter().position(|d| d.skill == skill) {
+        if let Some(index) = self.due.iter().position(|d| d.skill == skill).filter(|_| self.review_slot_open(skill)) {
             let due = self.due.remove(index);
             let base = self.rng.next_u64();
             return Some(match self.sibling(skill, &due.family, base, HELD_OUT_BIT) {
@@ -526,6 +579,7 @@ impl Session {
         match skill {
             Skill::Equity => seed = equity_seed_with_rung(seed, self.equity_rung),
             Skill::BeatsMe => seed = beats_me_seed_with_rung(seed, self.beats_me_rung),
+            Skill::ReadPrice => seed = read_price_seed_with_rung(seed, self.read_price_rung),
             Skill::BoardType => seed = seed_with_category(seed, self.board_dealer.deal(&mut self.rng)),
             _ => {}
         }
@@ -537,13 +591,16 @@ impl Session {
         if origin == Origin::SessionRetry {
             self.retries_dealt += 1;
         }
+        if origin == Origin::Due && skill == Skill::ReadPrice {
+            self.read_price_reviews += 1;
+        }
         Planned { skill, seed, origin }
     }
 
     fn choose_skill(&mut self, eligible: &[Skill], blocked: Option<Skill>) -> Skill {
         let choices: Vec<(Skill, u64)> = eligible
             .iter()
-            .filter(|&&s| Some(s) != blocked)
+            .filter(|&&s| Some(s) != blocked && !self.read_price_by_share(s))
             .map(|&s| {
                 let recent: Vec<bool> = self
                     .recent

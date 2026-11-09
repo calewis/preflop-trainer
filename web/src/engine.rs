@@ -24,6 +24,7 @@ use poker_trainer::progress::{
     pass_mark, reliability_table, BaselineRun, SkillStats, WindowMetrics, MIN_ATTEMPTS, PASS_ATTEMPTS, STEPS,
 };
 use poker_trainer::reflection::{reflection_comparison, reflection_form, reflection_row, reflection_state, ReflectState};
+use poker_trainer::read_price::{read_price_status, READ_PRICE_PROMOTE_PCT, READ_PRICE_PROMOTE_WINDOW};
 use poker_trainer::rng::Rng;
 use poker_trainer::table;
 use poker_trainer::schedule::{
@@ -322,6 +323,7 @@ impl Engine {
             "checkups": checkups.iter().map(checkup_json).collect::<Vec<_>>(),
             "board_types": self.board_types_json(),
             "equity": self.equity_json(),
+            "read_price": self.read_price_json(),
             "anchors": self.anchors_json(now_ms),
             "reflection": present::reflection_comparison(&reflection_comparison(&self.attempts)),
             "reliability": present::reliability(&reliability_table(&self.attempts)),
@@ -344,6 +346,30 @@ impl Engine {
             })
             .collect();
         obj! { "enough_data": total >= MIN_ATTEMPTS, "attempts": total, "needed": MIN_ATTEMPTS, "rows": rows }
+    }
+
+    /// The player's rung and recent accuracy at it, for the Progress panel.
+    fn read_price_json(&self) -> V {
+        let status = read_price_status(&self.attempts);
+        let recent = (status.recent_total > 0).then(|| {
+            format!(
+                "Last {} at this rung: {} right ({:.0}%).",
+                status.recent_total,
+                status.recent_right,
+                100.0 * status.recent_right as f64 / status.recent_total as f64
+            )
+        });
+        obj! {
+            "rung": u32::from(status.rung) + 1,
+            "rungs": u32::from(poker_trainer::item::READ_PRICE_RUNGS),
+            "label": poker_trainer::read_price::rung_label(status.rung),
+            "recent": recent,
+            "rule": if status.rung + 1 == poker_trainer::item::READ_PRICE_RUNGS {
+                "This is the top rung.".to_string()
+            } else {
+                format!("Moves up when {READ_PRICE_PROMOTE_WINDOW} straight attempts at this rung reach {READ_PRICE_PROMOTE_PCT:.0}%.")
+            },
+        }
     }
 
     fn equity_json(&self) -> V {

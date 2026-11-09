@@ -11,10 +11,11 @@ use crate::eval::{straight_top, Category, HandRank};
 use crate::family::{equity_family, family_of};
 use crate::item::{
     chain_hand_seed, BeatsMeAsk, BeatsMeQuestion, ChainHand, ChainQuestion, ChainStage, EquityOpponents, EquityQuestion,
-    HitStreet, Item, Question, SpotMode, SpotQuestion,
+    HitStreet, Item, Question, ReadPriceAsk, ReadPriceQuestion, SpotMode, SpotQuestion,
 };
 use crate::money;
 use crate::preflop::{preflop_answer, Action, PreflopReason, Seat, Situation};
+use crate::read_price::{price_points, question_band, question_call, reveal_for, smallest_mistake, PriceBand, PriceCall, ReadPriceReveal};
 use crate::table::{self, TableGrade, TableQuestion};
 
 /// EV-loss bands for `spot` and `spot_mw`, as a percentage of P. Starting guesses.
@@ -320,6 +321,7 @@ pub enum Reveal {
     },
     Table(TableGrade),
     BeatsMe(BeatsMeReveal),
+    ReadPrice(ReadPriceReveal),
 }
 
 /// One shown hand's result at rung 0 of `beats_me`.
@@ -394,6 +396,7 @@ fn grade_item(item: &Item, raw: &str) -> Result<Outcome, InvalidAnswer> {
         Question::Table(q) => grade_table(q, raw),
         Question::Chain(q) => grade_chain(q, item.seed, raw),
         Question::BeatsMe(q) => grade_beats_me(q, raw),
+        Question::ReadPrice(q) => grade_read_price(q, raw),
     }
 }
 
@@ -494,6 +497,39 @@ fn grade_beats_me(q: &BeatsMeQuestion, raw: &str) -> Result<Outcome, InvalidAnsw
             Ok(outcome(band == standing.band, code, Reveal::BeatsMe(BeatsMeReveal::Mix { standing, mix: mix.clone(), hero_rank })))
         }
     }
+}
+
+/// Grades one rung of the "Read the price" ladder.
+fn grade_read_price(q: &ReadPriceQuestion, raw: &str) -> Result<Outcome, InvalidAnswer> {
+    let code = normalize(raw);
+    let mut picked = None;
+    let (correct, answer) = match q.ask {
+        ReadPriceAsk::Band => {
+            let band = PriceBand::ALL
+                .into_iter()
+                .find(|b| b.code() == code)
+                .ok_or_else(|| InvalidAnswer("Answer c, f or e.".to_string()))?;
+            (band == question_band(q), code)
+        }
+        ReadPriceAsk::Number => {
+            let guess = percent_guess(raw)?;
+            let price = price_points(q.pot_before, q.bet, q.callers);
+            ((guess - price).abs() <= PERCENT_TOLERANCE, format!("{guess}"))
+        }
+        ReadPriceAsk::Stated(_) | ReadPriceAsk::Recall { .. } => {
+            let call = PriceCall::ALL
+                .into_iter()
+                .find(|c| c.code() == code)
+                .ok_or_else(|| InvalidAnswer("Answer c, l or f.".to_string()))?;
+            (Some(call) == question_call(q), code)
+        }
+        ReadPriceAsk::SetPrice { kind, options } => {
+            let index = "abcd".find(&code).filter(|_| code.len() == 1).ok_or_else(|| InvalidAnswer("Answer a, b, c or d.".to_string()))?;
+            picked = Some(index);
+            (Some(index) == smallest_mistake(q.pot_before, kind, &options), code)
+        }
+    };
+    Ok(outcome(correct, answer, Reveal::ReadPrice(reveal_for(q, picked))))
 }
 
 fn outcome(correct: bool, answer: String, reveal: Reveal) -> Outcome {

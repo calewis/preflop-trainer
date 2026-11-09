@@ -1,5 +1,5 @@
 """Full browser test suite: python3 web/test/run.py [sections...]
-Sections: native libresearch libcli research researchshots (on request only) libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card preflopspots libpreflop offline nostorage legacy screens
+Sections: native libresearch libreadprice readprice libcli research researchshots (on request only) libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card preflopspots libpreflop offline nostorage legacy screens
 Results go to target/webtest/results.json and screenshots to target/webtest/screens/."""
 import itertools, json, os, pathlib, random, re, shutil, subprocess, sys, time
 
@@ -111,6 +111,10 @@ def check_differential_coverage(commands, replies):
     fields = [c.split("\x1f") for c in commands]
     def count(kind, test=lambda f: True):
         return sum(1 for f in fields if f[0] == kind and test(f))
+    check(count("prepare", lambda f: f[1] == "read_price") >= 50, "differential: read_price prepares missing")
+    for rung in range(5):
+        check(sum(f'"kind":"read_price","rung":{rung}' in r for r in replies) >= 5, f"differential: read_price rung {rung} never compared")
+    check(count("check_grade", lambda f: f[1] == "read_price") >= 5, "differential: no read_price checkup answers")
     check(count("reflect_commit") >= 5, "differential: no reflect_commit")
     check(count("commit", lambda f: len(f) == 4) >= 5, "differential: no commit without a confidence")
     for code in ("high", "medium", "bogus", ""):
@@ -237,7 +241,7 @@ def run_timing():
     try:
         page = browser.page
         boot_app(page, 8952 + PORT_SHIFT)
-        skills = ["preflop", "nuts", "possible", "made", "beats", "outs", "price", "hit", "board_type", "anchor"]
+        skills = ["preflop", "nuts", "possible", "made", "beats", "outs", "price", "hit", "board_type", "anchor", "read_price"]
         fast = page.eval(f"({TIMING})({json.dumps(skills)}, 200)")
         slow = page.eval(f"({TIMING})(['spot'], 200)")
         mw = page.eval(f"({TIMING})(['spot_mw'], 150)")
@@ -564,7 +568,7 @@ def drill_session(page, inspector, want_all, max_items, keyboard=False, label_pr
     return items, seen, records
 
 
-ALL_SKILLS = ["preflop", "nuts", "possible", "made", "beats", "beats_me", "outs", "price", "hit", "spot", "spot_mw",
+ALL_SKILLS = ["preflop", "nuts", "possible", "made", "beats", "beats_me", "read_price", "outs", "price", "hit", "spot", "spot_mw",
               "board_type", "equity", "anchor", "chain"]
 LOG_COLUMNS = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer"
 PASSING_SKILLS = [("nuts", "AKs"), ("possible", "f"), ("made", "top"), ("beats_me", "a"), ("board_type", "td"),
@@ -1708,6 +1712,107 @@ def run_lib_preflop():
     if done.returncode != 0:
         print(done.stderr[-1500:])
     check(done.returncode == 0, f"library preflop tests failed: {done.stdout[-400:]}")
+
+
+def run_lib_read_price():
+    done = subprocess.run(["cargo", "test", "--release", "--test", "read_price"], capture_output=True, text=True, cwd=ROOT)
+    print(done.stdout[-3000:])
+    if done.returncode != 0:
+        print(done.stderr[-1500:])
+    check(done.returncode == 0, f"library read_price tests failed: {done.stdout[-400:]}")
+
+
+READ_PRICE_RUNG_SEED = lambda rung, i: (rung << 60) + 1000 + i
+
+
+def read_price_log(rung):
+    """A log that has passed every rung below `rung`, so a new drill deals at `rung`."""
+    lines = [LOG_COLUMNS]
+    t = int(time.time() * 1000) - 86400000 * 5
+    for lower in range(rung):
+        for i in range(20):
+            t += 1000
+            lines.append(f"{t}\tdrill\t\tread_price\t{READ_PRICE_RUNG_SEED(lower, i)}\t2\t1\t0\t\t1500\tc")
+    return "\n".join(lines) + "\n"
+
+
+def run_read_price():
+    """Each rung, wrong and right, at phone width in both themes, then the Progress panel."""
+    port = 8988 + PORT_SHIFT
+    srv = server.start(port)
+    browser = Browser("readprice")
+    try:
+        page = browser.page
+        for width, height, mobile, theme in [(w, h, m, t) for (w, h, m) in ((390, 844, True), (1280, 800, False)) for t in ("light", "dark")]:
+            page.viewport(width, height, mobile)
+            page.theme(theme)
+            page.navigate(f"http://127.0.0.1:{port}/")
+            page.wait("!!document.querySelector('.app-title') && !!window.__trainer", 30)
+            inspector = Inspector(page, (width, height), theme, True)
+            wanted = {0: "a third to three-quarters", 1: "\u00f7", 2: "what you need", 3: "what you need", 4: "Bet $"}
+            for rung in range(5):
+                seed_log(page, port, read_price_log(rung))
+                open_limited_drill(page, "read_price")
+                page.wait(READY, 60)
+                current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+                question = current["bundle"]["question"]
+                check(question["kind"] == "read_price" and question["rung"] == rung, f"rung {rung}: {question}")
+                text = page.eval("document.querySelector('.question').innerText")
+                check("Pot before the bet" in text, f"rung {rung}: pot not labelled: {text}")
+                check(len(question["context"]) >= 1 and all(line in text for line in question["context"]), f"rung {rung}: the context lines are not shown: {text}")
+                if rung == 4:
+                    check(question["bet"] is None and "Bet" not in text.replace("betting", "").replace("bets", ""), f"rung 4 shows a bet chip: {text}")
+                else:
+                    check(f"${question['bet']}" in text and question["context"][0].index("pot") < question["context"][0].index("bets"), f"rung {rung}: bet missing: {text}")
+                check(rung != 3 or "%" not in text, f"rung 3 shows the share: {text}")
+                inspector.snapshot(f"readprice-q{rung}-{theme}", full=True)
+                answer_drill_item(page, False)
+                wait_rows(page, 20 * rung + 1)
+                reveal_text = page.eval("document.querySelector('.reveal').innerText")
+                check(("to win $" in reveal_text and "\u00f7" in reveal_text) if rung != 4 else "They call $" in reveal_text, f"rung {rung} reveal has no sum: {reveal_text}")
+                check("Answer" in reveal_text, f"rung {rung} reveal has no answer: {reveal_text}")
+                if rung == 0:
+                    check("a third to three-quarters" in reveal_text, f"no shortcut: {reveal_text}")
+                if rung == 4:
+                    check("Real opponents often call anyway" in reveal_text, f"no real-opponent note: {reveal_text}")
+                inspector.snapshot(f"readprice-r{rung}-{theme}", full=True)
+                if page.eval("!!document.querySelector('.cue-skip')"):
+                    clear = "(() => { window.scrollTo(0, document.documentElement.scrollHeight); const s = document.querySelector('.cue-skip').getBoundingClientRect(); const b = document.querySelector('.action-bar').getBoundingClientRect(); return s.bottom <= b.top + 1; })()"
+                    check(page.eval(clear), f"rung {rung}: the reflection form can't be scrolled clear of the Next bar")
+                page.eval("location.hash = '#home'")
+                wait_home(page)
+                # The next new item is a fresh sibling or a new deal; one right answer logs too.
+                seed_log(page, port, read_price_log(rung))
+                open_limited_drill(page, "read_price")
+                page.wait(READY, 60)
+                current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+                answer_drill_item(page, True)
+                wait_rows(page, 20 * rung + 1)
+                check(page.eval("document.querySelector('.reveal').classList.contains('good')"), f"rung {rung}: right answer not graded right")
+                check(page.eval("document.querySelector('.reveal').innerText").count(wanted[rung]) >= 1, f"rung {rung}: reveal lacks {wanted[rung]!r}")
+                page.eval("location.hash = '#home'")
+                wait_home(page)
+            # The Progress panel shows the rung and recent accuracy.
+            seed_log(page, port, read_price_log(2))
+            page.eval("location.hash = '#progress'")
+            must_see(page, "!!document.querySelector('[data-read-price]')", 20, "no read the price panel at all")
+            panel = page.eval("document.querySelector('[data-read-price]').innerText")
+            check("Rung 3 of 5" in panel and "With a hand, share stated" in panel, f"no read the price panel: {panel}")
+            check("No attempts at this rung yet" in panel, f"no read the price panel: {panel}")
+            check("Moves up when 20 straight attempts" in panel, f"no promotion rule: {panel}")
+            inspector.snapshot(f"readprice-progress-{theme}", full=True)
+            seed_log(page, port, read_price_log(4))
+            page.eval("location.hash = '#progress'")
+            must_see(page, "!!document.querySelector('[data-read-price]')", 20, "no read the price panel at all")
+            top = page.eval("document.querySelector('[data-read-price]').innerText")
+            check("Rung 5 of 5" in top and "This is the top rung." in top and "Moves up" not in top, f"top rung panel: {top}")
+            page.eval("location.hash = '#home'")
+            wait_home(page)
+        check(not browser.errors, f"read_price errors: {browser.errors[:5]}")
+        print("read_price ok")
+    finally:
+        browser.close()
+        srv.shutdown()
 
 
 def run_lib_table():
@@ -2951,7 +3056,7 @@ def run_preflop_spots():
 
 SECTIONS = {
     "native": run_native, "wasmclean": run_wasm_clean, "doubletap": run_doubletap, "twotabs": run_twotabs,
-    "libresearch": run_lib_research, "libcli": run_lib_cli, "research": run_research, "researchshots": run_research_shots, "libtable": run_lib_table, "tablespots": run_table_spots, "midgrade": run_mid_grade,
+    "libresearch": run_lib_research, "libcli": run_lib_cli, "libreadprice": run_lib_read_price, "readprice": run_read_price, "research": run_research, "researchshots": run_research_shots, "libtable": run_lib_table, "tablespots": run_table_spots, "midgrade": run_mid_grade,
     "dealing": run_dealing, "prepfail": run_prep_failure, "export": run_export, "swscope": run_sw_scope,
     "quota": run_quota, "hiddenevent": run_hidden_event,
     "differential": run_differential, "timing": run_timing, "e2e": run_e2e, "baseline": run_baseline,

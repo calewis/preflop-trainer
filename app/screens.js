@@ -926,6 +926,7 @@ export async function showProgress() {
         h('p', { class: 'hint' }, 'Pass mark: ', s.mark.join(', '), '.'),
         h('p', { class: 'hint' }, s.status),
         s.checkup ? checkupLink(s.checkup) : null))),
+    readPricePanel(data.read_price),
     boardTypePanel(data.board_types),
     equityPanel(data.equity),
     anchorPanel(data.anchors),
@@ -947,6 +948,14 @@ function miniTable(headers, rows) {
   return h('table', { class: 'mini-table' },
     h('thead', {}, h('tr', {}, headers.map(text => h('th', {}, text)))),
     h('tbody', {}, rows.map(cells => h('tr', {}, cells.map(text => h('td', {}, text))))));
+}
+
+function readPricePanel(info) {
+  return h('section', { class: 'panel', 'data-read-price': '' },
+    h('h2', { class: 'panel-title' }, 'Read the price'),
+    h('p', {}, `Rung ${info.rung} of ${info.rungs}: ${info.label}.`),
+    info.recent ? h('p', {}, info.recent) : h('p', { class: 'hint' }, 'No attempts at this rung yet.'),
+    h('p', { class: 'hint' }, info.rule));
 }
 
 function boardTypePanel(info) {

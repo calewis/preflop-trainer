@@ -2,8 +2,9 @@
 
 use crate::beats_me::{BeatKind, MixBand};
 use crate::classes::MadeClass;
-use crate::item::{BeatsMeAsk, BeatsMeQuestion, ChainQuestion, ChainStage, Question};
+use crate::item::{BeatsMeAsk, BeatsMeQuestion, ChainQuestion, ChainStage, Question, ReadPriceAsk, ReadPriceQuestion};
 use crate::preflop::{action_label, Action, Seat, Situation};
+use crate::read_price::{dollar_label, PriceBand, PriceCall};
 
 /// Largest answer an `outs` item accepts.
 pub const MAX_OUTS: u32 = 47;
@@ -72,6 +73,19 @@ fn beats_me_format(q: &BeatsMeQuestion) -> AnswerFormat {
     }
 }
 
+fn read_price_format(q: &ReadPriceQuestion) -> AnswerFormat {
+    match q.ask {
+        ReadPriceAsk::Band => AnswerFormat::Choice(PriceBand::ALL.iter().map(|b| option(b.code(), b.label())).collect()),
+        ReadPriceAsk::Number => AnswerFormat::Percent,
+        ReadPriceAsk::Stated(_) | ReadPriceAsk::Recall { .. } => {
+            AnswerFormat::Choice(PriceCall::ALL.iter().map(|c| option(c.code(), c.label())).collect())
+        }
+        ReadPriceAsk::SetPrice { options, .. } => AnswerFormat::Choice(
+            options.iter().zip(["a", "b", "c", "d"]).map(|(&amount, code)| option(code, dollar_label(amount))).collect(),
+        ),
+    }
+}
+
 /// The kinds' codes as static strings, in [`BeatKind::ALL`] order.
 const KIND_CODES: [&str; 7] = ["p", "k", "t", "s", "r", "f", "h"];
 
@@ -120,5 +134,6 @@ pub fn answer_format(question: &Question) -> AnswerFormat {
         }
         Question::Table(q) => AnswerFormat::Choice(q.options.clone()),
         Question::BeatsMe(q) => beats_me_format(q),
+        Question::ReadPrice(q) => read_price_format(q),
     }
 }

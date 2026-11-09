@@ -8,9 +8,9 @@ use std::time::Instant;
 
 use trainer_web::dispatch;
 
-const SKILLS: [&str; 16] = [
+const SKILLS: [&str; 17] = [
     "preflop", "nuts", "possible", "made", "beats", "outs", "price", "hit", "spot", "spot_mw",
-    "board_type", "equity", "anchor", "table", "chain", "beats_me",
+    "board_type", "equity", "anchor", "table", "chain", "beats_me", "read_price",
 ];
 /// Answers tried for items that aren't simple choices.
 const FREE_ANSWERS: [&str; 18] = [
@@ -18,6 +18,8 @@ const FREE_ANSWERS: [&str; 18] = [
 ];
 /// Answers tried on `beats_me`: subsets of the letters, ways counts and bands.
 const BEATS_ME_ANSWERS: [&str; 11] = ["none", "a", "ab", "abcd", "pk", "ptfh", "6", "3", "16", "e", "b"];
+/// Answers tried on `read_price`: every rung's codes, some numbers, some junk.
+const READ_PRICE_ANSWERS: [&str; 13] = ["c", "f", "e", "l", "a", "b", "d", "20", "33.3", "0", "100", "zzz", "cf"];
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -29,6 +31,7 @@ fn main() {
     let mut out = Out { commands: Vec::new() };
     drills(&mut out, count);
     origins(&mut out);
+    read_price_session(&mut out);
     chain_session(&mut out);
     retried_session(&mut out);
     start_over_notes(&mut out);
@@ -71,7 +74,7 @@ impl Out {
 }
 
 fn is_free_form(skill: &str) -> bool {
-    matches!(skill, "nuts" | "possible" | "outs" | "price" | "hit" | "equity" | "anchor" | "board_type" | "chain" | "beats_me")
+    matches!(skill, "nuts" | "possible" | "outs" | "price" | "hit" | "equity" | "anchor" | "board_type" | "chain" | "beats_me" | "read_price")
 }
 
 /// Answers for one skill: `board_type` tries its codes at target, slow and too-slow
@@ -85,6 +88,7 @@ fn answers_for(skill: &str) -> Vec<(&'static str, &'static str)> {
         "equity" => vec![("10", "0"), ("45", "0"), ("90", "0")],
         "chain" => ["hc", "top", "2p", "4", "9", "25", "33", "c", "f", "zzz"].into_iter().map(|a| (a, "0")).collect(),
         "beats_me" => BEATS_ME_ANSWERS.iter().map(|&a| (a, "0")).collect(),
+        "read_price" => READ_PRICE_ANSWERS.iter().map(|&a| (a, "0")).collect(),
         _ => FREE_ANSWERS.iter().map(|&a| (a, "0")).collect(),
     }
 }
@@ -94,7 +98,11 @@ fn drills(out: &mut Out, count: u64) {
         let items = if skill == "equity" { count / 3 } else { count };
         for i in 0..items {
             // beats_me carries its rung in the top bits of the seed.
-            let rung_bits = if skill == "beats_me" { (i % 4) << 60 } else { 0 };
+            let rung_bits = match skill {
+                "beats_me" => (i % 4) << 60,
+                "read_price" => (i % 5) << 60,
+                _ => 0,
+            };
             let seed = (rung_bits + i * 2_654_435_761 + 17).to_string();
             let prepared = out.call(&["prepare", skill, &seed]);
             if skill == "table" {
@@ -149,6 +157,7 @@ fn scripted_answer(skill: &str) -> &'static str {
         "equity" | "anchor" => "42",
         "board_type" => "td",
         "chain" => "c",
+        "read_price" => "c",
         _ => "",
     }
 }
@@ -308,6 +317,42 @@ fn retried_session(out: &mut Out) {
         out.call(&["commit", &template, &(500_000_000 + step).to_string(), "1500"]);
     }
     out.call(&["progress", "600000000"]);
+}
+
+/// A `read_price`-only session and checkup, through every rung's commands.
+fn read_price_session(out: &mut Out) {
+    out.call(&["load", ""]);
+    out.call(&["session_open", "5150", "1000000", "read_price"]);
+    out.call(&["session_start", "15"]);
+    for step in 0..20u64 {
+        let next = out.call(&["session_next", &(step * 1000).to_string()]);
+        let (Some(skill), Some(seed)) = (field(&next, "skill"), field(&next, "seed")) else { break };
+        let (skill, seed) = (skill.to_string(), seed.to_string());
+        out.call(&["session_peek", "0"]);
+        let reply = out.call(&["grade", &skill, &seed, "c", "1500"]);
+        let Some(template) = first_template(&reply) else { break };
+        out.call(&["commit", &template, &(2_000_000 + step).to_string(), "1500", "medium"]);
+    }
+    out.call(&["session_summary"]);
+    out.call(&["progress", "2100000"]);
+    out.call(&["export"]);
+    let begin = out.call(&["check_begin", "read_price", "0"]);
+    let run = number_field(&begin, "run").expect("a run").to_string();
+    let form = number_field(&begin, "form").expect("a form").to_string();
+    for slot in 0..10 {
+        let slot = slot.to_string();
+        out.call(&["prepare_check", "read_price", &form, &slot, &run]);
+        // Every rung is in a checkup, and "c" is not an answer at the number or at rung 4.
+        let mut reply = out.call(&["check_grade", "read_price", &form, &slot, &run, "c", "1500"]);
+        for other in ["20", "a"] {
+            if first_template(&reply).is_none() {
+                reply = out.call(&["check_grade", "read_price", &form, &slot, &run, other, "1500"]);
+            }
+        }
+        let Some(template) = first_template(&reply) else { break };
+        out.call(&["check_commit", &template, &(3_000_000 + slot.parse::<u64>().unwrap()).to_string(), "1500"]);
+    }
+    out.call(&["check_info", "read_price"]);
 }
 
 /// The table checkup start screen: no form in progress, form 4 in progress, form 5 in progress.

@@ -5,6 +5,7 @@ use crate::beats_me::counts_for_beats_me_mark;
 use crate::checkup::latest_checkup;
 use crate::item::Skill;
 use crate::log::{asks_confidence, Attempt, Confidence, Mode};
+use crate::read_price::counts_for_read_price_mark;
 use crate::table::Verdict;
 
 /// Attempts considered for a pass mark.
@@ -74,6 +75,9 @@ pub const PASS_TABLE: PassMark = PassMark {
 /// `beats_me`: over the last 40 attempts at rungs 2-3.
 pub const BEATS_ME_MIN_CORRECT_PCT: f64 = 85.0;
 pub const PASS_BEATS_ME: PassMark = accuracy(BEATS_ME_MIN_CORRECT_PCT, None);
+/// `read_price`: over the last 40 attempts at rungs 2-4. Starting guess.
+pub const READ_PRICE_MIN_CORRECT_PCT: f64 = 85.0;
+pub const PASS_READ_PRICE: PassMark = accuracy(READ_PRICE_MIN_CORRECT_PCT, None);
 /// Stage accuracy over the last 40 stages, outs within 1 counting as right.
 /// Starting guess.
 pub const PASS_CHAIN: PassMark = PassMark {
@@ -112,6 +116,7 @@ pub fn pass_mark(skill: Skill) -> PassMark {
         Skill::Table => PASS_TABLE,
         Skill::Chain => PASS_CHAIN,
         Skill::BeatsMe => PASS_BEATS_ME,
+        Skill::ReadPrice => PASS_READ_PRICE,
     }
 }
 
@@ -209,6 +214,7 @@ fn counts_for_stats(attempt: &Attempt) -> bool {
     attempt.mode == Mode::Drill
         && attempt.extra.table_verdict != Some(Verdict::Depends)
         && (attempt.skill != Skill::BeatsMe || counts_for_beats_me_mark(attempt))
+        && (attempt.skill != Skill::ReadPrice || counts_for_read_price_mark(attempt))
 }
 
 pub fn skill_stats(skill: Skill, attempts: &[Attempt]) -> SkillStats {
@@ -266,10 +272,11 @@ pub fn current_step_for(attempts: &[Attempt]) -> usize {
     today.max(earned)
 }
 
-/// `preflop`, `beats` (kept in drills but in no step's pass requirement) and every
+/// `preflop`, `beats` (kept in drills but in no step's pass requirement),
+/// `read_price` (dealt from the first day, also outside the steps) and every
 /// skill up to and including `step`.
 pub fn skills_up_to_step(step: usize) -> Vec<Skill> {
-    let mut out = vec![Skill::Preflop, Skill::Beats];
+    let mut out = vec![Skill::Preflop, Skill::Beats, Skill::ReadPrice];
     for skills in &STEPS[..step] {
         out.extend_from_slice(skills);
     }

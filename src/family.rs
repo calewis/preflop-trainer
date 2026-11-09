@@ -6,7 +6,8 @@ use crate::beats_me::beats_me_family;
 use crate::eval::Category;
 use crate::generate::{equity_first_candidate, family_prefilter, generate, Prefilter, EQUITY_MAX_PCT, EQUITY_MIN_PCT};
 use crate::grade::{beats_analysis, equity_analysis, nuts_analysis, outs_analysis, possible_analysis};
-use crate::item::{beats_me_seed_with_rung, equity_seed_with_rung, EquityQuestion, Item, Question, Skill, SpotMode, SpotQuestion, HELD_OUT_BIT};
+use crate::item::{beats_me_seed_with_rung, equity_seed_with_rung, read_price_seed_with_rung, EquityQuestion, Item, Question, Skill, SpotMode, SpotQuestion, HELD_OUT_BIT};
+use crate::read_price::read_price_family;
 use crate::classes::made_class;
 use crate::preflop::{Seat, Situation};
 use crate::rng::Rng;
@@ -50,6 +51,7 @@ pub fn family_of(item: &Item) -> Option<String> {
         Question::Equity(q) => equity_analysis(q, item.seed).map(|a| equity_family(q, a.truth_pct)),
         Question::Table(q) => Some(table_family(q)),
         Question::BeatsMe(q) => Some(beats_me_family(q)),
+        Question::ReadPrice(q) => Some(read_price_family(q)),
         Question::Anchor { .. } | Question::BoardType { .. } | Question::Chain(_) => None,
     }
 }
@@ -151,13 +153,17 @@ pub fn table_family(q: &TableQuestion) -> String {
 /// plain new item and the family waits for another session.
 pub fn find_sibling(skill: Skill, family: &str, base: u64, avoid: u64) -> Option<u64> {
     let mut rng = Rng::new(base ^ SIBLING_SALT);
-    let rung = (skill == Skill::Equity || skill == Skill::BeatsMe).then(|| equity_rung_in_family(family)).flatten();
+    let rung = matches!(skill, Skill::Equity | Skill::BeatsMe | Skill::ReadPrice).then(|| equity_rung_in_family(family)).flatten();
     let mut exact_left = SIBLING_EXACT_CHECKS;
     let tries = if skill == Skill::Preflop { PREFLOP_SIBLING_TRIES } else { SIBLING_TRIES };
     for _ in 0..tries {
         let mut seed = rng.next_u64() & !HELD_OUT_BIT;
         if let Some(rung) = rung {
-            seed = if skill == Skill::BeatsMe { beats_me_seed_with_rung(seed, rung) } else { equity_seed_with_rung(seed, rung) };
+            seed = match skill {
+                Skill::BeatsMe => beats_me_seed_with_rung(seed, rung),
+                Skill::ReadPrice => read_price_seed_with_rung(seed, rung),
+                _ => equity_seed_with_rung(seed, rung),
+            };
         }
         if seed == avoid {
             continue;

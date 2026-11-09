@@ -16,6 +16,7 @@ use crate::item::{
 };
 use crate::money;
 use crate::preflop::{chart_for, Range, Seat, Situation, CARD};
+use crate::read_price::gen_read_price;
 use crate::rng::Rng;
 use crate::table;
 
@@ -126,6 +127,7 @@ pub fn generate(skill: Skill, seed: u64) -> Item {
         Skill::Table => Question::Table(table::question_for_seed(seed)),
         Skill::Chain => Question::Chain(gen_chain(seed)),
         Skill::BeatsMe => Question::BeatsMe(gen_beats_me(&mut rng, seed)),
+        Skill::ReadPrice => Question::ReadPrice(gen_read_price(&mut rng, seed)),
     };
     Item { skill, seed, question }
 }

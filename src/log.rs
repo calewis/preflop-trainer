@@ -113,7 +113,7 @@ impl Confidence {
 /// are left out on purpose: those decks are near break-even, so a rating would
 /// measure the deck more than the player.
 pub const fn asks_confidence(skill: Skill) -> bool {
-    matches!(skill, Skill::Made | Skill::Outs | Skill::Price | Skill::Equity)
+    matches!(skill, Skill::Made | Skill::Outs | Skill::Price | Skill::Equity | Skill::ReadPrice)
 }
 
 /// Columns added after the original eleven. An empty value means not applicable.

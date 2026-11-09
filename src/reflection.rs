@@ -4,10 +4,11 @@
 
 use crate::cards::Card;
 use crate::classes::{is_flush_draw, is_oesd, made_class};
-use crate::grade::{Outcome, Reveal, SpotAnalysis};
-use crate::item::{Item, Question, Skill, SpotMode, SpotQuestion};
+use crate::grade::{pot_with_bet, Outcome, Reveal, SpotAnalysis};
+use crate::item::{HitStreet, Item, PriceHand, Question, ReadPriceAsk, ReadPriceQuestion, Skill, SpotMode, SpotQuestion};
 use crate::log::{Attempt, ItemRef, Mode};
 use crate::preflop::Action;
+use crate::read_price::{price_points, question_share_points, whole_percent, PriceCall, CLOSE_POINTS};
 use crate::rng::Rng;
 use crate::schedule::Origin;
 use crate::table::{bb_text, TableGrade, TableQuestion, Verdict};
@@ -57,6 +58,7 @@ pub fn reflection_offered(seed: u64) -> bool {
 pub fn reflection_eligible(item: &Item, outcome: &Outcome) -> bool {
     match (&item.question, &outcome.reveal) {
         (Question::Spot(_), _) => !outcome.ok(),
+        (Question::ReadPrice(q), _) => matches!(q.rung(), 2 | 3) && !outcome.ok(),
         (Question::Table(_), Reveal::Table(g)) => g.spot.verdict == Verdict::Robust && g.chosen != g.spot.best,
         _ => false,
     }
@@ -135,8 +137,86 @@ pub fn reflection_form(item: &Item, outcome: &Outcome) -> Option<Vec<Prompt>> {
     match (&item.question, &outcome.reveal) {
         (Question::Spot(q), Reveal::Spot { analysis, chosen, .. }) => Some(spot_form(q, analysis, *chosen)),
         (Question::Table(q), Reveal::Table(graded)) => Some(table_form(q, graded)),
+        (Question::ReadPrice(q), _) => Some(read_price_form(q, &outcome.answer)),
         _ => None,
     }
+}
+
+fn read_price_form(q: &ReadPriceQuestion, picked: &str) -> Vec<Prompt> {
+    let price_needed = price_points(q.pot_before, q.bet, q.callers);
+    let share_points = question_share_points(q).unwrap_or(0.0);
+    let price = if price_needed < 0.5 {
+        cue("price", format!("The price: {} needed", whole_percent(price_needed)))
+    } else {
+        cue("price", format!("The price: about {} needed", whole_percent(price_needed)))
+    };
+    let share = cue("share", format!("Your share: about {share_points:.0}%"));
+    let size = cue("size", format!("A ${} bet into a ${} pot", q.bet, q.pot_before));
+    let callers = match q.callers {
+        0 => None,
+        1 => Some(cue("callers", "1 caller's money is in the pot".to_string())),
+        n => Some(cue("callers", format!("{n} callers' money is in the pot"))),
+    };
+    let cost = cue("cost", format!("You pay ${} to win ${}", q.bet, pot_with_bet(q.pot_before, q.bet, q.callers)));
+    // Only an all-in flop has no betting left to come; the other hands may still see some.
+    let all_in = matches!(
+        q.ask,
+        ReadPriceAsk::Stated(PriceHand::Draw { street: HitStreet::Flop, .. }) | ReadPriceAsk::Recall { street: HitStreet::Flop, .. }
+    );
+    let later = if all_in {
+        cue("later", "All-in, so no more betting can follow".to_string())
+    } else {
+        cue("later", "Later betting could change what the call is worth".to_string())
+    };
+    // A read is a guess that can be off; a draw's share is exact under the stated assumption.
+    let unsure = match q.ask {
+        ReadPriceAsk::Stated(PriceHand::Read { .. }) => cue("unsure", "You may be ahead more or less often than you figured".to_string()),
+        ReadPriceAsk::Stated(PriceHand::Draw { street: HitStreet::Flop, .. }) | ReadPriceAsk::Recall { street: HitStreet::Flop, .. } => {
+            cue("unsure", "Two cards are still to come".to_string())
+        }
+        _ => cue("unsure", "One card is still to come".to_string()),
+    };
+    let hand = match q.ask {
+        ReadPriceAsk::Stated(PriceHand::Read { .. }) => cue("hand", "Your read of how often you're ahead".to_string()),
+        ReadPriceAsk::Stated(PriceHand::Draw { kind, .. }) | ReadPriceAsk::Recall { kind, .. } => {
+            cue("hand", format!("Your hand: {}", kind.word()))
+        }
+        _ => cue("hand", "Your hand".to_string()),
+    };
+    let lose = match q.ask {
+        ReadPriceAsk::Stated(PriceHand::Read { .. }) => cue("lose", format!("You lose the ${} when you're behind", q.bet)),
+        _ => cue("lose", format!("You lose the ${} when your outs miss", q.bet)),
+    };
+    let shares_for_call = share_points >= price_needed;
+    // Price first: the form trims each prompt to its first cues.
+    let mut supports_call = vec![price.clone()];
+    supports_call.extend(shares_for_call.then(|| share.clone()));
+    supports_call.push(hand.clone());
+    supports_call.extend(callers.clone());
+    if all_in {
+        supports_call.push(later.clone());
+    }
+    supports_call.push(size.clone());
+    let mut supports_fold = vec![price.clone()];
+    supports_fold.extend((!shares_for_call).then(|| share.clone()));
+    supports_fold.push(lose);
+    supports_fold.push(cost.clone());
+    if !all_in {
+        supports_fold.push(later.clone());
+    }
+    let gap = (share_points - price_needed).abs();
+    let gap_cue = cue("gap", format!("A gap of about {gap:.0} points between your share and the price"));
+    let (supported, against) = if picked == PriceCall::Easy.code() {
+        (supports_call, supports_fold)
+    } else if picked == PriceCall::Fold.code() {
+        (supports_fold, supports_call)
+    } else {
+        // A wrong Close: the gap is what it came down to, and it is wider than Close allows.
+        let close_rule = cue("rule", format!("Close only covers a share within {CLOSE_POINTS:.0} points of the price"));
+        (vec![price, share, gap_cue.clone(), hand], vec![close_rule, gap_cue, cost, size.clone()])
+    };
+    let otherwise = vec![unsure, later, size];
+    prompts(supported, against, otherwise)
 }
 
 fn spot_form(q: &SpotQuestion, a: &SpotAnalysis, chosen: Action) -> Vec<Prompt> {
