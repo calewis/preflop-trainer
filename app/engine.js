@@ -111,7 +111,7 @@ function request(key, args, urgent) {
 }
 
 export function prepareDrill(planned, urgent) {
-  return request(`d:${planned.skill}:${planned.seed}`, ['prepare', planned.skill, planned.seed], urgent);
+  return request(`d:${planned.skill}:${planned.seed}`, ['prepare', planned.skill, planned.seed, planned.origin], urgent);
 }
 
 export function prepareBaseline(seed, index, urgent) {

@@ -115,10 +115,15 @@ pub enum OppClass {
     Trips,
     FlushDraw,
     Oesd,
+    /// A pocket pair below the board, or a hole card pairing its lowest card.
+    Low,
+    /// No pair and no draw.
+    Nothing,
 }
 
 impl OppClass {
-    pub const ALL: [OppClass; 8] = [
+    /// The classes `equity` and `chain` assign one at a time.
+    pub const SINGLE: [OppClass; 8] = [
         OppClass::Over,
         OppClass::Top,
         OppClass::Mid,
@@ -127,6 +132,19 @@ impl OppClass {
         OppClass::Trips,
         OppClass::FlushDraw,
         OppClass::Oesd,
+    ];
+
+    pub const ALL: [OppClass; 10] = [
+        OppClass::Over,
+        OppClass::Top,
+        OppClass::Mid,
+        OppClass::TwoPair,
+        OppClass::Set,
+        OppClass::Trips,
+        OppClass::FlushDraw,
+        OppClass::Oesd,
+        OppClass::Low,
+        OppClass::Nothing,
     ];
 
     pub fn code(self) -> &'static str {
@@ -139,6 +157,8 @@ impl OppClass {
             OppClass::Trips => "trips",
             OppClass::FlushDraw => "fd",
             OppClass::Oesd => "oesd",
+            OppClass::Low => "low",
+            OppClass::Nothing => "nothing",
         }
     }
 
@@ -157,6 +177,111 @@ impl OppClass {
             OppClass::Trips => "trips",
             OppClass::FlushDraw => "a flush draw",
             OppClass::Oesd => "an open-ended straight draw",
+            OppClass::Low => "a low pair",
+            OppClass::Nothing => "nothing much",
+        }
+    }
+
+    /// The class's words inside a list of hands, where they should read short.
+    pub fn in_a_list(self) -> &'static str {
+        match self {
+            OppClass::Mid => "second pair",
+            OppClass::Oesd => "a straight draw",
+            other => other.description(),
+        }
+    }
+}
+
+/// The kind of player a mix of hands is built for.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum PlayerType {
+    Tight,
+    Average,
+    Loose,
+}
+
+impl PlayerType {
+    pub const ALL: [PlayerType; 3] = [PlayerType::Tight, PlayerType::Average, PlayerType::Loose];
+
+    pub fn code(self) -> &'static str {
+        match self {
+            PlayerType::Tight => "tight",
+            PlayerType::Average => "average",
+            PlayerType::Loose => "loose",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<PlayerType> {
+        PlayerType::ALL.into_iter().find(|p| p.code() == code)
+    }
+
+    /// `a tight player` in a sentence.
+    pub fn described(self) -> &'static str {
+        match self {
+            PlayerType::Tight => "a tight player",
+            PlayerType::Average => "an average player",
+            PlayerType::Loose => "a loose player",
+        }
+    }
+
+    /// The hands this player is assumed to have when betting or calling.
+    pub fn groups(self) -> &'static [OppClass] {
+        match self {
+            PlayerType::Tight => &[OppClass::Over, OppClass::Top, OppClass::TwoPair, OppClass::Set],
+            PlayerType::Average => &[OppClass::Over, OppClass::Top, OppClass::Mid, OppClass::FlushDraw, OppClass::Oesd],
+            PlayerType::Loose => &[
+                OppClass::Top,
+                OppClass::Mid,
+                OppClass::Low,
+                OppClass::FlushDraw,
+                OppClass::Oesd,
+                OppClass::Nothing,
+            ],
+        }
+    }
+}
+
+/// The hands one opponent is assumed to hold. The frozen baseline uses a single
+/// class and no player type; a `spot` mix names the player and several groups.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct OppMix {
+    pub player: Option<PlayerType>,
+    pub classes: Vec<OppClass>,
+}
+
+impl OppMix {
+    pub fn single(class: OppClass) -> OppMix {
+        OppMix { player: None, classes: vec![class] }
+    }
+
+    /// The hands as a list: `top pair, second pair, or nothing much`.
+    pub fn listed(&self) -> String {
+        let words: Vec<&str> = self.classes.iter().map(|c| c.in_a_list()).collect();
+        match words.as_slice() {
+            [] => String::new(),
+            [one] => one.to_string(),
+            [first, second] => format!("{first} or {second}"),
+            [rest @ .., last] => format!("{}, or {last}", rest.join(", ")),
+        }
+    }
+
+    /// The sentence for a second opponent behind the one already shown.
+    pub fn other_opponent(&self) -> String {
+        match self.player {
+            Some(player) => format!("The other opponent is {}. Assume they have one of: {}. Nobody can raise.", player.described(), self.listed()),
+            None => format!("Assume another opponent has {}. Nobody can raise.", self.classes[0].description()),
+        }
+    }
+
+    /// The sentence telling the player what to assume about this opponent.
+    /// `opponent` is 1-based and set when there is more than one opponent.
+    pub fn assumption(&self, opponent: Option<usize>) -> String {
+        let hands = self.listed();
+        match (self.player, opponent) {
+            (None, None) => format!("Assume they have {}.", self.classes[0].description()),
+            (None, Some(n)) => format!("Assume opponent {n} has {}.", self.classes[0].description()),
+            (Some(player), None) => format!("They're {}. Assume they have one of: {hands}.", player.described()),
+            (Some(player), Some(n)) => format!("Opponent {n} is {}. Assume they have one of: {hands}.", player.described()),
         }
     }
 }
@@ -292,6 +417,7 @@ fn spot_pair_class(holding: Holding, board: &[Card]) -> Option<OppClass> {
         return match count(a) {
             0 if a > max => Some(OppClass::Over),
             0 if between(a) => Some(OppClass::Mid),
+            0 if a < min => Some(OppClass::Low),
             1 => Some(OppClass::Set),
             _ => None,
         };
@@ -307,6 +433,7 @@ fn spot_pair_class(holding: Holding, board: &[Card]) -> Option<OppClass> {
         2 => Some(OppClass::Trips),
         1 if paired == max => Some(OppClass::Top),
         1 if between(paired) => Some(OppClass::Mid),
+        1 if paired == min => Some(OppClass::Low),
         _ => None,
     }
 }
@@ -317,8 +444,61 @@ pub fn matches_opp_class(class: OppClass, holding: Holding, board: &[Card]) -> b
     match class {
         OppClass::FlushDraw => is_flush_draw(holding, board),
         OppClass::Oesd => is_oesd(holding, board),
+        OppClass::Nothing => is_nothing(holding, board),
         pair_type => spot_pair_class(holding, board) == Some(pair_type),
     }
+}
+
+/// No hole card pairs the board, no pocket pair, no straight or better, no draw.
+fn is_nothing(holding: Holding, board: &[Card]) -> bool {
+    let (a, b) = (holding[0].rank(), holding[1].rank());
+    a != b
+        && !board.iter().any(|c| c.rank() == a || c.rank() == b)
+        && rank_of(holding, board).category() < Category::Straight
+        && !is_flush_draw(holding, board)
+        && !is_oesd(holding, board)
+}
+
+/// A gutshot with both hole cards above the board: one rank completes a straight
+/// that uses a hole card, on the flop or turn.
+pub fn is_gutshot_with_overcards(holding: Holding, board: &[Card]) -> bool {
+    if !(3..=4).contains(&board.len()) {
+        return false;
+    }
+    let top = board.iter().map(|c| c.rank()).max().expect("board is not empty");
+    if holding[0].rank() <= top || holding[1].rank() <= top {
+        return false;
+    }
+    let board_ranks = rank_mask(board);
+    let ranks = board_ranks | rank_mask(&holding);
+    straight_top(ranks).is_none()
+        && completing_ranks(ranks).count_ones() == 1
+        && completing_ranks(board_ranks) == 0
+}
+
+/// A pair or better that a hole card makes.
+fn makes_a_pair_or_better(holding: Holding, board: &[Card]) -> bool {
+    let (a, b) = (holding[0].rank(), holding[1].rank());
+    a == b
+        || board.iter().any(|c| c.rank() == a || c.rank() == b)
+        || rank_of(holding, board).category() >= Category::Straight
+}
+
+/// Whether `hero` holds something worth a real decision: a pair or better, a
+/// flush draw, an open-ended straight draw, or a gutshot with two overcards.
+pub fn worth_a_decision(hero: Holding, board: &[Card]) -> bool {
+    makes_a_pair_or_better(hero, board)
+        || is_flush_draw(hero, board)
+        || is_oesd(hero, board)
+        || is_gutshot_with_overcards(hero, board)
+}
+
+/// Every unseen holding in any of the mix's classes, each counted once.
+pub fn mix_combos(mix: &OppMix, hero: Holding, board: &[Card]) -> Vec<Holding> {
+    unseen_holdings(holding_mask(&hero) | mask_of(board))
+        .into_iter()
+        .filter(|&h| mix.classes.iter().any(|&c| matches_opp_class(c, h, board)))
+        .collect()
 }
 
 /// Every unseen holding in `class`, given hero's cards and the board.

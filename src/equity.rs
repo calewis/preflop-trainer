@@ -77,6 +77,69 @@ pub fn equity_with_cards_to_come(
     }
 }
 
+/// Hero's share against `combos`, averaged per possible next card. With
+/// `extra_card` the card after that is enumerated too, as an all-in flop still
+/// has the river to come; both orders of a runout count once for each card, so
+/// this costs one pass over the runouts. Cards every combo holds, or that are
+/// dead, stay out of the result; the caller compares each card with its price.
+pub fn share_by_next_card(hero: Holding, board: &[Card], combos: &[Holding], extra_card: bool) -> Vec<(Card, f64)> {
+    let dead = holding_mask(&hero) | mask_of(board);
+    let cards = unseen_cards(dead);
+    let mut wins = vec![0.0f64; 52];
+    let mut counts = vec![0u32; 52];
+    let share = |hero_rank: HandRank, villain_rank: HandRank| -> f64 {
+        match hero_rank.cmp(&villain_rank) {
+            std::cmp::Ordering::Greater => 1.0,
+            std::cmp::Ordering::Equal => 0.5,
+            std::cmp::Ordering::Less => 0.0,
+        }
+    };
+    let mut full: Vec<Card> = board.to_vec();
+    let last = full.len();
+    full.push(hero[0]);
+    if extra_card {
+        full.push(hero[0]);
+    }
+    let rank = |h: Holding, b: &[Card]| {
+        let mut seven = [hero[0]; 7];
+        seven[0] = h[0];
+        seven[1] = h[1];
+        seven[2..2 + b.len()].copy_from_slice(b);
+        evaluate(&seven[..2 + b.len()])
+    };
+    for &combo in combos {
+        let mask = holding_mask(&combo);
+        for (i, &first) in cards.iter().enumerate() {
+            if mask & first.mask() != 0 {
+                continue;
+            }
+            full[last] = first;
+            if extra_card {
+                for &second in &cards[i + 1..] {
+                    if mask & second.mask() != 0 {
+                        continue;
+                    }
+                    full[last + 1] = second;
+                    let s = share(rank(hero, &full), rank(combo, &full));
+                    wins[first.index()] += s;
+                    counts[first.index()] += 1;
+                    wins[second.index()] += s;
+                    counts[second.index()] += 1;
+                }
+            } else {
+                let s = share(rank(hero, &full), rank(combo, &full));
+                wins[first.index()] += s;
+                counts[first.index()] += 1;
+            }
+        }
+    }
+    cards
+        .iter()
+        .filter(|c| counts[c.index()] > 0)
+        .map(|c| (*c, wins[c.index()] / f64::from(counts[c.index()])))
+        .collect()
+}
+
 /// A sampled estimate of exactly `samples` outcomes, deterministic in `seed`.
 pub fn sampled(
     hero: Holding,

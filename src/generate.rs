@@ -2,13 +2,17 @@
 
 use crate::anchors;
 use crate::board_type::{answer_options, category_of_seed, classify_flop};
+use crate::beats_me::{gen_beats_me, mix_for, MixBand};
 use crate::cards::{holding_mask, mask_of, unseen_holdings, Card, Holding, ACE};
-use crate::classes::{is_flush_draw, is_oesd, made_class, matches_opp_class, rank_of, MadeClass, OppClass};
+use crate::classes::{
+    is_flush_draw, is_oesd, made_class, matches_opp_class, mix_combos, rank_of, worth_a_decision, MadeClass, OppClass, OppMix, PlayerType,
+};
 use crate::equity::{equity_with_cards_to_come, sampled, Equity};
 use crate::equity_skill::EQUITY_BAND_START;
-use crate::grade::{beats_analysis, equity_analysis, nuts_analysis, outs_analysis, BeatsBucket};
+use crate::grade::{beats_analysis, chain_equity, equity_analysis, nuts_analysis, outs_analysis, BeatsBucket};
 use crate::item::{
-    equity_rung_of_seed, EquityOpponents, EquityQuestion, HitStreet, Item, Question, Skill, SpotMode, SpotQuestion,
+    beats_me_rung_of_seed, chain_hand_seed, chain_stage_of_seed, equity_rung_of_seed, ChainHand, ChainQuestion, EquityOpponents, EquityQuestion,
+    HitStreet, Item, Question, Skill, SpotMode, SpotQuestion,
 };
 use crate::money;
 use crate::preflop::{Range, Seat, Situation, CARD};
@@ -30,14 +34,29 @@ pub const BET_SIZES: [(u32, u32); 8] = [
 ];
 pub const HIT_OUTS: [u32; 8] = [2, 4, 6, 8, 9, 10, 12, 15];
 
-/// Most spots land within this many points of break-even.
-pub const SPOT_NEAR_PCT: f64 = 0.10;
-/// Share of spots required to be near break-even, out of 100.
-const SPOT_TARGETED_PCT: u64 = 85;
-/// Hero's share, in the mode being asked, stays inside this range, so no spot
-/// is one hero can't win or can't lose.
-pub const SPOT_MIN_SHARE: f64 = 0.08;
-pub const SPOT_MAX_SHARE: f64 = 0.92;
+/// A spot's price stays within this many points of break-even.
+pub const SPOT_NEAR_PCT: f64 = 0.20;
+/// Prices closer than this to break-even don't count as being on either side.
+const SPOT_MIN_MARGIN: f64 = 0.01;
+/// Samples for the quick share estimate that screens spot candidates.
+const SPOT_QUICK_SAMPLES: u64 = 2_000;
+/// Samples for the first look at a hand that has to be foldable.
+const SPOT_COARSE_SAMPLES: u64 = 400;
+/// Coarse rejections before settling for any near price.
+const SPOT_COARSE_TRIES: u32 = 2_000;
+/// Room for sampling error when ruling out a fold from the coarse estimate.
+const SPOT_COARSE_SLACK: f64 = 0.08;
+/// Extra room left for the quick estimate before the exact figure decides.
+const SPOT_QUICK_SLACK: f64 = 0.02;
+/// Hero's all-in equity stays inside this range, so no spot is one hero can't
+/// win or can't lose.
+pub const SPOT_MIN_SHARE: f64 = 0.15;
+pub const SPOT_MAX_SHARE: f64 = 0.85;
+/// Candidate hands tried for the chosen side before settling for any near price.
+const SPOT_SIDE_TRIES: u32 = 300;
+/// Hero's share in a chain's last stage stays inside this range.
+pub const CHAIN_MIN_SHARE: f64 = 0.08;
+pub const CHAIN_MAX_SHARE: f64 = 0.92;
 /// Extra margin when the share was only estimated from a multiway sample.
 const MW_SHARE_MARGIN: f64 = 0.005;
 /// Fewest combos an assumed class may have.
@@ -54,6 +73,12 @@ pub const EQUITY_MAX_PCT: f64 = 95.0;
 const EQUITY_OPPONENTS: [(usize, u64); 3] = [(1, 50), (2, 35), (3, 15)];
 /// Attempts to deal disjoint exact hands from the chosen classes before redealing.
 const EQUITY_EXACT_TRIES: u32 = 40;
+
+/// Fewest and most outs a chain's opponent hand may leave, so a chain has real outs.
+pub const CHAIN_MIN_OUTS: usize = 4;
+pub const CHAIN_MAX_OUTS: usize = 17;
+/// Chains targeted near break-even, out of 100. Starting guess.
+const CHAIN_TARGETED_PCT: u64 = 70;
 
 const DRILL_TABLE: [(u8, u64); 4] = [(4, 40), (5, 40), (6, 10), (7, 10)];
 
@@ -99,6 +124,8 @@ pub fn generate(skill: Skill, seed: u64) -> Item {
         Skill::Equity => Question::Equity(gen_equity(&mut rng, seed)),
         Skill::Anchor => Question::Anchor { card: anchors::card_of_seed(seed) as u16 },
         Skill::Table => Question::Table(table::question_for_seed(seed)),
+        Skill::Chain => Question::Chain(gen_chain(seed)),
+        Skill::BeatsMe => Question::BeatsMe(gen_beats_me(&mut rng, seed)),
     };
     Item { skill, seed, question }
 }
@@ -167,7 +194,7 @@ fn deal_card(rng: &mut Rng, dead: &mut u64) -> Card {
     }
 }
 
-fn deal_holding(rng: &mut Rng, dead: u64) -> Holding {
+pub(crate) fn deal_holding(rng: &mut Rng, dead: u64) -> Holding {
     let mut used = dead;
     let first = deal_card(rng, &mut used);
     let second = deal_card(rng, &mut used);
@@ -178,7 +205,7 @@ fn deal_holding(rng: &mut Rng, dead: u64) -> Holding {
     }
 }
 
-fn deal_board(rng: &mut Rng, len: usize, dead: &mut u64) -> Vec<Card> {
+pub(crate) fn deal_board(rng: &mut Rng, len: usize, dead: &mut u64) -> Vec<Card> {
     (0..len).map(|_| deal_card(rng, dead)).collect()
 }
 
@@ -388,15 +415,9 @@ fn pick_classes(
     Some(chosen)
 }
 
-fn playable(hero: Holding, board: &[Card]) -> bool {
-    !matches!(made_class(hero, board), MadeClass::HighCard | MadeClass::BoardPair)
-        || is_flush_draw(hero, board)
-        || is_oesd(hero, board)
-}
-
 fn class_lists(hero: Holding, board: &[Card]) -> Vec<(OppClass, Vec<Holding>)> {
     let holdings = unseen_holdings(holding_mask(&hero) | mask_of(board));
-    OppClass::ALL
+    OppClass::SINGLE
         .into_iter()
         .map(|class| {
             let combos = holdings
@@ -427,35 +448,69 @@ fn round_to_five(value: u32) -> u32 {
     (value + 2) / 5 * 5
 }
 
+/// The next-card money a player of `kind` pays off, as a fraction of the pot after calling.
+fn spot_next_card_x(kind: usize, pot: u32, bet: u32) -> u32 {
+    let after_calling = pot + bet;
+    match kind {
+        0 => 0,
+        1 => round_to_five(after_calling / 4),
+        _ => round_to_five(after_calling / 3),
+    }
+}
+
 fn gen_spot(rng: &mut Rng, opponents: usize, seed: u64) -> SpotQuestion {
-    let targeted = rng.chance(SPOT_TARGETED_PCT, 100);
     let next_card = rng.chance(1, 2);
+    let want_call = rng.chance(1, 2);
+    let kind = rng.below(PlayerType::ALL.len() as u64) as usize;
     let next_card_limit = if opponents == 1 { 0.5 } else { MW_NEXT_CARD_LIMIT };
     let share_margin = if opponents == 1 { 0.0 } else { MW_SHARE_MARGIN };
+    let (mut tries, mut coarse_rejects) = (0, 0);
     loop {
         let mut dead = 0;
         let board_len = if rng.chance(2, 3) { 3 } else { 4 };
         let board = deal_board(rng, board_len, &mut dead);
         let hero = deal_holding(rng, dead);
-        if !CARD.plays(hero) || !playable(hero, &board) {
+        if !CARD.plays(hero) || !worth_a_decision(hero, &board) {
             continue;
         }
-        let available: Vec<(OppClass, Vec<Holding>)> = class_lists(hero, &board)
-            .into_iter()
-            .filter(|(_, combos)| combos.len() >= MIN_CLASS_COMBOS)
+        // The first opponent follows the seed's player type; others vary.
+        let players: Vec<PlayerType> = (0..opponents)
+            .map(|i| if i == 0 { PlayerType::ALL[kind] } else { PlayerType::ALL[rng.below(3) as usize] })
             .collect();
-        if available.is_empty() {
-            continue;
-        }
-        let Some(picked) = pick_classes(rng, &available, opponents) else {
+        let Some(mixes) = players.iter().map(|&p| mix_for(p, hero, &board)).collect::<Option<Vec<OppMix>>>() else {
             continue;
         };
-        let classes: Vec<OppClass> = picked.iter().map(|&i| available[i].0).collect();
-        let lists: Vec<Vec<Holding>> = picked.iter().map(|&i| available[i].1.clone()).collect();
+        let lists: Vec<Vec<Holding>> = mixes.iter().map(|m| mix_combos(m, hero, &board)).collect();
+        // A coarse estimate clears most hands that can't be folded at any price.
+        let pot_before = rng.pick(&POTS);
+        if !want_call {
+            let to_come = if next_card { 1 } else { 5 - board.len() };
+            let Some(coarse) = sampled(hero, &board, &lists, to_come, SPOT_COARSE_SAMPLES, seed) else { continue };
+            if coarse.share > spot_top_price(pot_before, opponents, next_card, kind) + SPOT_COARSE_SLACK {
+                coarse_rejects += 1;
+                if coarse_rejects < SPOT_COARSE_TRIES {
+                    continue;
+                }
+            }
+        }
+        // A quick estimate settles most candidates; only a likely one pays for the exact figure.
+        let estimate = |to_come| sampled(hero, &board, &lists, to_come, SPOT_QUICK_SAMPLES, seed);
+        let Some(quick_all_in) = estimate(5 - board.len()) else { continue };
+        if out_of_spot_bounds(quick_all_in.share, share_margin + SPOT_QUICK_SLACK)
+            || (next_card && quick_all_in.share >= next_card_limit + SPOT_QUICK_SLACK)
+        {
+            continue;
+        }
+        let Some(quick) = (if next_card { estimate(1) } else { Some(quick_all_in) }) else { continue };
+        tries += 1;
+        let side_free = tries >= SPOT_SIDE_TRIES || coarse_rejects >= SPOT_COARSE_TRIES;
+        if spot_prices(pot_before, opponents, next_card, kind, quick.share, want_call, side_free, share_margin).is_empty() {
+            continue;
+        }
         let Some(all_in) = share_for_screening(hero, &board, &lists, 5 - board.len(), seed) else {
             continue;
         };
-        if next_card && all_in.share >= next_card_limit {
+        if out_of_spot_bounds(all_in.share, share_margin) || (next_card && all_in.share >= next_card_limit) {
             continue;
         }
         let share = if next_card {
@@ -466,30 +521,7 @@ fn gen_spot(rng: &mut Rng, opponents: usize, seed: u64) -> SpotQuestion {
         } else {
             all_in.share
         };
-        if share < SPOT_MIN_SHARE + share_margin || share > SPOT_MAX_SHARE - share_margin {
-            continue;
-        }
-
-        let pot_before = rng.pick(&POTS);
-        let x_kind = rng.below(3);
-        let mut eligible = Vec::with_capacity(BET_SIZES.len());
-        for (num, den) in BET_SIZES {
-            let bet = pot_before * num / den;
-            let pot = pot_before + bet * opponents as u32;
-            let x = if !next_card {
-                0
-            } else {
-                match x_kind {
-                    0 => 0,
-                    1 => round_to_five((pot + bet) / 2),
-                    _ => round_to_five((pot + bet) * 3 / 2),
-                }
-            };
-            let required = money::break_even_with_x(f64::from(pot), f64::from(bet), f64::from(x));
-            if !targeted || (required - share).abs() <= SPOT_NEAR_PCT {
-                eligible.push((pot, bet, x));
-            }
-        }
+        let eligible = spot_prices(pot_before, opponents, next_card, kind, share, want_call, side_free, share_margin);
         if eligible.is_empty() {
             continue;
         }
@@ -500,9 +532,54 @@ fn gen_spot(rng: &mut Rng, opponents: usize, seed: u64) -> SpotQuestion {
             pot,
             call,
             mode: if next_card { SpotMode::NextCard { x } } else { SpotMode::AllIn },
-            opponents: classes,
+            opponents: mixes,
         };
     }
+}
+
+fn out_of_spot_bounds(share: f64, margin: f64) -> bool {
+    share < SPOT_MIN_SHARE + margin || share > SPOT_MAX_SHARE - margin
+}
+
+/// The highest price any bet size puts on this spot: above it, folding can't be right.
+fn spot_top_price(pot_before: u32, opponents: usize, next_card: bool, kind: usize) -> f64 {
+    BET_SIZES
+        .iter()
+        .map(|&(num, den)| {
+            let bet = pot_before * num / den;
+            let pot = pot_before + bet * opponents as u32;
+            let x = if next_card { spot_next_card_x(kind, pot, bet) } else { 0 };
+            money::break_even_with_x(f64::from(pot), f64::from(bet), f64::from(x))
+        })
+        .fold(0.0, f64::max)
+}
+
+/// The (pot, call, x) choices near break-even on the wanted side of it.
+#[allow(clippy::too_many_arguments)]
+fn spot_prices(
+    pot_before: u32,
+    opponents: usize,
+    next_card: bool,
+    kind: usize,
+    share: f64,
+    want_call: bool,
+    side_free: bool,
+    share_margin: f64,
+) -> Vec<(u32, u32, u32)> {
+    let mut prices = Vec::with_capacity(BET_SIZES.len());
+    for (num, den) in BET_SIZES {
+        let bet = pot_before * num / den;
+        let pot = pot_before + bet * opponents as u32;
+        let x = if next_card { spot_next_card_x(kind, pot, bet) } else { 0 };
+        let required = money::break_even_with_x(f64::from(pot), f64::from(bet), f64::from(x));
+        let margin = share - required;
+        let near = margin.abs() <= SPOT_NEAR_PCT && margin.abs() >= SPOT_MIN_MARGIN + share_margin;
+        let on_side = if want_call { margin > 0.0 } else { margin < 0.0 };
+        if near && (on_side || side_free) {
+            prices.push((pot, bet, x));
+        }
+    }
+    prices
 }
 
 /// A random flop of the seed's category. The card space is huge, so a given
@@ -552,9 +629,31 @@ fn deal_exact_hands(rng: &mut Rng, lists: &[Vec<Holding>], dead: u64) -> Option<
 /// classes `spot` assumes, so rung 0 teaches the matchups rung 1 averages over.
 /// Served with [`EQUITY_BAND_START`]; a session replaces it with the current band.
 fn gen_equity(rng: &mut Rng, seed: u64) -> EquityQuestion {
-    let rung = equity_rung_of_seed(seed);
     let opponents = roll_equity_opponents(rng);
-    let margin = if opponents == 1 { 0.0 } else { MW_SHARE_MARGIN * 100.0 };
+    loop {
+        let (question, _) = equity_candidate(rng, seed, opponents);
+        // The screen is only an estimate, so the range is enforced on the exact
+        // figure the player will be graded against.
+        if equity_analysis(&question, seed)
+            .is_some_and(|a| (EQUITY_MIN_PCT..=EQUITY_MAX_PCT).contains(&a.truth_pct))
+        {
+            return question;
+        }
+    }
+}
+
+/// The question [`generate`] would try first for an `equity` seed, with the
+/// estimated equity in percent, without paying for the exact figure.
+pub fn equity_first_candidate(seed: u64) -> (EquityQuestion, f64) {
+    let mut rng = skill_rng(Skill::Equity, seed);
+    let opponents = roll_equity_opponents(&mut rng);
+    equity_candidate(&mut rng, seed, opponents)
+}
+
+/// The next dealt hand whose estimated equity is inside the allowed range.
+fn equity_candidate(rng: &mut Rng, seed: u64, opponents: usize) -> (EquityQuestion, f64) {
+    let rung = equity_rung_of_seed(seed);
+    let margin = SPOT_QUICK_SLACK * 100.0;
     loop {
         let mut dead = 0;
         let board_len = if rng.chance(2, 3) { 3 } else { 4 };
@@ -580,20 +679,167 @@ fn gen_equity(rng: &mut Rng, seed: u64) -> EquityQuestion {
         } else {
             (EquityOpponents::Classes(picked.iter().map(|&i| available[i].0).collect()), lists)
         };
-        let Some(screen) = share_for_screening(hero, &board, &screen_lists, 5 - board.len(), seed) else {
+        let Some(screen) = sampled(hero, &board, &screen_lists, 5 - board.len(), SPOT_QUICK_SAMPLES, seed) else {
             continue;
         };
         let share_pct = screen.share * 100.0;
-        if share_pct < EQUITY_MIN_PCT + margin || share_pct > EQUITY_MAX_PCT - margin {
+        if share_pct < EQUITY_MIN_PCT - margin || share_pct > EQUITY_MAX_PCT + margin {
             continue;
         }
-        let question = EquityQuestion { hero, board, opponents: setup, band: EQUITY_BAND_START };
-        // Screening may use a smaller sample, so the range is enforced on the
-        // exact figure the player will be graded against.
-        if equity_analysis(&question, seed)
-            .is_some_and(|a| (EQUITY_MIN_PCT..=EQUITY_MAX_PCT).contains(&a.truth_pct))
-        {
-            return question;
+        return (EquityQuestion { hero, board, opponents: setup, band: EQUITY_BAND_START }, share_pct);
+    }
+}
+
+/// What a seed's first random draws say about a family, without generating the item.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Prefilter {
+    /// The seed can't be in the family.
+    Reject,
+    /// The seed is in the family for certain.
+    Definite,
+    /// The draws so far don't settle it.
+    Maybe,
+}
+
+/// Screens a candidate sibling seed from its first draws, so slow generators
+/// only run on seeds that can still be in the family. The draws here must stay
+/// in step with [`generate`], and a test checks that they do.
+pub fn family_prefilter(skill: Skill, seed: u64, family: &str) -> Prefilter {
+    let mut rng = skill_rng(skill, seed);
+    match skill {
+        Skill::Spot => {
+            let (next_card, _want_call) = (rng.chance(1, 2), rng.chance(1, 2));
+            let player = PlayerType::ALL[rng.below(PlayerType::ALL.len() as u64) as usize];
+            if family == format!("{}:{}", mode_prefix(next_card), player.code()) {
+                Prefilter::Definite
+            } else {
+                Prefilter::Reject
+            }
         }
+        Skill::SpotMw => {
+            let opponents = rng.range(2, 3);
+            let (next_card, _want_call) = (rng.chance(1, 2), rng.chance(1, 2));
+            if family == format!("{}:{opponents}", mode_prefix(next_card)) {
+                Prefilter::Definite
+            } else {
+                Prefilter::Reject
+            }
+        }
+        Skill::Equity => {
+            let opponents = roll_equity_opponents(&mut rng);
+            let rung = equity_rung_of_seed(seed);
+            if family.starts_with(&format!("{rung}:{opponents}:")) {
+                Prefilter::Maybe
+            } else {
+                Prefilter::Reject
+            }
+        }
+        // The band is drawn first, and the deal keeps trying until it matches.
+        Skill::BeatsMe if beats_me_rung_of_seed(seed) == 3 => {
+            let band = MixBand::ALL[rng.below(3) as usize];
+            if family == format!("3:{}", band.code()) {
+                Prefilter::Definite
+            } else {
+                Prefilter::Reject
+            }
+        }
+        _ => Prefilter::Maybe,
+    }
+}
+
+fn mode_prefix(next_card: bool) -> &'static str {
+    if next_card {
+        "next"
+    } else {
+        "allin"
+    }
+}
+
+fn gen_chain(seed: u64) -> ChainQuestion {
+    let hand_seed = chain_hand_seed(seed);
+    let mut rng = skill_rng(Skill::Chain, hand_seed);
+    ChainQuestion { hand: gen_chain_hand(&mut rng, hand_seed), stage: chain_stage_of_seed(seed) }
+}
+
+/// Deals a hand the preflop card plays where hero is behind a stated hand with
+/// real outs, then a bet that is usually near hero's break-even price.
+fn gen_chain_hand(rng: &mut Rng, seed: u64) -> ChainHand {
+    let opponents = rng.range(1, 2) as u32;
+    let next_card = rng.chance(1, 2);
+    let targeted = rng.chance(CHAIN_TARGETED_PCT, 100);
+    let x_kind = rng.below(3);
+    loop {
+        let mut dead = 0;
+        let board_len = if rng.chance(2, 3) { 3 } else { 4 };
+        let board = deal_board(rng, board_len, &mut dead);
+        let hero = deal_holding(rng, dead);
+        if !CARD.plays(hero) {
+            continue;
+        }
+        let hero_rank = rank_of(hero, &board);
+        if !worth_a_decision(hero, &board) {
+            continue;
+        }
+        let mut available: Vec<(OppClass, Vec<Holding>)> = class_lists(hero, &board)
+            .into_iter()
+            .filter(|(_, combos)| combos.len() >= MIN_CLASS_COMBOS)
+            .collect();
+        rng.shuffle(&mut available);
+        let Some(villain) = available.iter().find_map(|(_, combos)| {
+            let ahead: Vec<Holding> = combos.iter().copied().filter(|&v| rank_of(v, &board) > hero_rank).collect();
+            (!ahead.is_empty()).then(|| rng.pick(&ahead))
+        }) else {
+            continue;
+        };
+        if !(CHAIN_MIN_OUTS..=CHAIN_MAX_OUTS).contains(&outs_analysis(hero, &board, villain).outs.len()) {
+            continue;
+        }
+        let second = if opponents == 2 {
+            let player = PlayerType::ALL[rng.below(3) as usize];
+            let Some(mix) = mix_for(player, hero, &board) else { continue };
+            Some(mix)
+        } else {
+            None
+        };
+        let mode = if next_card { SpotMode::NextCard { x: 0 } } else { SpotMode::AllIn };
+        let candidate = ChainHand { hero, board: board.clone(), villain, second: second.clone(), pot_before: 0, bet: 0, mode };
+        let Some((equity, _)) = chain_equity(&candidate, seed) else {
+            continue;
+        };
+        if !(CHAIN_MIN_SHARE..=CHAIN_MAX_SHARE).contains(&equity.share) {
+            continue;
+        }
+        let pot_before = rng.pick(&POTS);
+        let mut eligible = Vec::with_capacity(BET_SIZES.len());
+        for (num, den) in BET_SIZES {
+            let bet = pot_before * num / den;
+            let pot = pot_before + bet * opponents;
+            let x = if !next_card {
+                0
+            } else {
+                match x_kind {
+                    0 => 0,
+                    1 => round_to_five((pot + bet) / 2),
+                    _ => round_to_five((pot + bet) * 3 / 2),
+                }
+            };
+            let required = money::break_even_with_x(f64::from(pot), f64::from(bet), f64::from(x));
+            if !targeted || (required - equity.share).abs() <= SPOT_NEAR_PCT {
+                eligible.push((bet, x));
+            }
+        }
+        if eligible.is_empty() {
+            continue;
+        }
+        let (bet, x) = rng.pick(&eligible);
+        return ChainHand {
+            hero,
+            board,
+            villain,
+            second,
+            pot_before,
+            bet,
+            mode: if next_card { SpotMode::NextCard { x } } else { SpotMode::AllIn },
+        };
     }
 }

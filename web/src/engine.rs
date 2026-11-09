@@ -15,14 +15,15 @@ use poker_trainer::checkup::{
 };
 use poker_trainer::equity_skill::{equity_band, equity_bias, equity_rung, BIAS_MIN_ATTEMPTS};
 use poker_trainer::generate::generate;
-use poker_trainer::grade::grade_timed;
+use poker_trainer::grade::{grade_choices, grade_timed};
 use poker_trainer::item::{Item, Skill};
-use poker_trainer::log::{format_attempt, parse_log, Attempt, CheckRef, ItemRef, Mode, LOG_HEADER};
+use poker_trainer::log::{asks_confidence, format_attempt, parse_log, Attempt, CheckRef, Confidence, ItemRef, Mode, LOG_HEADER};
 use poker_trainer::preflop::{preflop_answer, Action, Seat, Situation, CARD};
 use poker_trainer::progress::{
-    all_stats, baseline_runs, current_step, drill_skills, has_baseline, next_baseline_run,
-    pass_mark, BaselineRun, SkillStats, WindowMetrics, MIN_ATTEMPTS, PASS_ATTEMPTS, STEPS,
+    all_stats, baseline_runs, current_step_for, drill_skills, has_baseline, next_baseline_run,
+    pass_mark, reliability_table, BaselineRun, SkillStats, WindowMetrics, MIN_ATTEMPTS, PASS_ATTEMPTS, STEPS,
 };
+use poker_trainer::reflection::{reflection_comparison, reflection_form, reflection_row, reflection_state, ReflectState};
 use poker_trainer::rng::Rng;
 use poker_trainer::table;
 use poker_trainer::schedule::{
@@ -77,33 +78,16 @@ struct Engine {
 }
 
 struct LiveSession {
-    allowed: Vec<Skill>,
-    start_len: usize,
-    now_ms: u64,
-    seed: u64,
     limits: SessionLimits,
     real: Session,
     current: Option<Planned>,
-    /// Finished items, for rebuilding the session when looking ahead.
+    /// Finished items, for the session summary.
     done: Vec<(Planned, bool, u32)>,
 }
 
 struct LiveBaseline {
     run: u32,
     items: Vec<BaselineItem>,
-}
-
-impl LiveSession {
-    /// A copy of the session as it stands, by replaying it; [`Session`] can't be cloned.
-    fn replayed(&self, attempts: &[Attempt]) -> Session {
-        let start = &attempts[..self.start_len.min(attempts.len())];
-        let mut copy = Session::new(self.allowed.clone(), start, self.now_ms, self.seed);
-        for &(planned, ok, response_ms) in &self.done {
-            let _ = copy.try_next_item();
-            copy.record_timed(planned, ok, response_ms);
-        }
-        copy
-    }
 }
 
 fn planned_json(p: Planned) -> V {
@@ -124,15 +108,15 @@ fn planned_json(p: Planned) -> V {
 /// `board_type` is left ungraded: its answer depends on the response time, so
 /// it is graded when the answer arrives. `table` is left ungraded so the page
 /// holds no EV, verdict or best option before the player commits.
-fn bundle(item: &Item, make_template: &dyn Fn(&poker_trainer::grade::Outcome) -> Attempt) -> V {
+fn bundle(item: &Item, origin: Option<Origin>, make_template: &dyn Fn(&poker_trainer::grade::Outcome) -> Attempt) -> V {
     let format = poker_trainer::answer::answer_format(&item.question);
     let mut graded: Vec<(String, V)> = Vec::new();
     if !matches!(item.skill, Skill::BoardType | Skill::Table) {
         if let poker_trainer::answer::AnswerFormat::Choice(options) = &format {
-            for option in options {
-                if let Ok(outcome) = grade_timed(item, option.code, 0) {
-                    let template = format_attempt(&make_template(&outcome));
-                    graded.push((option.code.to_string(), present::outcome(item, &outcome, template, 0)));
+            let codes: Vec<&str> = options.iter().map(|o| o.code).collect();
+            for (option, result) in options.iter().zip(grade_choices(item, &codes)) {
+                if let Ok(outcome) = result {
+                    graded.push((option.code.to_string(), graded_outcome(item, &outcome, origin, make_template(&outcome), 0)));
                 }
             }
         }
@@ -144,7 +128,21 @@ fn bundle(item: &Item, make_template: &dyn Fn(&poker_trainer::grade::Outcome) ->
         "question": present::question(&item.question),
         "format": present::format(&item.question),
         "graded": V::Obj(graded),
+        "confidence": (asks_confidence(item.skill) && origin.is_some()).then(present::confidence_levels),
     }
+}
+
+/// An answer's reply. `origin` is set for drills, the only mode with a reveal to
+/// reflect on; the template is stamped with what the reflection column should
+/// say, and the form is sent only when the seed offers it.
+fn graded_outcome(item: &Item, outcome: &poker_trainer::grade::Outcome, origin: Option<Origin>, mut template: Attempt, response: u32) -> V {
+    let state = origin.and_then(|origin| reflection_state(item, outcome, origin));
+    template.extra.reflect = state;
+    let form = (state == Some(ReflectState::Offered))
+        .then(|| reflection_form(item, outcome))
+        .flatten()
+        .map_or(V::Null, |prompts| present::reflection_form(&prompts));
+    present::outcome(item, outcome, format_attempt(&template), response, form)
 }
 
 fn drill_template(planned: Planned, outcome: &poker_trainer::grade::Outcome) -> Attempt {
@@ -175,6 +173,7 @@ impl Engine {
             "session_summary" => self.session_summary(),
             "grade" => self.grade(fields),
             "commit" => self.commit(fields),
+            "reflect_commit" => self.reflect_commit(fields),
             "baseline_open" => self.baseline_open(fields),
             "baseline_grade" => self.baseline_grade(fields),
             "baseline_commit" => self.baseline_commit(fields),
@@ -193,8 +192,9 @@ impl Engine {
         let skill = skill_from(arg(fields, 1)?)?;
         let seed = parse_u64(arg(fields, 2)?, "seed")?;
         let item = drill_item(skill, seed);
-        let planned = Planned { skill, seed, origin: Origin::New };
-        Ok(bundle(&item, &|outcome| drill_template(planned, outcome)))
+        let origin = fields.get(3).map_or(Origin::New, |text| origin_from(text));
+        let planned = Planned { skill, seed, origin };
+        Ok(bundle(&item, Some(origin), &|outcome| drill_template(planned, outcome)))
     }
 
     fn prepare_baseline(&mut self, fields: &[&str]) -> Reply {
@@ -202,7 +202,7 @@ impl Engine {
         let index = parse_u64(arg(fields, 2)?, "index")? as usize;
         let items = randomized_baseline(seed)?;
         let entry = items.get(index).ok_or("no such question")?;
-        Ok(bundle(&entry.item, &|outcome| Attempt::from_baseline(0, entry, outcome, 0, 0)))
+        Ok(bundle(&entry.item, None, &|outcome| Attempt::from_baseline(0, entry, outcome, 0, 0)))
     }
 
     fn load(&mut self, text: &str) -> Reply {
@@ -288,7 +288,7 @@ impl Engine {
     fn home(&self) -> V {
         let stats = all_stats(&self.attempts);
         let checkups = checkup_runs(&self.attempts);
-        let step = current_step(&stats);
+        let step = current_step_for(&self.attempts);
         let rotation: Vec<&str> = drill_skills(&[], &self.attempts)
             .into_iter()
             .map(present::skill_title)
@@ -309,7 +309,7 @@ impl Engine {
         let stats = all_stats(&self.attempts);
         let checkups = checkup_runs(&self.attempts);
         let skills: Vec<V> = stats.iter().map(|s| stats_json(s, &checkups)).collect();
-        let step = current_step(&stats);
+        let step = current_step_for(&self.attempts);
         let runs = baseline_runs(&self.attempts, BASELINE_SIZE);
         let names: Vec<&str> = STEPS[step - 1].iter().map(|&s| present::skill_title(s)).collect();
         obj! {
@@ -323,6 +323,8 @@ impl Engine {
             "board_types": self.board_types_json(),
             "equity": self.equity_json(),
             "anchors": self.anchors_json(now_ms),
+            "reflection": present::reflection_comparison(&reflection_comparison(&self.attempts)),
+            "reliability": present::reliability(&reliability_table(&self.attempts)),
         }
     }
 
@@ -402,21 +404,19 @@ impl Engine {
             list => list.split(',').map(skill_from).collect::<Result<_, _>>()?,
         };
         let allowed = drill_skills(&requested, &self.attempts);
-        let start_len = self.attempts.len();
-        let real = Session::new(allowed.clone(), &self.attempts, now_ms, seed);
+        let mut real = Session::new(allowed, &self.attempts, now_ms, seed);
+        if requested.is_empty() {
+            real = real.with_preflop_floor();
+        }
         let limits = SessionLimits::resolve(None, None);
         self.session = Some(LiveSession {
-            allowed,
-            start_len,
-            now_ms,
-            seed,
             limits,
             real,
             current: None,
             done: Vec::new(),
         });
         // The first item, so the page can have it ready before Start is pressed.
-        let mut preview = self.live()?.replayed(&self.attempts);
+        let mut preview = self.live()?.real.clone();
         Ok(obj! { "first": preview.try_next_item().map(planned_json) })
     }
 
@@ -434,7 +434,8 @@ impl Engine {
     fn session_next(&mut self, fields: &[&str]) -> Reply {
         let elapsed = parse_u64(arg(fields, 1)?, "elapsed")?;
         let live = self.session.as_mut().ok_or("no session is open")?;
-        if live.limits.finished(live.done.len() as u64, elapsed) {
+        // A hand in progress finishes before the session's time runs out.
+        if !live.real.chain_in_progress() && live.limits.finished(live.done.len() as u64, elapsed) {
             return Ok(obj! { "finished": true });
         }
         let Some(planned) = live.real.try_next_item() else {
@@ -447,13 +448,14 @@ impl Engine {
     /// The item that would follow the current one if it were answered `ok`.
     fn session_peek(&mut self, fields: &[&str]) -> Reply {
         let ok = arg(fields, 1)? == "1";
-        let attempts = &self.attempts;
         let live = self.session.as_ref().ok_or("no session is open")?;
-        let mut copy = live.replayed(attempts);
-        let Some(current) = copy.try_next_item() else {
+        let Some(current) = live.current else {
             return Ok(obj! { "planned": V::Null });
         };
-        copy.record_timed(current, ok, 0);
+        let mut copy = live.real.clone().without_sibling_search();
+        // The family isn't known ahead of grading, which only matters if a retry
+        // comes due on this very item: then the speculative guess is the same seed.
+        copy.record_with_family(current, ok, 0, None);
         Ok(obj! { "planned": copy.try_next_item().map(planned_json) })
     }
 
@@ -495,8 +497,8 @@ impl Engine {
                     .filter(|p| p.skill == skill && p.seed == seed)
                     .map_or(Origin::New, |p| p.origin);
                 let planned = Planned { skill, seed, origin };
-                let template = format_attempt(&drill_template(planned, &outcome));
-                Ok(obj! { "outcome": present::outcome(&item, &outcome, template, response) })
+                let template = drill_template(planned, &outcome);
+                Ok(obj! { "outcome": graded_outcome(&item, &outcome, Some(origin), template, response) })
             }
             Err(invalid) => Ok(obj! { "invalid": invalid.0 }),
         }
@@ -523,6 +525,10 @@ impl Engine {
         let now = parse_u64(arg(fields, 2)?, "now")?;
         let response = parse_u64(arg(fields, 3)?, "response")?.min(u64::from(u32::MAX)) as u32;
         let mut attempt = Self::attempt_from_template(arg(fields, 1)?, now, response)?;
+        // A fourth field carries the optional confidence tap.
+        if asks_confidence(attempt.skill) {
+            attempt.extra.confidence = fields.get(4).and_then(|code| Confidence::from_code(code));
+        }
         let live = self.session.as_mut().ok_or("no session is open")?;
         let expected = live.current.is_some_and(|p| p.skill == attempt.skill && attempt.item == ItemRef::Seed(p.seed));
         if !expected {
@@ -541,12 +547,27 @@ impl Engine {
         } else {
             Mode::Drill
         };
+        if planned.origin == Origin::SessionRetry {
+            attempt.extra.reflect = None;
+        }
         let ok = attempt.ok();
+        let family = attempt.extra.family.clone();
         let line = format_attempt(&attempt);
         self.attempts.push(attempt);
-        live.real.record_timed(planned, ok, response);
+        live.real.record_with_family(planned, ok, response, family);
         live.done.push((planned, ok, response));
         Ok(obj! { "line": line, "ok": ok, "answered": live.done.len() })
+    }
+
+    /// Logs a finished reflection form. The time spent on it is never recorded.
+    fn reflect_commit(&mut self, fields: &[&str]) -> Reply {
+        let now = parse_u64(arg(fields, 2)?, "now")?;
+        let answers = arg(fields, 3)?;
+        let attempt = Self::attempt_from_template(arg(fields, 1)?, now, 0)?;
+        let row = reflection_row(&attempt, answers, now);
+        let line = format_attempt(&row);
+        self.attempts.push(row);
+        Ok(obj! { "line": line })
     }
 
     fn baseline_open(&mut self, fields: &[&str]) -> Reply {
@@ -570,7 +591,7 @@ impl Engine {
         match grade_timed(&entry.item, raw, 0) {
             Ok(outcome) => {
                 let template = format_attempt(&Attempt::from_baseline(0, entry, &outcome, 0, 0));
-                Ok(obj! { "outcome": present::outcome(&entry.item, &outcome, template, 0) })
+                Ok(obj! { "outcome": present::outcome(&entry.item, &outcome, template, 0, V::Null) })
             }
             Err(invalid) => Ok(obj! { "invalid": invalid.0 }),
         }
@@ -606,7 +627,7 @@ impl Engine {
         let seed = plan.slots.get(slot).ok_or("no such slot")?.seed;
         let item = plan.item(slot);
         let check = CheckRef { run, form, slot: slot as u32 };
-        Ok(bundle(&item, &|outcome| Attempt::from_check(check, skill, seed, outcome, 0, 0)))
+        Ok(bundle(&item, None, &|outcome| Attempt::from_check(check, skill, seed, outcome, 0, 0)))
     }
 
     /// What a player can do about a skill's checkups, and how they went.
@@ -614,11 +635,14 @@ impl Engine {
         let skill = skill_from(arg(fields, 1)?)?;
         let runs = checkup_runs(&self.attempts);
         let latest = runs.iter().rfind(|r| r.skill == skill);
-        let upcoming_form = latest.filter(|r| !r.complete).map_or_else(|| next_checkup_form(skill, &self.attempts), |r| r.form);
-        let in_progress = latest.filter(|r| !r.complete).map(|r| {
+        let open = latest.filter(|r| !r.complete && !r.stale);
+        let upcoming_form = open.map_or_else(|| next_checkup_form(skill, &self.attempts), |r| r.form);
+        let in_progress = open.map(|r| {
             obj! { "answered": r.answered, "total": CHECKUP_LEN }
         });
         let history: Vec<V> = runs.iter().filter(|r| r.skill == skill).map(checkup_json).collect();
+        // Starting over deals a new form, which may be past the reserved spots.
+        let start_over_form = next_checkup_form(skill, &self.attempts);
         Ok(obj! {
             "skill": skill.name(),
             "title": present::skill_title(skill),
@@ -628,6 +652,7 @@ impl Engine {
             "in_progress": in_progress,
             "history": history,
             "reuse_note": (skill == Skill::Table && table::checkup_form_reuses_spots(upcoming_form)).then_some(table::REUSE_NOTE),
+            "start_over_note": (skill == Skill::Table && open.is_some() && table::checkup_form_reuses_spots(start_over_form)).then_some(table::REUSE_NOTE),
         })
     }
 
@@ -638,7 +663,7 @@ impl Engine {
         let unfinished = checkup_runs(&self.attempts)
             .into_iter()
             .rfind(|r| r.skill == skill)
-            .filter(|r| !r.complete);
+            .filter(|r| !r.complete && !r.stale);
         let (run, form) = match unfinished.filter(|_| resume) {
             Some(score) => (score.run, score.form),
             None => {
@@ -699,7 +724,7 @@ impl Engine {
             Ok(outcome) => {
                 let check = CheckRef { run, form, slot: slot as u32 };
                 let template = format_attempt(&Attempt::from_check(check, skill, seed, &outcome, 0, 0));
-                Ok(obj! { "outcome": present::outcome(&item, &outcome, template, response) })
+                Ok(obj! { "outcome": present::outcome(&item, &outcome, template, response, V::Null) })
             }
             Err(invalid) => Ok(obj! { "invalid": invalid.0 }),
         }
@@ -763,6 +788,14 @@ fn seen_runs(attempt: &Attempt) -> SeenRuns {
     RunIds { baseline: attempt.baseline_run, check: check_run(attempt) }
 }
 
+fn origin_from(text: &str) -> Origin {
+    match text {
+        "retry" => Origin::SessionRetry,
+        "due" => Origin::Due,
+        _ => Origin::New,
+    }
+}
+
 fn check_fields(fields: &[&str]) -> Result<(Skill, u32, usize, u32), String> {
     let skill = skill_from(arg(fields, 1)?)?;
     let form = parse_u64(arg(fields, 2)?, "form")? as u32;
@@ -798,7 +831,9 @@ fn mark_lines(skill: Skill) -> Vec<String> {
     if let Some(m) = mark.min_correct_pct {
         parts.push(format!("at least {m:.0}% correct"));
     }
-    if let Some(m) = mark.min_within_one_pct {
+    if let (Some(m), Skill::Chain) = (mark.min_within_one_pct, skill) {
+        parts.push(format!("at least {m:.0}% of stages right (outs within 1 count)"));
+    } else if let Some(m) = mark.min_within_one_pct {
         parts.push(format!("at least {m:.0}% within 1"));
     }
     if let Some(m) = mark.max_median_ms {
@@ -826,7 +861,9 @@ fn measure_lines(skill: Skill, m: &WindowMetrics) -> Vec<String> {
     if mark.min_correct_pct.is_some() {
         parts.push(format!("{:.0}% correct", m.correct_pct));
     }
-    if mark.min_within_one_pct.is_some() {
+    if mark.min_within_one_pct.is_some() && skill == Skill::Chain {
+        parts.push(format!("{:.0}% of stages right", m.within_one_pct));
+    } else if mark.min_within_one_pct.is_some() {
         parts.push(format!("{:.0}% within 1 ({:.0}% exact)", m.within_one_pct, m.correct_pct));
     }
     if mark.max_median_ms.is_some() {
@@ -858,12 +895,20 @@ fn stat_lines(stats: &SkillStats) -> Vec<String> {
     parts
 }
 
+fn attempts_needed(s: &SkillStats) -> String {
+    if s.skill == Skill::BeatsMe {
+        format!("Drill mark counts levels 3 and 4 only: needs {PASS_ATTEMPTS} attempts there, has {}.", s.total_attempts)
+    } else {
+        format!("Drill mark needs {PASS_ATTEMPTS} attempts, has {}.", s.total_attempts)
+    }
+}
+
 /// Where a skill stands on its drill mark and its checkup, in words.
 fn skill_status(s: &SkillStats) -> String {
     if s.passed {
         "Passed: drill mark and checkup both met.".to_string()
     } else if !s.drill_passed && s.total_attempts < PASS_ATTEMPTS {
-        format!("Drill mark needs {PASS_ATTEMPTS} attempts, has {}.", s.total_attempts)
+        attempts_needed(s)
     } else if !s.drill_passed {
         "Drill mark not met yet.".to_string()
     } else if s.checkup_passed.is_none() {
@@ -875,7 +920,7 @@ fn skill_status(s: &SkillStats) -> String {
 
 /// `None` when no checkup is offered for this skill.
 fn checkup_action(s: &SkillStats, checkups: &[CheckupScore]) -> V {
-    let unfinished = checkups.iter().rfind(|r| r.skill == s.skill).filter(|r| !r.complete);
+    let unfinished = checkups.iter().rfind(|r| r.skill == s.skill).filter(|r| !r.complete && !r.stale);
     if let Some(run) = unfinished {
         return obj! {
             "skill": s.skill.name(),
@@ -1350,6 +1395,47 @@ mod tests {
     }
 
     #[test]
+    fn the_default_drill_keeps_preflop_at_a_quarter() {
+        load("");
+        dispatch("session_open\x1f7\x1f1000000");
+        dispatch("session_start\x1f15");
+        let mut preflop = 0;
+        let total = 120;
+        for step in 0..total {
+            let next = dispatch(&format!("session_next\x1f{}", step * 1000));
+            preflop += u32::from(next.contains("\"skill\":\"preflop\""));
+        }
+        assert!(preflop * 4 >= total, "{preflop} of {total}");
+    }
+
+    #[test]
+    fn an_old_generators_unfinished_checkup_cannot_resume() {
+        load("1\tcheck\t\thit\t7\t1\t1\t0\t\t1000\t20\t1\t5\t0\t\t\t\t\n");
+        assert!(dispatch("check_info\x1fhit").contains("\"in_progress\":null"), "offered a resume");
+        let begun = dispatch("check_begin\x1fhit\x1f1");
+        assert!(begun.contains("\"run\":2"), "{begun}");
+    }
+
+    #[test]
+    fn the_beats_me_status_says_only_the_top_levels_count() {
+        load("");
+        let progress = dispatch("progress\x1f0");
+        assert!(progress.contains("counts levels 3 and 4 only"), "{progress}");
+    }
+
+    #[test]
+    fn a_card_with_any_of_a_suit_is_echoed_in_words() {
+        for seed in 0..40u32 {
+            let reply = dispatch(&format!("grade\x1fnuts\x1f{seed}\x1fAsxs\x1f0"));
+            if reply.contains("\"outcome\"") {
+                assert!(reply.contains("with any other spade"), "{reply}");
+                return;
+            }
+        }
+        panic!("the ace of spades was on every board");
+    }
+
+    #[test]
     fn a_checkup_from_another_device_gets_a_new_run_number() {
         load(&(check_line(1, 1, 0) + &check_line(2, 1, 1)));
         // The other device also numbered its first checkup 1.
@@ -1368,6 +1454,60 @@ mod tests {
             check_runs_in_log(),
             vec![(1, "1".to_string()), (3, "2".to_string()), (4, "2".to_string())]
         );
+    }
+
+    #[test]
+    fn starting_over_a_late_table_checkup_warns_about_the_next_form() {
+        let line = |form: u32, slot: u32| format!("{}\tcheck\t\ttable\t7\t2\t1\t0\t\t1000\tfold\t1\t{form}\t{slot}\t\t\t\t\n", 100 + slot);
+        let note = "\"start_over_note\":";
+        // Form 4 unfinished: starting over deals form 5, which still has fresh spots.
+        load(&line(4, 0));
+        let info = dispatch("check_info\x1ftable");
+        assert!(info.contains(&format!("{note}null")), "{info}");
+        // Form 5 unfinished: starting over deals form 6, which reuses spots, even
+        // though the unfinished form itself does not.
+        load(&line(5, 0));
+        let info = dispatch("check_info\x1ftable");
+        assert!(!info.contains(&format!("{note}null")), "{info}");
+        assert!(info.contains("\"reuse_note\":null"), "{info}");
+        // Other skills never warn.
+        load("1\tcheck\t\thit\t7\t2\t1\t0\t\t1000\t20\t1\t5\t0\t\t\t\t\n");
+        assert!(dispatch("check_info\x1fhit").contains(&format!("{note}null")));
+    }
+
+    #[test]
+    fn a_session_retry_bundle_offers_no_reflection() {
+        load("");
+        assert!(dispatch("session_open\x1f5\x1f1000000\x1fspot").contains("first"));
+        let seed = "11";
+        let retry = dispatch(&format!("prepare\x1fspot\x1f{seed}\x1fretry"));
+        assert!(!retry.contains("\"reflection\":["), "a retried spot gets no form: {retry}");
+        assert!(retry.contains("drill-retry"), "the template keeps the retry mode: {retry}");
+    }
+
+    #[test]
+    fn confidence_is_kept_only_on_skills_that_ask_for_it() {
+        load("");
+        dispatch("session_open\x1f6\x1f1000000\x1fprice");
+        let next = dispatch("session_next\x1f0");
+        let seed = {
+            let needle = "\"seed\":\"";
+            let start = next.find(needle).unwrap() + needle.len();
+            next[start..start + next[start..].find('"').unwrap()].to_string()
+        };
+        let line = template(&dispatch(&format!("grade\x1fprice\x1f{seed}\x1f25\x1f1500")));
+        let committed = dispatch(&format!("commit\x1f{line}\x1f2000000\x1f1500\x1fhigh"));
+        assert!(committed.contains("high"), "{committed}");
+    }
+
+    #[test]
+    fn a_reflection_row_is_logged_with_no_time() {
+        load("");
+        let line = "1\tdrill\t\tspot\t7\t1\t0\t0\t\t1000\tc\t\t\t\t\t\t\t\t\t\tallin:top\t\t\toffered";
+        let reply = dispatch(&format!("reflect_commit\x1f{line}\x1f5000\x1fsupported:price"));
+        assert!(reply.contains("\"line\""), "{reply}");
+        let export = dispatch("export").replace("\\t", "\t");
+        assert!(export.contains("5000\treflect\t\tspot\t7"), "{export}");
     }
 
     #[test]

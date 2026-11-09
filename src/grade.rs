@@ -1,13 +1,18 @@
 //! Answer parsing, exact truth and grading. Returns structured reveals.
 
 use crate::anchors::{self, AnchorCard};
+use crate::beats_me::{self, kinds_analysis, mix_standing, standing, BeatKind, KindRow, MixBand, MixStanding, Standing, WaysCount};
 use crate::answer::MAX_OUTS;
 use crate::board_type::{classify_flop, BoardCategory, BOARD_TYPE_MISS_MS};
-use crate::cards::{holding_mask, mask_of, rank_from_byte, unseen_cards, unseen_holdings, Card, Holding};
-use crate::classes::{combos_in_class, made_class, rank_of, MadeClass};
-use crate::equity::{equity_all_in, equity_next_card, Equity};
+use crate::cards::{holding_mask, mask_of, rank_from_byte, suit_from_byte, unseen_cards, unseen_holdings, Card, Holding};
+use crate::classes::{combos_in_class, made_class, matches_opp_class, mix_combos, rank_of, MadeClass, OppMix};
+use crate::equity::{equity_all_in, equity_next_card, share_by_next_card, Equity};
 use crate::eval::{straight_top, Category, HandRank};
-use crate::item::{EquityOpponents, EquityQuestion, HitStreet, Item, Question, SpotMode, SpotQuestion};
+use crate::family::{equity_family, family_of};
+use crate::item::{
+    chain_hand_seed, BeatsMeAsk, BeatsMeQuestion, ChainHand, ChainQuestion, ChainStage, EquityOpponents, EquityQuestion,
+    HitStreet, Item, Question, SpotMode, SpotQuestion,
+};
 use crate::money;
 use crate::preflop::{preflop_answer, Action, PreflopReason, Seat, Situation};
 use crate::table::{self, TableGrade, TableQuestion};
@@ -56,6 +61,12 @@ pub struct Outcome {
     pub reveal: Reveal,
     /// Set for `equity` items: what gets logged beyond the answer itself.
     pub equity_log: Option<EquityLog>,
+    /// The item's family, logged so scheduling needn't regenerate it.
+    pub family: Option<String>,
+    /// Set for `chain` items: which stage this answer was for.
+    pub chain_stage: Option<ChainStage>,
+    /// Set on a chain's last stage: one line that ties the four stages together.
+    pub chain_tie: Option<String>,
 }
 
 /// The facts an `equity` attempt logs.
@@ -156,6 +167,14 @@ pub struct TemptingCard {
 pub struct NutsAnalysis {
     pub top: HandRank,
     pub top_holdings: Vec<Holding>,
+    /// Holdings no disjoint holding beats: card removal can make a lesser
+    /// holding unbeatable, since only one player can hold a given card.
+    pub nuts: Vec<Holding>,
+    /// The nuts that are only unbeatable because they hold a card the better hand needs.
+    pub by_card_removal: Vec<Holding>,
+    /// `Some((card, suit))` when the nuts are exactly that card with any other
+    /// card of that suit, the way a player would say it.
+    pub any_of_suit: Option<(Card, u8)>,
     /// The next-best distinct hand strength and who makes it.
     pub next: Option<(HandRank, Vec<Holding>)>,
     pub unseen_count: usize,
@@ -191,6 +210,15 @@ pub struct OutsAnalysis {
     pub unseen: usize,
 }
 
+/// Library-computed facts shown after a `spot` or `spot_mw` reveal. They never affect the grade.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct FlipFacts {
+    /// The largest call that still breaks even. `None` when the share is 100%.
+    pub break_even_call: Option<f64>,
+    /// Heads-up only: next cards after which hero's share beats the price, and how many are unseen.
+    pub cards_ahead: Option<(u32, u32)>,
+}
+
 #[derive(Clone, Debug)]
 pub struct SpotAnalysis {
     /// P: the pot before hero acts, including the bet and earlier callers.
@@ -209,6 +237,9 @@ pub struct SpotAnalysis {
     pub break_even_x: Option<f64>,
     pub x: u32,
     pub next_card: bool,
+    /// One line per opponent saying which groups of hands were averaged over.
+    /// Empty for the frozen baseline, whose spots assume one exact class.
+    pub groups: Vec<String>,
 }
 
 /// The truth behind an `equity` question.
@@ -267,6 +298,7 @@ pub enum Reveal {
         loss_pct: f64,
         loss_money: f64,
         band: Option<EvBand>,
+        flip: Option<FlipFacts>,
     },
     Equity {
         analysis: EquityAnalysis,
@@ -287,10 +319,63 @@ pub enum Reveal {
         too_slow: bool,
     },
     Table(TableGrade),
+    BeatsMe(BeatsMeReveal),
+}
+
+/// One shown hand's result at rung 0 of `beats_me`.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct WhichHand {
+    pub letter: char,
+    pub holding: Holding,
+    pub rank: HandRank,
+    pub standing: Standing,
+}
+
+/// What a `beats_me` answer shows, by rung.
+#[derive(Clone, Debug)]
+pub enum BeatsMeReveal {
+    Which { hero_rank: HandRank, hands: Vec<WhichHand>, answer: String },
+    Kinds { hero_rank: HandRank, rows: Vec<KindRow> },
+    Ways { high: u8, low: u8, count: WaysCount, hero_rank: HandRank },
+    Mix { standing: MixStanding, mix: OppMix, hero_rank: HandRank },
+}
+
+/// Added to the `beats` reveal after the exact percentage.
+pub const BEATS_RANDOM_NOTE: &str = "That's against random hands. Someone who bets usually has better than random, so treat this as your first read and adjust down.";
+
+/// Grades every choice of an item, working out what they share only once.
+/// A `spot`'s exact share is the slow part and is the same for each choice.
+pub fn grade_choices(item: &Item, codes: &[&str]) -> Vec<Result<Outcome, InvalidAnswer>> {
+    let Question::Spot(q) = &item.question else {
+        return codes.iter().map(|code| grade(item, code)).collect();
+    };
+    let Some(analysis) = spot_analysis(q, item.seed) else {
+        return codes.iter().map(|code| grade(item, code)).collect();
+    };
+    let flip = spot_flip(q, &analysis);
+    codes
+        .iter()
+        .map(|code| {
+            let chosen = parse_call_or_fold(code)?;
+            let mut result = graded_spot(analysis.clone(), chosen, Some(flip));
+            result.family = family_of(item);
+            Ok(result)
+        })
+        .collect()
 }
 
 /// Grades a raw answer. `Err` means the input was not understood and nothing is counted.
 pub fn grade(item: &Item, raw: &str) -> Result<Outcome, InvalidAnswer> {
+    let mut result = grade_item(item, raw)?;
+    result.family = match (&result.reveal, &item.question) {
+        // `grade_equity` already knows the truth; `family_of` would work it out again.
+        (Reveal::Equity { analysis, .. }, Question::Equity(q)) => Some(equity_family(q, analysis.truth_pct)),
+        _ => family_of(item),
+    };
+    Ok(result)
+}
+
+fn grade_item(item: &Item, raw: &str) -> Result<Outcome, InvalidAnswer> {
     match &item.question {
         Question::Preflop { behind, situation, hand, .. } => {
             grade_preflop(Seat::from_behind(*behind), *situation, *hand, raw)
@@ -307,6 +392,8 @@ pub fn grade(item: &Item, raw: &str) -> Result<Outcome, InvalidAnswer> {
         Question::Anchor { card } => grade_anchor(usize::from(*card), raw),
         Question::BoardType { board, options } => grade_board_type(board, options, raw),
         Question::Table(q) => grade_table(q, raw),
+        Question::Chain(q) => grade_chain(q, item.seed, raw),
+        Question::BeatsMe(q) => grade_beats_me(q, raw),
     }
 }
 
@@ -330,8 +417,97 @@ fn normalize(raw: &str) -> String {
         .collect()
 }
 
+/// Parses a set of letters joined together, or `none`.
+fn parse_letter_set(raw: &str, allowed: &str) -> Option<Vec<char>> {
+    let text: String = normalize(raw).chars().filter(|&c| c != ',').collect();
+    if text == "none" {
+        return Some(Vec::new());
+    }
+    if text.is_empty() {
+        return None;
+    }
+    let mut seen: Vec<char> = Vec::new();
+    for ch in text.chars() {
+        if !allowed.contains(ch) || seen.contains(&ch) {
+            return None;
+        }
+        seen.push(ch);
+    }
+    seen.sort_unstable();
+    Some(seen)
+}
+
+fn letters_or_none(letters: &[char]) -> String {
+    if letters.is_empty() {
+        "none".to_string()
+    } else {
+        letters.iter().collect()
+    }
+}
+
+/// Grades one rung of the "What beats you?" ladder.
+fn grade_beats_me(q: &BeatsMeQuestion, raw: &str) -> Result<Outcome, InvalidAnswer> {
+    let hero_rank = rank_of(q.hero, &q.board);
+    match &q.ask {
+        BeatsMeAsk::Which(options) => {
+            let guess = parse_letter_set(raw, "abcd")
+                .ok_or_else(|| InvalidAnswer("Answer any of a, b, c, d together, or none.".to_string()))?;
+            let hands: Vec<WhichHand> = options
+                .iter()
+                .zip("abcd".chars())
+                .map(|(&holding, letter)| WhichHand {
+                    letter,
+                    holding,
+                    rank: rank_of(holding, &q.board),
+                    standing: standing(q.hero, holding, &q.board),
+                })
+                .collect();
+            let truth: Vec<char> = hands.iter().filter(|h| h.standing == Standing::Ahead).map(|h| h.letter).collect();
+            let answer = letters_or_none(&truth);
+            Ok(outcome(guess == truth, letters_or_none(&guess), Reveal::BeatsMe(BeatsMeReveal::Which { hero_rank, hands, answer })))
+        }
+        BeatsMeAsk::Kinds => {
+            let allowed: String = BeatKind::ALL.iter().map(|k| k.code()).collect();
+            let guess = parse_letter_set(raw, &allowed)
+                .ok_or_else(|| InvalidAnswer("Answer any of the letters together, or none.".to_string()))?;
+            let rows = kinds_analysis(q.hero, &q.board);
+            let mut truth: Vec<char> = rows.iter().map(|r| r.kind.code()).collect();
+            truth.sort_unstable();
+            Ok(outcome(guess == truth, letters_or_none(&guess), Reveal::BeatsMe(BeatsMeReveal::Kinds { hero_rank, rows })))
+        }
+        BeatsMeAsk::Ways { high, low } => {
+            let guess: u32 = normalize(raw)
+                .parse()
+                .ok()
+                .filter(|&n| n <= crate::answer::MAX_WAYS)
+                .ok_or_else(|| InvalidAnswer("Answer a whole number of ways.".to_string()))?;
+            let count = beats_me::ways_count(*high, *low, q.hero, &q.board);
+            Ok(outcome(guess == count.ways, guess.to_string(), Reveal::BeatsMe(BeatsMeReveal::Ways { high: *high, low: *low, count, hero_rank })))
+        }
+        BeatsMeAsk::Mix(mix) => {
+            let code = normalize(raw);
+            let band = MixBand::ALL
+                .into_iter()
+                .find(|b| b.code() == code)
+                .ok_or_else(|| InvalidAnswer("Answer a, e or b.".to_string()))?;
+            let standing = mix_standing(q.hero, &q.board, mix);
+            Ok(outcome(band == standing.band, code, Reveal::BeatsMe(BeatsMeReveal::Mix { standing, mix: mix.clone(), hero_rank })))
+        }
+    }
+}
+
 fn outcome(correct: bool, answer: String, reveal: Reveal) -> Outcome {
-    Outcome { correct, close: false, ev_loss_pct: None, answer, reveal, equity_log: None }
+    Outcome {
+        correct,
+        close: false,
+        ev_loss_pct: None,
+        answer,
+        reveal,
+        equity_log: None,
+        family: None,
+        chain_stage: None,
+        chain_tie: None,
+    }
 }
 
 fn grade_preflop(
@@ -361,6 +537,8 @@ pub enum NutsGuess {
     Exact(Holding),
     CardX(Card),
     RankX(u8),
+    /// A specific card plus any card of a stated suit, such as `asxs`.
+    CardAnySuit(Card, u8),
 }
 
 pub fn parse_nuts_guess(raw: &str) -> Option<NutsGuess> {
@@ -381,6 +559,7 @@ pub fn parse_nuts_guess(raw: &str) -> Option<NutsGuess> {
             }
             Some(NutsGuess::Ranks { a: r1, b: r2, suited: Some(b[2] == b's') })
         }
+        4 if b[2] == b'x' => Some(NutsGuess::CardAnySuit(Card::parse(text.get(..2)?)?, suit_from_byte(b[3])?)),
         4 => {
             let first = Card::parse(text.get(..2)?)?;
             let second = Card::parse(text.get(2..)?)?;
@@ -408,7 +587,48 @@ pub fn guess_matches(guess: NutsGuess, holding: Holding) -> bool {
         NutsGuess::Exact([c1, c2]) => (h1 == c1 && h2 == c2) || (h1 == c2 && h2 == c1),
         NutsGuess::CardX(card) => h1 == card || h2 == card,
         NutsGuess::RankX(rank) => h1.rank() == rank || h2.rank() == rank,
+        NutsGuess::CardAnySuit(card, suit) => (h1 == card && h2.suit() == suit) || (h2 == card && h1.suit() == suit),
     }
+}
+
+/// `Some((card, suit))` when `nuts` is exactly every unseen holding of `card`
+/// with another card of `suit`.
+fn nuts_as_card_plus_suit(nuts: &[Holding], holdings: &[Holding]) -> Option<(Card, u8)> {
+    let first = nuts.first()?;
+    for &card in first {
+        let Some(other) = first.iter().find(|&&c| c != card) else { continue };
+        let suit = other.suit();
+        let with_card: Vec<Holding> = holdings
+            .iter()
+            .copied()
+            .filter(|h| h.contains(&card) && h.iter().any(|&c| c != card && c.suit() == suit))
+            .collect();
+        if nuts.len() > 1 && with_card.len() == nuts.len() && with_card.iter().all(|h| nuts.contains(h)) {
+            return Some((card, suit));
+        }
+    }
+    None
+}
+
+/// `A♠ with any other spade`.
+pub fn any_of_suit_text(card: Card, suit: u8) -> String {
+    format!("{} with any other {}", card_symbol(card), suit_noun(suit))
+}
+
+fn card_symbol(card: Card) -> String {
+    format!("{}{}", rank_text(card.rank()), ["\u{2660}", "\u{2665}", "\u{2666}", "\u{2663}"][usize::from(card.suit())])
+}
+
+fn rank_text(rank: u8) -> String {
+    if rank == 8 {
+        "10".to_string()
+    } else {
+        crate::cards::rank_char(rank).to_string()
+    }
+}
+
+fn suit_noun(suit: u8) -> &'static str {
+    ["spade", "heart", "diamond", "club"][usize::from(suit)]
 }
 
 /// Enumerates every unseen holding and finds the top two distinct strengths.
@@ -419,21 +639,32 @@ pub fn nuts_analysis(board: &[Card]) -> NutsAnalysis {
     let top = ranked.iter().map(|&(_, r)| r).max().expect("holdings exist");
     let top_holdings: Vec<Holding> =
         ranked.iter().filter(|&&(_, r)| r == top).map(|&(h, _)| h).collect();
-    let second = ranked.iter().map(|&(_, r)| r).filter(|&r| r < top).max();
-    let next = second.map(|s| {
-        (s, ranked.iter().filter(|&&(_, r)| r == s).map(|&(h, _)| h).collect())
+    let nuts: Vec<Holding> = ranked
+        .iter()
+        .filter(|&&(h, rank)| !ranked.iter().any(|&(other, r)| r > rank && holding_mask(&other) & holding_mask(&h) == 0))
+        .map(|&(h, _)| h)
+        .collect();
+    // The next best is the best hand that can actually be beaten.
+    let beatable = || ranked.iter().filter(|(h, _)| !nuts.contains(h));
+    let next = beatable().map(|&(_, r)| r).max().map(|s| {
+        (s, beatable().filter(|&&(_, r)| r == s).map(|&(h, _)| h).collect())
     });
+    let by_card_removal: Vec<Holding> = nuts.iter().copied().filter(|h| !top_holdings.contains(h)).collect();
+    let any_of_suit = nuts_as_card_plus_suit(&nuts, &holdings);
     NutsAnalysis {
         top,
         all_tie: top_holdings.len() == holdings.len(),
         top_holdings,
+        nuts,
+        by_card_removal,
+        any_of_suit,
         next,
         unseen_count: holdings.len(),
     }
 }
 
 fn grade_nuts(board: &[Card], raw: &str) -> Result<Outcome, InvalidAnswer> {
-    const HELP: &str = "Give two ranks (QJ, KK), ranks with s or o (AKs), two exact cards (AhKh), or a card or rank plus x (Ahx, Ax).";
+    const HELP: &str = "Give two ranks (QJ, KK), ranks with s or o (AKs), two exact cards (AhKh), a card or rank plus x (Ahx, Ax), or a card with any of a suit (Asxs for A of spades with any spade).";
     let guess = parse_nuts_guess(raw).ok_or_else(|| InvalidAnswer(HELP.to_string()))?;
     let analysis = nuts_analysis(board);
     let holdings = unseen_holdings(mask_of(board));
@@ -444,9 +675,9 @@ fn grade_nuts(board: &[Card], raw: &str) -> Result<Outcome, InvalidAnswer> {
             "No unseen holding matches that (those cards are on the board). Try again.".to_string(),
         ));
     }
-    let is_nut = |h: &Holding| rank_of(*h, board) == analysis.top;
+    let is_nut = |h: &Holding| analysis.nuts.contains(h);
     let consistent_nuts = consistent.iter().filter(|h| is_nut(h)).count();
-    let used_x = matches!(guess, NutsGuess::CardX(_) | NutsGuess::RankX(_));
+    let used_x = matches!(guess, NutsGuess::CardX(_) | NutsGuess::RankX(_) | NutsGuess::CardAnySuit(..));
     let correct = if used_x {
         consistent_nuts == consistent.len()
     } else {
@@ -834,11 +1065,7 @@ fn grade_board_type(board: &[Card], options: &[BoardCategory; 4], raw: &str) -> 
 /// `None` only if the assumed classes leave no card-disjoint combination.
 pub fn spot_analysis(q: &SpotQuestion, seed: u64) -> Option<SpotAnalysis> {
     let (hero, board) = canonical_suits(q.hero, &q.board);
-    let lists: Vec<Vec<Holding>> = q
-        .opponents
-        .iter()
-        .map(|&class| combos_in_class(class, hero, &board))
-        .collect();
+    let lists: Vec<Vec<Holding>> = q.opponents.iter().map(|mix| mix_combos(mix, hero, &board)).collect();
     let eq: Equity = match q.mode {
         SpotMode::AllIn => equity_all_in(hero, &board, &lists, seed)?,
         SpotMode::NextCard { .. } => equity_next_card(hero, &board, &lists, seed)?,
@@ -857,30 +1084,176 @@ pub fn spot_analysis(q: &SpotQuestion, seed: u64) -> Option<SpotAnalysis> {
         break_even_x: money::break_even_x(eq.share, pot, call),
         x: q.x(),
         next_card: matches!(q.mode, SpotMode::NextCard { .. }),
+        groups: groups_used(&q.opponents, hero, &board, 0),
     })
 }
 
+/// A line per opponent naming the groups of hands averaged over, with how many
+/// ways each can be held. A hand that fits two groups counts in the first, so the
+/// ways add up to the combos averaged. `shown` is any other cards already visible.
+fn groups_used(mixes: &[OppMix], hero: Holding, board: &[Card], shown: u64) -> Vec<String> {
+    let many = mixes.len() > 1;
+    mixes
+        .iter()
+        .enumerate()
+        .filter(|(_, mix)| mix.player.is_some())
+        .map(|(index, mix)| {
+            let holdings = unseen_holdings(holding_mask(&hero) | mask_of(board) | shown);
+            let mut seen = vec![false; holdings.len()];
+            let counts: Vec<String> = mix
+                .classes
+                .iter()
+                .map(|&class| {
+                    let mut ways = 0;
+                    for (holding, taken) in holdings.iter().zip(seen.iter_mut()) {
+                        if !*taken && matches_opp_class(class, *holding, board) {
+                            *taken = true;
+                            ways += 1;
+                        }
+                    }
+                    format!("{} ({ways} {})", class.in_a_list(), if ways == 1 { "way" } else { "ways" })
+                })
+                .collect();
+            let lead = if many { format!("Opponent {}", index + 1) } else { "Hands counted".to_string() };
+            format!("{lead}: {}.", counts.join(", "))
+        })
+        .collect()
+}
+
 fn grade_spot(q: &SpotQuestion, seed: u64, raw: &str) -> Result<Outcome, InvalidAnswer> {
-    let chosen = match normalize(raw).as_str() {
-        "c" => Action::Call,
-        "f" => Action::Fold,
-        _ => return Err(InvalidAnswer("Answer c or f.".to_string())),
-    };
+    let chosen = parse_call_or_fold(raw)?;
     let analysis = spot_analysis(q, seed)
         .ok_or_else(|| InvalidAnswer("This spot has no possible opponent hands.".to_string()))?;
+    let flip = spot_flip(q, &analysis);
+    Ok(graded_spot(analysis, chosen, Some(flip)))
+}
+
+fn parse_call_or_fold(raw: &str) -> Result<Action, InvalidAnswer> {
+    match normalize(raw).as_str() {
+        "c" => Ok(Action::Call),
+        "f" => Ok(Action::Fold),
+        _ => Err(InvalidAnswer("Answer c or f.".to_string())),
+    }
+}
+
+/// The call-or-fold grade, shared by `spot`, `spot_mw` and a chain's last stage.
+fn graded_spot(analysis: SpotAnalysis, chosen: Action, flip: Option<FlipFacts>) -> Outcome {
     let gap = analysis.ev_call - analysis.ev_fold;
     let best = if gap >= 0.0 { Action::Call } else { Action::Fold };
     let loss_money = if chosen == best { 0.0 } else { gap.abs() };
-    let pot = f64::from(q.pot);
+    let pot = f64::from(analysis.pot);
     let loss_pct = 100.0 * loss_money / pot;
     let band = if chosen == best { None } else { Some(ev_band(loss_pct)) };
     let correct = loss_pct < EV_CLOSE_PCT;
     let mut result = outcome(
         correct,
         chosen.code().to_string(),
-        Reveal::Spot { analysis, chosen, best, loss_pct, loss_money, band },
+        Reveal::Spot { analysis, chosen, best, loss_pct, loss_money, band, flip },
     );
     result.close = 100.0 * gap.abs() / pot < EV_CLOSE_PCT;
     result.ev_loss_pct = Some(loss_pct);
+    result
+}
+
+/// The facts shown after a `spot` or `spot_mw` reveal. The card count is heads-up
+/// only: with two or more opponents it would mean enumerating every pairing.
+fn spot_flip(q: &SpotQuestion, a: &SpotAnalysis) -> FlipFacts {
+    let cards_ahead = (q.opponents.len() == 1).then(|| {
+        let (hero, board) = canonical_suits(q.hero, &q.board);
+        let combos = mix_combos(&q.opponents[0], hero, &board);
+        // After the next card an all-in flop still has the river to come.
+        let extra = matches!(q.mode, SpotMode::AllIn) && board.len() == 3;
+        let shares = share_by_next_card(hero, &board, &combos, extra);
+        let ahead = shares.iter().filter(|(_, share)| *share > a.required).count() as u32;
+        (ahead, 52 - 2 - board.len() as u32)
+    });
+    FlipFacts { break_even_call: money::break_even_call(a.share, f64::from(q.pot), f64::from(q.x())), cards_ahead }
+}
+
+/// Hero's equity at the chain's showdown: exact against the shown opponent and
+/// averaged over the second opponent's assumed mix of hands. `None` if they can't coexist.
+pub fn chain_equity(hand: &ChainHand, seed: u64) -> Option<(Equity, Vec<usize>)> {
+    let perm = canonical_perm(hand.hero, &hand.board);
+    let relabel = |h: &Holding| [h[0].with_suit_perm(&perm), h[1].with_suit_perm(&perm)];
+    let hero = relabel(&hand.hero);
+    let villain = relabel(&hand.villain);
+    let board: Vec<Card> = hand.board.iter().map(|c| c.with_suit_perm(&perm)).collect();
+    let mut lists = vec![vec![villain]];
+    if let Some(mix) = &hand.second {
+        let villain_mask = holding_mask(&villain);
+        let others: Vec<Holding> = mix_combos(mix, hero, &board)
+            .into_iter()
+            .filter(|h| holding_mask(h) & villain_mask == 0)
+            .collect();
+        lists.push(others);
+    }
+    let seed = chain_hand_seed(seed);
+    let eq = match hand.mode {
+        SpotMode::AllIn => equity_all_in(hero, &board, &lists, seed)?,
+        SpotMode::NextCard { .. } => equity_next_card(hero, &board, &lists, seed)?,
+    };
+    Some((eq, lists.iter().map(Vec::len).collect()))
+}
+
+/// The call-or-fold analysis for a chain's last stage.
+pub fn chain_analysis(hand: &ChainHand, seed: u64) -> Option<SpotAnalysis> {
+    let (eq, combos) = chain_equity(hand, seed)?;
+    let (pot, call, x) = (f64::from(hand.pot()), f64::from(hand.bet), f64::from(hand.x()));
+    Some(SpotAnalysis {
+        pot: hand.pot(),
+        call: hand.bet,
+        share: eq.share,
+        sampled: eq.sampled,
+        combos_per_opponent: combos,
+        price: money::break_even(pot, call),
+        required: money::break_even_with_x(pot, call, x),
+        ev_call: money::ev_call(eq.share, pot, call, x),
+        ev_fold: money::EV_FOLD,
+        break_even_x: money::break_even_x(eq.share, pot, call),
+        x: hand.x(),
+        next_card: matches!(hand.mode, SpotMode::NextCard { .. }),
+        groups: chain_groups(hand),
+    })
+}
+
+fn chain_groups(hand: &ChainHand) -> Vec<String> {
+    let shown = holding_mask(&hand.villain);
+    hand.second
+        .as_ref()
+        .map_or_else(Vec::new, |mix| groups_used(std::slice::from_ref(mix), hand.hero, &hand.board, shown))
+}
+
+fn grade_chain(q: &ChainQuestion, seed: u64, raw: &str) -> Result<Outcome, InvalidAnswer> {
+    let hand = &q.hand;
+    let mut result = match q.stage {
+        ChainStage::Hand => grade_made(hand.hero, &hand.board, raw)?,
+        ChainStage::Outs => grade_outs(hand.hero, &hand.board, hand.villain, raw)?,
+        ChainStage::Price => grade_price(hand.pot_before, hand.bet, hand.callers(), raw)?,
+        ChainStage::Decide => {
+            let chosen = parse_call_or_fold(raw)?;
+            let analysis = chain_analysis(hand, seed)
+                .ok_or_else(|| InvalidAnswer("This spot has no possible opponent hands.".to_string()))?;
+            let tie = chain_tie_line(hand, &analysis);
+            let mut result = graded_spot(analysis, chosen, None);
+            result.chain_tie = Some(tie);
+            result
+        }
+    };
+    result.chain_stage = Some(q.stage);
     Ok(result)
+}
+
+/// One short line that ties a chain's four stages together.
+fn chain_tie_line(hand: &ChainHand, a: &SpotAnalysis) -> String {
+    let class = made_class(hand.hero, &hand.board).label();
+    let outs = outs_analysis(hand.hero, &hand.board, hand.villain).outs.len();
+    let verb = if a.ev_call >= 0.0 { "calling" } else { "folding" };
+    let later = if a.x > 0 { " counting what you win later" } else { "" };
+    format!(
+        "{}{}, {outs} outs, {:.1}% needed{later}, your share {:.1}%, so {verb} was right.",
+        class[..1].to_uppercase(),
+        &class[1..],
+        a.required * 100.0,
+        a.share * 100.0,
+    )
 }

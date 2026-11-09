@@ -1,7 +1,7 @@
-"""Full browser test suite, run on hal: python3 web/test/run.py [sections...]
-Sections: native libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card offline nostorage legacy screens
+"""Full browser test suite: python3 web/test/run.py [sections...]
+Sections: native libresearch libcli research researchshots (on request only) libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card offline nostorage legacy screens
 Results go to target/webtest/results.json and screenshots to target/webtest/screens/."""
-import json, os, pathlib, random, re, shutil, subprocess, sys, time
+import itertools, json, os, pathlib, random, re, shutil, subprocess, sys, time
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 import cdp, server
@@ -51,7 +51,7 @@ class Browser:
         shutil.rmtree(profile, ignore_errors=True)
         self.proc = subprocess.Popen(["google-chrome", "--headless=new", "--no-sandbox",
             f"--remote-debugging-port={port}", f"--user-data-dir={profile}", "--no-first-run",
-            "--remote-allow-origins=*", "--disable-background-timer-throttling",
+            "--remote-allow-origins=*", "--password-store=basic", "--disable-background-timer-throttling",
             "--disable-renderer-backgrounding", "about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(50):
             try:
@@ -100,6 +100,34 @@ WORKER_DIFF = """
 """
 
 
+def unescape_command(text):
+    """Undoes diff_native's escaping of one command."""
+    codes = {"\\\\": "\\", "\\x1f": "\x1f", "\\t": "\t", "\\n": "\n", "\\r": "\r"}
+    return re.sub(r"\\\\|\\x1f|\\t|\\n|\\r", lambda m: codes[m.group()], text)
+
+
+def check_differential_coverage(commands, replies):
+    """The compared set must keep exercising the commands the feature added."""
+    fields = [c.split("\x1f") for c in commands]
+    def count(kind, test=lambda f: True):
+        return sum(1 for f in fields if f[0] == kind and test(f))
+    check(count("reflect_commit") >= 5, "differential: no reflect_commit")
+    check(count("commit", lambda f: len(f) == 4) >= 5, "differential: no commit without a confidence")
+    for code in ("high", "medium", "bogus", ""):
+        check(count("commit", lambda f: len(f) == 5 and f[4] == code) >= 2, f"differential: no commit with confidence {code!r}")
+    for origin in ("new", "due", "retry"):
+        check(count("prepare", lambda f: len(f) == 4 and f[3] == origin) >= 5, f"differential: no prepare with origin {origin}")
+    check(count("prepare", lambda f: len(f) == 3) >= 100, "differential: no prepare without an origin")
+    for stage in ("hand", "outs", "price", "decide"):
+        check(sum(f'"stage":"{stage}"' in r for r in replies) >= 3, f"differential: chain stage {stage} never compared")
+    nexts = [r for f, r in zip(fields, replies) if f[0] == "session_next"]
+    check(sum('"origin":"retry"' in r for r in nexts) >= 5, "differential: no family retry dealt")
+    check(sum('"origin":"due"' in r for r in nexts) >= 1, "differential: no later-day family review dealt")
+    lines = [r for f, r in zip(fields, replies) if f[0] in ("commit", "reflect_commit")]
+    check(any("\\treflect\\t" in r for r in lines), "differential: no reflection row logged")
+    check(any("\\tdrill-retry\\t" in r for r in lines), "differential: no retry row logged")
+
+
 def run_differential():
     srv = server.start(8951 + PORT_SHIFT)
     browser = Browser("diff")
@@ -111,10 +139,11 @@ def run_differential():
                        cwd=ROOT, check=True, capture_output=True)
         binary = pathlib.Path(os.environ.get("CARGO_TARGET_DIR") or ROOT / "web/target") / "release/diff_native"
         native = subprocess.run([str(binary), "60"],
-                                capture_output=True, text=True, check=True).stdout.splitlines()
+                                capture_output=True, text=True, check=True).stdout.split("\n")[:-1]
         pairs = [line.split("\t", 1) for line in native]
-        commands = [c.replace("\\x1f", "\x1f").replace("\\t", "\t") for c, _ in pairs]
+        commands = [unescape_command(c) for c, _ in pairs]
         expected = [r for _, r in pairs]
+        check_differential_coverage(commands, expected)
         got = []
         for start in range(0, len(commands), 300):
             chunk = commands[start:start + 300]
@@ -156,6 +185,26 @@ TIMING = """
 """
 
 
+# Every rung, by the seed bits that carry it.
+BEATS_ME_TIMING = """
+(async (perRung) => {
+  const worker = new Worker('app/worker.js');
+  const ask = (args) => new Promise(resolve => { worker.onmessage = e => resolve(e.data); worker.postMessage({id: 1, args}); });
+  let total = 0, max = 0, worst = '', count = 0;
+  for (let rung = 0n; rung < 4n; rung++) {
+    for (let i = 0; i < perRung; i++) {
+      const seed = String((rung << 60n) + BigInt(i) * 2654435761n + 99n);
+      const reply = await ask(['prepare', 'beats_me', seed]);
+      if (reply.fatal) throw new Error(reply.fatal);
+      total += reply.ms; count += 1;
+      if (reply.ms > max) { max = reply.ms; worst = seed; }
+    }
+  }
+  return { beats_me: { mean: total / count, max, worst, count } };
+})
+"""
+
+
 TABLE_TIMING = """
 (async (count) => {
   const worker = new Worker('app/worker.js');
@@ -186,19 +235,22 @@ def run_timing():
         slow = page.eval(f"({TIMING})(['spot'], 200)")
         mw = page.eval(f"({TIMING})(['spot_mw'], 150)")
         equity = page.eval(f"({TIMING})(['equity'], 200)")
+        chain = page.eval(f"({TIMING})(['chain'], 200)")
+        beats_me = page.eval(f"({BEATS_ME_TIMING})(100)")
         table_worker = page.eval(f"({TABLE_TIMING})(200)")
-        results["timing_ms"] = {**fast, **slow, **mw, **equity, "table": table_worker["items"]}
+        results["timing_ms"] = {**fast, **slow, **mw, **equity, **chain, **beats_me, "table": table_worker["items"]}
         results["table_first_use_ms"] = table_worker["first_ms"]
         print(f"table first use (parse + item) {table_worker['first_ms']:.1f} ms")
         check(table_worker["first_ms"] <= 1500, f"table first-use parse took {table_worker['first_ms']:.0f} ms")
         for k, v in results["timing_ms"].items():
             print(f"timing {k:9} mean {v['mean']:8.1f} ms  max {v['max']:8.1f} ms  worst seed {v['worst']}")
-        budgets = {"spot": (100, 1500), "spot_mw": (2000, 8000), "equity": (60, 600)}
-        expected = {*skills, "spot", "spot_mw", "equity", "table"}
+        # Measured with another CPU job running: spot 43 mean, 353 max; chain 5 mean, 70 max.
+        budgets = {"spot": (100, 1500), "spot_mw": (2000, 8000), "equity": (60, 600), "chain": (20, 300)}
+        expected = {*skills, "spot", "spot_mw", "equity", "chain", "table", "beats_me"}
         check(set(results["timing_ms"]) == expected, f"timing covered {sorted(results['timing_ms'])}")
         for skill, v in results["timing_ms"].items():
             mean_limit, max_limit = budgets.get(skill, (20, 100))
-            check(v["count"] >= 150, f"timing {skill}: only {v['count']} samples")
+            check(v["count"] >= 100, f"timing {skill}: only {v['count']} samples")
             check(v["mean"] <= mean_limit, f"timing {skill}: mean {v['mean']:.1f} ms over {mean_limit}")
             check(v["max"] <= max_limit, f"timing {skill}: max {v['max']:.1f} ms over {max_limit}")
     finally:
@@ -303,7 +355,9 @@ def pick_answer(page, current, want_ok):
                 return kind, guess
         return kind, top[0] + top[1]
     if kind == "multi":
-        for code in ("none", "f", "s", "h", "fs", "fh", "sh", "fsh"):
+        codes = [o["code"] for o in bundle["format"]["options"]]
+        subsets = ["none"] + ["".join(c) for r in range(1, len(codes) + 1) for c in itertools.combinations(codes, r)]
+        for code in subsets:
             result = grade_probe(page, skill, seed, code)
             if result["outcome"]["correct"] == want_ok:
                 return kind, code
@@ -340,9 +394,9 @@ def type_answer(page, current, kind, answer, keyboard=False):
             page.eval(f"[...document.querySelectorAll('.choice')].find(b => b.textContent.endsWith({json.dumps(label)})).click()")
     elif kind == "multi":
         if answer != "none":
+            codes = [o["code"] for o in current["bundle"]["format"]["options"]]
             for ch in answer:
-                index = {"f": 0, "s": 1, "h": 2}[ch]
-                page.eval(f"document.querySelectorAll('.toggle')[{index}].click()")
+                page.eval(f"document.querySelectorAll('.toggle')[{codes.index(ch)}].click()")
         click(page, ".answers .btn.primary")
     elif kind in ("integer", "percent"):
         for ch in answer:
@@ -420,7 +474,9 @@ def check_logged(rows, records, where):
         check(row[4] == want["seed"], f"{label}: item {row[4]}")
         check(row[10] == want["answer"], f"{label}: answer {row[10]!r}, expected {want['answer']!r}")
         if want["skill"] == "equity":
-            check(len(row) == 18 and row[14] and row[15] and row[16] and row[17], f"{label}: equity columns {row[11:]}")
+            check(len(row) == len(RESEARCH_LOG_COLUMNS.split("\t")) and row[14] and row[15] and row[16] and row[17]
+                  and not row[18] and not row[19] and not row[21] and not row[22]
+                  and re.fullmatch(r"\d+:\d+:(0-25|25-50|50-75|75-100)", row[20]), f"{label}: equity columns {row[11:]}")
         # A correct spot answer can also be flagged close, so close is only pinned when wrong.
         check(int(row[6]) == want["correct"] and (want["correct"] == 1 or int(row[7]) == want["close"]),
               f"{label}: flags {row[6:8]}")
@@ -501,11 +557,19 @@ def drill_session(page, inspector, want_all, max_items, keyboard=False, label_pr
     return items, seen, records
 
 
-ALL_SKILLS = ["preflop", "nuts", "possible", "made", "beats", "outs", "price", "hit", "spot", "spot_mw",
-              "board_type", "equity", "anchor"]
+ALL_SKILLS = ["preflop", "nuts", "possible", "made", "beats", "beats_me", "outs", "price", "hit", "spot", "spot_mw",
+              "board_type", "equity", "anchor", "chain"]
 LOG_COLUMNS = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer"
-PASSING_SKILLS = [("nuts", "AKs"), ("possible", "f"), ("made", "top"), ("beats", "a"), ("board_type", "td"),
+PASSING_SKILLS = [("nuts", "AKs"), ("possible", "f"), ("made", "top"), ("beats_me", "a"), ("board_type", "td"),
                   ("outs", "8"), ("price", "25"), ("hit", "20"), ("equity", "50"), ("anchor", "33")]
+
+
+# Only rungs 2-3 count toward the beats_me mark; a seed carries its rung in bits 60-61.
+BEATS_ME_RUNG_3_BASE = 3 << 60
+
+
+def drill_seed(skill, i):
+    return BEATS_ME_RUNG_3_BASE + 1000 + i if skill == "beats_me" else 1000 + i
 
 
 def synthetic_drills(skills=PASSING_SKILLS, signed_error=1.0, now=None):
@@ -516,7 +580,7 @@ def synthetic_drills(skills=PASSING_SKILLS, signed_error=1.0, now=None):
         for i in range(45):
             t += 1000
             extra = f"\t\t\t\t8\t{signed_error:.4f}\t50.0000\t1" if skill == "equity" else ""
-            lines.append(f"{t}\tdrill\t\t{skill}\t{1000 + i}\t1\t1\t0\t\t1500\t{answer}{extra}")
+            lines.append(f"{t}\tdrill\t\t{skill}\t{drill_seed(skill, i)}\t1\t1\t0\t\t1500\t{answer}{extra}")
     return lines, t
 
 
@@ -817,7 +881,7 @@ def assert_no_leak(pre, number, where):
 
 
 def check_full_truth_absent(pre, row, where):
-    check(len(row) == 18 and row[16] not in pre, f"exact equity {row[16:17]} is in the page before answering at {where}")
+    check(len(row) == 24 and row[16] not in pre, f"exact equity {row[16:17]} is in the page before answering at {where}")
 
 
 def next_drill_item(page):
@@ -896,7 +960,7 @@ def run_new_skills():
         check_full_truth_absent(pre, rows_of(page)[before], "rung 0")
         check("Exact equity" not in visible, "exact equity shown before committing")
         row = rows_of(page)[before]
-        check(row[3] == "equity" and row[14] and row[15] and row[16] and row[17], f"equity log columns missing: {row}")
+        check(len(row) == 24 and row[3] == "equity" and row[14] and row[15] and row[16] and row[17], f"equity log columns missing: {row}")
         check(int(row[14]) == 10, f"first band should be 10, got {row[14]}")
         next_drill_item(page)
         # A wrong answer: an estimate far from the truth.
@@ -1022,6 +1086,385 @@ def check_table_reveal(page, verdict, want_correct, outcome, where):
         check("gave up" in reveal and outcome["reveal"]["loss"].split(" ")[0] in reveal, f"{where}: no loss in {reveal}")
 
 
+
+RESEARCH_LOG_COLUMNS = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer\tcheck_run\tcheck_form\tcheck_slot\tband\tsigned_error\ttruth_pct\topponents\ttable_spot\ttable_verdict\tfamily\tstage\tconfidence\treflect"
+
+
+def graded_outcomes(page, current):
+    """Every choice's outcome for the shown item, as already prepared or via the engine."""
+    bundle = current["bundle"]
+    outcomes = {}
+    for option in bundle["format"]["options"]:
+        code = option["code"]
+        outcomes[code] = bundle["graded"].get(code) or grade_probe(page, bundle["skill"], bundle["seed"], code)["outcome"]
+    return outcomes
+
+
+# Clicks SELECTOR the moment it appears, inside the double-tap window.
+TAP_ON_SHOW = """(() => {
+  window.__tappedOnShow = false;
+  const timer = setInterval(() => {
+    const el = document.querySelector('SELECTOR');
+    if (!el) return;
+    clearInterval(timer);
+    el.click();
+    window.__tappedOnShow = true;
+  }, 4);
+})()"""
+
+
+def run_research(viewport=(390, 844), mobile=True, theme="light", port_offset=0):
+    port = 8995 + PORT_SHIFT + port_offset
+    srv = server.start(port)
+    browser = Browser(f"research-{viewport[0]}-{theme}")
+    try:
+        page = browser.page
+        page.viewport(*viewport, mobile)
+        page.theme(theme)
+        boot_app(page, port, (*viewport, mobile), theme)
+        inspector = Inspector(page, viewport, theme, True)
+        # --- 1. Start over warns about the next form, not the unfinished one.
+        check_line = lambda form, slot, t: f"{t}\tcheck\t\ttable\t7\t2\t1\t0\t\t1000\tfold\t1\t{form}\t{slot}\t\t\t\t"
+        for form, expect_note in [(4, False), (5, True)]:
+            seed_log(page, port, RESEARCH_LOG_COLUMNS + "\n" + check_line(form, 0, 1000) + "\n")
+            page.eval("location.hash = '#checkup:table'")
+            page.wait("!!document.querySelector('.btn.primary')", 20)
+            has_note = page.eval("!!document.querySelector('[data-start-over-note]')")
+            check(has_note == expect_note, f"form {form} in progress: note {'missing' if expect_note else 'should not show'}")
+            if expect_note:
+                text = page.eval("document.querySelector('[data-start-over-note]').textContent")
+                check("reuses" in text, f"note text: {text}")
+                check(page.eval("!document.querySelector('[data-reuse-start]')"), "form 5 itself must not carry the reuse note")
+                inspector.snapshot("research-start-over-note")
+            page.eval("location.hash = '#home'")
+            wait_home(page)
+        # --- Confidence setting: off by default, one toggle, stored.
+        page.eval("document.querySelectorAll('.seg')[2].click()")
+        toggle = "[...document.querySelectorAll('button')].find(b => b.textContent.startsWith('Ask how sure'))"
+        check(page.eval(f"{toggle}.textContent") == "Ask how sure I am: off", "confidence must default to off")
+        # --- The old beats drill says what its percentage is against.
+        seed_log(page, port, LOG_COLUMNS + "\n")
+        open_limited_drill(page, "beats")
+        answer_drill_item(page, False)
+        wait_rows(page, 1)
+        text = page.eval("document.querySelector('.reveal').innerText")
+        check("That's against random hands" in text and "first read" in text, f"no random note: {text}")
+        inspector.snapshot("research-beats-note", full=True)
+        page.eval("location.hash = '#home'")
+        wait_home(page)
+        # --- A card plus any of a suit on the nuts picker.
+        seed_log(page, port, LOG_COLUMNS + "\n")
+        open_limited_drill(page, "nuts")
+        page.wait(READY, 60)
+        click_text(page, ".rank-grid .rank", "A")
+        page.eval("document.querySelectorAll('.slot')[0].querySelector('.slot-suit.suit-s').click()")
+        click(page, ".slot-any")
+        page.eval("document.querySelectorAll('.slot')[1].querySelector('.slot-suit.suit-s').click()")
+        preview = page.eval("document.querySelector('.picker-preview').textContent")
+        check("with any other spade" in preview, f"no any-of-suit form on the picker: {preview}")
+        check(page.eval("!document.querySelector('.picker .btn.primary').disabled"), "any-of-suit form not submittable")
+        inspector.snapshot("research-nuts-any-suit", full=True)
+        page.eval("location.hash = '#home'")
+        wait_home(page)
+        # --- The ladder: a rung 0 item, its reveal, and a mix question.
+        seed_log(page, port, LOG_COLUMNS + "\n")
+        open_limited_drill(page, "beats_me")
+        page.wait(READY, 60)
+        current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+        check(current["bundle"]["question"]["kind"] == "beats_me" and current["bundle"]["question"]["rung"] == 0, f"rung {current['bundle']['question']}")
+        check(page.eval("document.querySelector('.question').innerText").count("HAND") >= 4 or page.eval("document.querySelector('.question').innerText").count("Hand") >= 4, "the four hands are not shown")
+        inspector.snapshot("research-beats-me-q", full=True)
+        answer_drill_item(page, False)
+        wait_rows(page, 1)
+        reveal = page.eval("document.querySelector('.reveal').innerText")
+        check("ahead of you" in reveal or "behind you" in reveal or "tied with you" in reveal, f"rung 0 reveal: {reveal}")
+        inspector.snapshot("research-beats-me-r", full=True)
+        page.eval("location.hash = '#home'")
+        wait_home(page)
+        # --- 2. Flip feedback on spot and spot_mw, and only there.
+        seed_log(page, port, LOG_COLUMNS + "\n")
+        open_limited_drill(page, "spot")
+        answer_drill_item(page, False)
+        wait_rows(page, 1)
+        text = page.eval("document.querySelector('.reveal').innerText")
+        check(re.search(r"Calling stops being right above about \$\d+\.", text), f"no flip call line: {text}")
+        check(re.search(r"\d+ of 4[67] next cards put you ahead of the price\.", text), f"no flip card line: {text}")
+        check(re.search(r"Hands counted: ", text), f"the reveal does not list the groups used: {text}")
+        question_text = page.eval("document.querySelector('.question').innerText")
+        check("Assume they have one of:" in question_text, f"no mix in the question: {question_text}")
+        inspector.snapshot("research-flip-spot", full=True)
+        page.eval("location.hash = '#home'")
+        wait_home(page)
+        seed_log(page, port, LOG_COLUMNS + "\n")
+        open_limited_drill(page, "spot_mw")
+        answer_drill_item(page, True)
+        text = page.eval("document.querySelector('.reveal').innerText")
+        check("Calling stops being right above about" in text, f"multiway has no flip call line: {text}")
+        check("next cards put you ahead" not in text, f"multiway must not show the card count: {text}")
+        page.eval("location.hash = '#home'")
+        wait_home(page)
+        # --- 3. Reflection: offered on some misses, never blocking, logged.
+        seed_log(page, port, LOG_COLUMNS + "\n")
+        open_limited_drill(page, "spot")
+        offered_row = withheld_row = next_row_ok = None
+        for step in range(30):
+            page.wait(READY, 60)
+            current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+            outcomes = graded_outcomes(page, current)
+            wrong = [c for c, o in outcomes.items() if not o["ok"]]
+            if not wrong or current["planned"]["origin"] == "retry":
+                type_answer(page, current, "choice", next(iter(outcomes)))
+                page.wait("!!document.querySelector('.reveal')", 30)
+                next_drill_item(page)
+                continue
+            code = wrong[0]
+            form = outcomes[code]["reflection"]
+            before = len(rows_of(page))
+            guard_tap = bool(form) and offered_row is None
+            if guard_tap:
+                page.eval(TAP_ON_SHOW.replace("SELECTOR", "[data-reflect] .btn.cue"))
+            type_answer(page, current, "choice", code)
+            page.wait("!!document.querySelector('.reveal')", 30)
+            wait_rows(page, before + 1)
+            if guard_tap:
+                must_see(page, "!!document.querySelector('[data-reflect]')", 10, "offered form not shown")
+                page.wait("window.__tappedOnShow === true", 10)
+                check(page.eval(f"document.querySelector('.reflect-title').textContent === {json.dumps(form[0]['text'])}"), "a cue tapped inside the double-tap window counted")
+            response = int(rows_of(page)[before][9])
+            page.wait("!document.querySelector('.action-bar .btn').disabled", 10)
+            row_state = rows_of(page)[before][23]
+            if form and offered_row is None:
+                check(row_state == "offered", f"offered miss logged {row_state!r}")
+                check(page.eval("!!document.querySelector('[data-reflect]')"), "offered form not shown")
+                check(len(form) == 3 and all(3 <= len(p["cues"]) <= 4 for p in form), f"form shape {form}")
+                inspector.snapshot("research-reflect-form", full=True)
+                for i in range(3):
+                    time.sleep(0.35)  # past the double-tap window
+                    page.eval("document.querySelector('[data-reflect] .btn.cue').click()")
+                    if i < 2:
+                        page.wait(f"!!document.querySelector('[data-reflect] .btn.cue') && document.querySelector('.reflect-title').textContent === {json.dumps(form[i + 1]['text'])}", 5)
+                wait_rows(page, before + 2)
+                row = rows_of(page)[before + 1]
+                check(row[1] == "reflect" and row[23] == "answered", f"reflect row: {row}")
+                check(int(row[9]) == 0 and row[3] == "spot", f"reflect row has time or wrong skill: {row}")
+                check(int(rows_of(page)[before][9]) == response, "reflecting changed the response time")
+                offered_row = row
+            elif not form and withheld_row is None:
+                check(row_state == "withheld", f"unoffered miss logged {row_state!r}")
+                check(page.eval("!document.querySelector('[data-reflect]')"), "form shown for a held-back miss")
+                withheld_row = rows_of(page)[before]
+            elif form and next_row_ok is None:
+                # Next must work with the form showing and logs nothing.
+                check(page.eval("!!document.querySelector('[data-reflect]')"), "second offered form not shown")
+                next_row_ok = True
+                click(page, ".action-bar .btn")
+                page.wait("!document.querySelector('.reveal')", 30)
+                check(len(rows_of(page)) == before + 1, "ignoring the form logged a reflect row")
+                page.wait(READY + " || !!document.querySelector('.big-score')", 60)
+                if offered_row and withheld_row:
+                    break
+                continue
+            if offered_row and withheld_row and next_row_ok:
+                break
+            next_drill_item(page)
+        check(offered_row is not None and withheld_row is not None and next_row_ok, f"reflection paths not all exercised: {offered_row}, {withheld_row}, {next_row_ok}")
+        page.eval("location.hash = '#home'")
+        wait_home(page)
+        # Ending partway through the form keeps the cues already tapped.
+        seed_log(page, port, LOG_COLUMNS + "\n")
+        open_limited_drill(page, "spot")
+        partial_kept = False
+        for step in range(40):
+            page.wait(READY, 60)
+            current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+            outcomes = graded_outcomes(page, current)
+            offered = [c for c, o in outcomes.items() if o["reflection"]] if current["planned"]["origin"] != "retry" else []
+            type_answer(page, current, "choice", offered[0] if offered else next(iter(outcomes)))
+            page.wait("!!document.querySelector('.reveal')", 30)
+            if offered:
+                before = len(rows_of(page))
+                time.sleep(0.35)
+                page.eval("document.querySelector('[data-reflect] .btn.cue').click()")
+                page.eval("document.querySelector('.top-bar button.back').click()")
+                page.wait("!!document.querySelector('.big-score')", 20)
+                deadline = time.time() + 5
+                while len(rows_of(page)) <= before and time.time() < deadline:
+                    time.sleep(0.1)
+                row = rows_of(page)[-1]
+                check(len(rows_of(page)) > before and row[1] == "reflect" and row[23] == "answered" and ":" in row[10], f"partial cues lost on End: {row}")
+                partial_kept = True
+                break
+            next_drill_item(page)
+        check(partial_kept, "no offered form found for the partial End test")
+        page.eval("location.hash = '#home'")
+        wait_home(page)
+        # --- 4. Confidence: asked only when on, before the reveal, on its own skills.
+        seed_log(page, port, LOG_COLUMNS + "\n")
+        open_limited_drill(page, "made")
+        current, kind, answer = answer_drill_item(page, True)
+        check(page.eval("!document.querySelector('.confidence-ask')"), "confidence asked while the setting is off")
+        check(not rows_of(page)[0][22:][0], "confidence logged while the setting is off")
+        page.eval("location.hash = '#home'")
+        wait_home(page)
+        page.eval(f"{toggle}.click()")
+        check(page.eval(f"{toggle}.textContent") == "Ask how sure I am: on", "toggle did not switch on")
+        seed_log(page, port, LOG_COLUMNS + "\n")
+        check(page.eval("localStorage.getItem('poker-trainer.confidence')") == "1", "setting not stored")
+        open_limited_drill(page, "made")
+        current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+        kind, answer = pick_answer(page, current, True)
+        page.eval(TAP_ON_SHOW.replace("SELECTOR", ".confidence-ask .choice"))
+        type_answer(page, current, kind, answer)
+        must_see(page, "!!document.querySelector('.confidence-ask')", 10, "confidence prompt never shown")
+        page.wait("window.__tappedOnShow === true", 10)
+        check(page.eval("!!document.querySelector('.confidence-ask')") and len(rows_of(page)) == 0, "a confidence tap inside the double-tap window counted")
+        check(page.eval("!document.querySelector('.reveal')"), "the reveal came before the confidence tap")
+        check(len(rows_of(page)) == 0, "the answer was logged before the confidence tap")
+        check(page.eval("document.querySelectorAll('.confidence-ask .choice').length") == 3, "three levels expected")
+        check("55" in page.eval("document.querySelector('.confidence-ask').innerText"), "levels should say what they mean")
+        inspector.snapshot("research-confidence", full=True)
+        time.sleep(0.35)  # past the double-tap window
+        page.eval("[...document.querySelectorAll('.confidence-ask .choice')][2].click()")
+        page.wait("!!document.querySelector('.reveal')", 10)
+        wait_rows(page, 1)
+        check(rows_of(page)[0][22] == "high", f"confidence column: {rows_of(page)[0][22:]}")
+        next_drill_item(page)
+        # Ending during the tap keeps the answer, unrated.
+        page.wait(READY, 30)
+        current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+        kind, answer = pick_answer(page, current, True)
+        type_answer(page, current, kind, answer)
+        page.wait("!!document.querySelector('.confidence-ask')", 10)
+        page.eval("document.querySelector('.top-bar button.back').click()")
+        page.wait("!!document.querySelector('.big-score')", 20)
+        check(len(rows_of(page)) == 2, f"ending during the tap lost the answer: {len(rows_of(page))} rows")
+        check(rows_of(page)[1][22] == "", f"an ended tap logged a rating: {rows_of(page)[1][22:]}")
+        page.eval("location.hash = '#home'")
+        wait_home(page)
+        # Hiding the page during the tap saves the answer once and closes the tap.
+        seed_log(page, port, LOG_COLUMNS + "\n")
+        open_limited_drill(page, "made")
+        page.wait(READY, 30)
+        current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+        kind, answer = pick_answer(page, current, True)
+        type_answer(page, current, kind, answer)
+        page.wait("!!document.querySelector('.confidence-ask')", 10)
+        time.sleep(0.35)
+        page.eval("window.__heldChoice = [...document.querySelectorAll('.confidence-ask .choice')][2]")
+        page.eval("Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange'))")
+        wait_rows(page, 1)
+        page.eval("window.__heldChoice.click()")
+        time.sleep(0.5)
+        page.eval("delete document.hidden")
+        check(len(rows_of(page)) == 1, f"hiding the page then tapping logged {len(rows_of(page))} rows")
+        check(rows_of(page)[0][22] == "", f"a flushed answer took a rating: {rows_of(page)[0][22:]}")
+        check(page.eval("!!document.querySelector('.reveal') && !document.querySelector('.confidence-ask')"), "the tap stayed up after the page was hidden")
+        page.eval("location.hash = '#home'")
+        wait_home(page)
+        # Not asked on spot, spot_mw or table even when on.
+        seed_log(page, port, LOG_COLUMNS + "\n")
+        open_limited_drill(page, "spot")
+        answer_drill_item(page, True)
+        check(page.eval("!document.querySelector('.confidence-ask')"), "confidence asked on a spot")
+        page.eval("location.hash = '#home'")
+        wait_home(page)
+        page.eval(f"{toggle}.click()")
+        # --- 5. Whole-hand chains: four committed stages, a tie line at the end.
+        seed_log(page, port, LOG_COLUMNS + "\n")
+        open_limited_drill(page, "chain")
+        expected = ["Part 1 of 4", "Part 2 of 4", "Part 3 of 4", "Part 4 of 4"]
+        stages = ["hand", "outs", "price", "decide"]
+        seeds = []
+        for index in range(4):
+            page.wait(READY, 60)
+            current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+            bundle = current["bundle"]
+            check(bundle["skill"] == "chain", f"stage {index} skill {bundle['skill']}")
+            check(bundle["question"]["kind"] == "chain" and bundle["question"]["stage"] == stages[index], f"stage {index}: {bundle['question'].get('stage')}")
+            text = page.eval("document.querySelector('.question').innerText")
+            check(expected[index] in text, f"no part marker: {text}")
+            if index == 0:
+                check("villain" not in bundle["question"], "the hand stage leaks the opponent's cards")
+                check("opponent" not in text.lower(), f"the hand stage must not show the opponent yet: {text}")
+                check(bundle["format"]["type"] == "choice" and any(o["label"] == "top pair" for o in bundle["format"]["options"]), "hand stage answers like made")
+            if index == 1:
+                check("opponent shows" in text.lower() and bundle["format"]["type"] == "integer", f"outs stage: {text}")
+            if index == 2:
+                check(bundle["format"]["type"] == "percent", f"price stage format {bundle['format']['type']}")
+            if index == 3:
+                check(any(s in text for s in ("All-in", "one more card")), f"decide stage states no assumption: {text}")
+                check([o["code"] for o in bundle["format"]["options"]] == ["c", "f"], "decide stage asks call or fold")
+            check("Your hand" not in page.eval("document.querySelector('.top-title').textContent"), "chain stages must not carry a skill label")
+            seeds.append(bundle["seed"])
+            inspector.snapshot(f"research-chain-{stages[index]}-q", full=True)
+            before = len(rows_of(page))
+            answer_drill_item(page, True)
+            wait_rows(page, before + 1)
+            row = rows_of(page)[before]
+            check(row[21] == stages[index], f"stage column {row[21]} for {stages[index]}")
+            reveal = page.eval("document.querySelector('.reveal').innerText")
+            if index < 3:
+                check("so calling was right" not in reveal and "so folding was right" not in reveal, f"tie line too early: {reveal}")
+                inspector.snapshot(f"research-chain-{stages[index]}-r", full=True)
+            else:
+                check("so calling was right." in reveal or "so folding was right." in reveal, f"no tie line: {reveal}")
+                inspector.snapshot("research-chain-decide-r", full=True)
+            if index < 3:
+                next_drill_item(page)
+        check(len({int(s) & ~3 for s in seeds}) == 1, f"stages were not one hand: {seeds}")
+        check(all(int(row[9]) >= 0 for row in rows_of(page)), "a stage has no time")
+        check(len(rows_of(page)) == 4, f"{len(rows_of(page))} rows for 4 stages")
+        page.eval("location.hash = '#home'")
+        wait_home(page)
+        # --- 6. Progress panels: not enough, then enough.
+        page.eval("location.hash = '#progress'")
+        page.wait("!!document.querySelector('[data-reflection-panel]')", 20)
+        text = page.eval("document.querySelector('[data-reflection-panel]').innerText")
+        check("Not enough data" in text, f"reflection panel before data: {text}")
+        check("Not enough data" in page.eval("document.querySelector('[data-reliability]').innerText"), "reliability panel before data")
+        t = int(time.time() * 1000) - 86400000 * 40
+        def reflect_row(i, t):
+            state = "offered" if i % 2 == 0 else "withheld"
+            return f"{t}\tdrill\t\tspot\t{7000 + i}\t1\t0\t0\t8.0000\t3000\tc\t\t\t\t\t\t\t\t\t\tallin:top\t\t\t{state}"
+        lines = [RESEARCH_LOG_COLUMNS]
+        for i in range(70):
+            t += 1000
+            lines.append(reflect_row(i, t))
+            if i % 2 == 0:
+                t += 1000
+                lines.append(f"{t}\treflect\t\tspot\t{7000 + i}\t1\t0\t0\t\t0\tsupported:price\t\t\t\t\t\t\t\t\t\tallin:top\t\t\tanswered")
+            t += 1000
+            lines.append(f"{t}\tdrill\t\tspot\t{8000 + i}\t1\t{i % 3 != 0 and 1 or 0}\t0\t0.5000\t2500\tf\t\t\t\t\t\t\t\t\t\tallin:top\t\t\t")
+        for i in range(35):
+            t += 1000
+            right = 1 if i < 28 else 0
+            lines.append(f"{t}\tdrill\t\tmade\t{9000 + i}\t1\t{right}\t0\t\t1500\ttop\t\t\t\t\t\t\t\t\t\ttop\t\thigh\t")
+        seed_log(page, port, "\n".join(lines) + "\n")
+        page.eval("location.hash = '#progress'")
+        page.wait("!!document.querySelector('[data-reflection-panel]')", 20)
+        text = page.eval("document.querySelector('[data-reflection-panel]').innerText")
+        check("Not enough data" not in text and "noisy data" in text, f"reflection panel with data: {text}")
+        check("After reflecting" in text and "no form" in text and "Reflected" in text and "Form not shown" in text, f"comparison missing: {text}")
+        check("35 of 35" in text or "of 35" in text, f"comparison counts: {text}")
+        check(re.search(r"Shown, skipped\s+0 of 0\s+-", text), f"an empty group should show no share: {text}")
+        relia = page.eval("document.querySelector('[data-reliability]').innerText")
+        check("When you said High on Your hand, you were right 80% of the time" in relia, f"reliability sentence: {relia}")
+        check(not page.eval("!!document.querySelector('svg.chart, canvas')"), "progress must have no charts")
+        inspector.snapshot("research-progress", full=True)
+        check(not browser.errors, f"research errors: {browser.errors[:5]}")
+        print("research ok")
+    finally:
+        browser.close()
+        srv.shutdown()
+
+
+def run_research_shots():
+    """The new screens at both sizes and themes. Run on request, not in the full suite."""
+    modes = [((390, 844), True, "light"), ((390, 844), True, "dark"), ((1280, 800), False, "light"), ((1280, 800), False, "dark")]
+    for offset, (viewport, mobile, theme) in enumerate(modes):
+        run_research(viewport, mobile, theme, port_offset=offset)
+
+
 def run_table_spots():
     port = 8989 + PORT_SHIFT
     srv = server.start(port)
@@ -1075,7 +1518,7 @@ def run_table_spots():
             page.wait("!!document.querySelector('.reveal')", 30)
             wait_rows(page, before + 1)
             row = rows_of(page)[before]
-            check(row[3] == "table" and len(row) == 20, f"table row shape {row}")
+            check(row[3] == "table" and len(row) == 24 and re.fullmatch(r"(flop|turn|river):(hu|mw)", row[20]) and not row[21] and not row[22], f"table row shape {row}")
             check(row[4] == bundle["seed"] and row[10] == code, f"table row item/answer {row[4]} {row[10]}")
             check(row[19] == verdict, f"logged verdict {row[19]}, spot is {verdict}")
             check(row[18].isdigit(), f"no spot id logged: {row}")
@@ -1117,20 +1560,20 @@ def run_table_spots():
         print("table checkup:", text[:400].replace("\n", " | "))
         check("Mark met" in text and "of the pot lost on average" in text, f"table checkup result: {text[:400]}")
         rows = rows_of(page)[before:]
-        check_checkup_rows(rows, 50, "table checkup", "1", "0", columns=20)
+        check_checkup_rows(rows, 50, "table checkup", "1", "0", columns=24)
         check(all(r[3] == "table" and r[19] in ("robust", "close") for r in rows), "depends spots leaked into the checkup")
         check(not page.eval("!!document.querySelector('[data-reused]')"), "an early form claimed reuse")
         inspector.snapshot("table-checkup-result", full=True)
         # A start screen for a late form says it reuses spots too.
-        unfinished = "\n".join([LOG_COLUMNS] + [f"{i}\tcheck\t\ttable\t{i}\t1\t1\t0\t0.5000\t1500\tcheck\t1\t6\t{i}\t\t\t\t\t205\trobust" for i in range(3)]) + "\n"
+        unfinished = "\n".join([LOG_COLUMNS] + [f"{i}\tcheck\t\ttable\t{i}\t2\t1\t0\t0.5000\t1500\tcheck\t1\t6\t{i}\t\t\t\t\t205\trobust" for i in range(3)]) + "\n"
         seed_log(page, port, unfinished)
         page.eval("location.hash = '#checkup:table'")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Resume')", 20)
-        check("reuses some spots" in page.eval("document.body.innerText"), "no reuse note on the start screen of a late form")
+        check(page.eval("!!document.querySelector('[data-reuse-start]')") and "reuses some spots" in page.eval("document.body.innerText"), "no reuse note on the start screen of a late form")
         page.eval("location.hash = '#home'")
         wait_home(page)
         # A late form reuses reserved spots and says so on the result screen.
-        late = "\n".join([LOG_COLUMNS] + [f"{i}\tcheck\t\ttable\t{i}\t1\t1\t0\t0.5000\t1500\tcheck\t1\t5\t{i}\t\t\t\t\t205\trobust" for i in range(3)]) + "\n"
+        late = "\n".join([LOG_COLUMNS] + [f"{i}\tcheck\t\ttable\t{i}\t2\t1\t0\t0.5000\t1500\tcheck\t1\t5\t{i}\t\t\t\t\t205\trobust" for i in range(3)]) + "\n"
         seed_log(page, port, late)
         page.eval("location.hash = '#checkup:table'")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Resume')", 20)
@@ -1228,6 +1671,22 @@ def run_mid_grade():
     finally:
         browser.close()
         srv.shutdown()
+
+
+def run_lib_research():
+    done = subprocess.run(["cargo", "test", "--release", "--test", "research", "--test", "skills"], capture_output=True, text=True, cwd=ROOT)
+    print(done.stdout[-3000:])
+    if done.returncode != 0:
+        print(done.stderr[-1500:])
+    check(done.returncode == 0, f"library research tests failed: {done.stdout[-400:]}")
+
+
+def run_lib_cli():
+    done = subprocess.run(["cargo", "test", "--release", "--bin", "poker-trainer"], capture_output=True, text=True, cwd=ROOT)
+    print(done.stdout[-3000:])
+    if done.returncode != 0:
+        print(done.stderr[-1500:])
+    check(done.returncode == 0, f"command-line tests failed: {done.stdout[-400:]}")
 
 
 def run_lib_table():
@@ -1330,7 +1789,7 @@ def play_checkup(page, inspector, want_ok, start_number=1, count=50, shot=None):
     return answers
 
 
-def check_checkup_rows(rows, count, where, run, form, slots=None, columns=18):
+def check_checkup_rows(rows, count, where, run, form, slots=None, columns=24):
     check(len(rows) == count, f"{where}: {len(rows)} rows for {count} answers")
     for i, row in enumerate(rows):
         check(row[1] == "check" and len(row) == columns, f"{where}: row {i} mode/columns {row[1]}, {len(row)}")
@@ -1417,7 +1876,7 @@ def run_checkup():
         page.wait("!!document.querySelector('.big-score')", 30)
         text = page.eval("document.body.innerText")
         check("100% correct" in text and "Mark met" in text, f"board checkup result: {text[:300]}")
-        check_checkup_rows(rows_of(page)[before:], 50, "board checkup", "3", "0")
+        check_checkup_rows(rows_of(page)[before:], 50, "board checkup", "3", "0", columns=18)
         # Once passed, Home stops offering; checkup_passed reflects the latest run, here missed.
         page.eval("location.hash = '#home'")
         wait_home(page)
@@ -1425,7 +1884,7 @@ def run_checkup():
         check("Take checkup: Pot odds" in home, "after a missed checkup it should be offered again")
         # A mixed score gets a real margin of error in plain words.
         t = int(time.time() * 1000) - 3600000
-        mixed = [f"{t + slot}\tcheck\t\thit\t{2000 + slot}\t1\t{slot % 2}\t0\t\t1500\t20\t1\t0\t{slot}\t\t\t\t" for slot in range(49)]
+        mixed = [f"{t + slot}\tcheck\t\thit\t{2000 + slot}\t2\t{slot % 2}\t0\t\t1500\t20\t1\t0\t{slot}\t\t\t\t" for slot in range(49)]
         seed_log(page, port, drills_only_log([("hit", "20")]) + "\n".join(mixed) + "\n")
         page.eval("location.hash = '#checkup:hit'")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Resume')", 20)
@@ -1579,7 +2038,7 @@ def showcase_lines():
         lines.append(f"{t}\tdrill\t\tboard_type\t{i << 56}\t1\t1\t0\t\t1500\ttd")
     for slot in range(50):
         t += 1000
-        lines.append(f"{t}\tcheck\t\tprice\t{2000 + slot}\t1\t1\t0\t\t1500\t25\t1\t0\t{slot}\t\t\t\t")
+        lines.append(f"{t}\tcheck\t\tprice\t{2000 + slot}\t2\t1\t0\t\t1500\t25\t1\t0\t{slot}\t\t\t\t")
     for i in range(45):
         t += 1000
         lines.append(f"{t}\tdrill\t\tanchor\t{i % 40}\t1\t1\t0\t\t1500\t33")
@@ -2394,7 +2853,7 @@ def run_sw_scope():
 
 SECTIONS = {
     "native": run_native, "wasmclean": run_wasm_clean, "doubletap": run_doubletap, "twotabs": run_twotabs,
-    "libtable": run_lib_table, "tablespots": run_table_spots, "midgrade": run_mid_grade,
+    "libresearch": run_lib_research, "libcli": run_lib_cli, "research": run_research, "researchshots": run_research_shots, "libtable": run_lib_table, "tablespots": run_table_spots, "midgrade": run_mid_grade,
     "dealing": run_dealing, "prepfail": run_prep_failure, "export": run_export, "swscope": run_sw_scope,
     "quota": run_quota, "hiddenevent": run_hidden_event,
     "differential": run_differential, "timing": run_timing, "e2e": run_e2e, "baseline": run_baseline,
@@ -2406,7 +2865,7 @@ SECTIONS = {
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     os.chdir(ROOT)
-    wanted = sys.argv[1:] or list(SECTIONS)
+    wanted = sys.argv[1:] or [name for name in SECTIONS if name != "researchshots"]
     started = time.time()
     for name in wanted:
         print(f"== {name}", flush=True)

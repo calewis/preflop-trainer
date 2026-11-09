@@ -24,12 +24,13 @@ use poker_trainer::item::{
     equity_seed_with_rung, is_held_out, EquityOpponents, EquityQuestion, Item, Question, Skill, GEN_VERSION, HELD_OUT_BIT,
 };
 use poker_trainer::log::{format_attempt, parse_log, Attempt, AttemptExtra, CheckRef, ItemRef, Mode, LEGACY_LOG_HEADER, LOG_HEADER};
+use poker_trainer::family::family_of;
 use poker_trainer::eval::evaluate;
 use poker_trainer::preflop::CARD;
 use poker_trainer::progress::{pass_mark, skill_stats, STEPS};
 use poker_trainer::rng::Rng;
 use poker_trainer::schedule::{
-    anchor_status, anchors_due, anchors_new, due_items, recent_results, Origin, Session, FIRST_REVIEW_MS,
+    anchor_status, anchors_due, anchors_new, due_families, recent_results, Origin, Session, DAY_MS,
     LEITNER_INTERVAL_DAYS, MAX_NEW_ANCHORS_PER_SESSION,
 };
 
@@ -78,18 +79,22 @@ fn equity_item(hero: &str, board: &str, opponents: EquityOpponents, band: u8) ->
 fn drills_and_reviews_never_serve_a_held_out_seed() {
     let allowed = vec![Skill::Preflop, Skill::Nuts, Skill::Equity, Skill::BoardType, Skill::Anchor];
     // A review log containing a held-out seed from before the bit was reserved.
-    let old = attempt(Skill::Nuts, HELD_OUT_BIT | 7, 0, false, 1000);
-    let plain = attempt(Skill::Nuts, 7, 0, false, 1000);
+    let in_family = |mut a: Attempt| {
+        a.extra.family = family_of(&generate(Skill::Nuts, 7));
+        a
+    };
+    let old = in_family(attempt(Skill::Nuts, HELD_OUT_BIT | 7, 0, false, 1000));
+    let plain = in_family(attempt(Skill::Nuts, 7, 0, false, 1000));
     for seed in 0..40 {
         let log = vec![old.clone(), plain.clone()];
-        let mut session = Session::new(allowed.clone(), &log, FIRST_REVIEW_MS * 3, seed);
+        let mut session = Session::new(allowed.clone(), &log, DAY_MS * 3, seed);
         for i in 0..400 {
             let planned = session.try_next_item().unwrap();
             assert!(!is_held_out(planned.seed), "{planned:?}");
             session.record(planned, i % 4 != 0);
         }
     }
-    assert!(due_items(&[old], FIRST_REVIEW_MS * 3).is_empty());
+    assert!(due_families(&[old], DAY_MS * 3).is_empty());
 }
 
 #[test]
@@ -323,7 +328,7 @@ fn checkups_do_not_touch_drill_stats_miss_rates_or_reviews() {
     let log = checkup_log(Skill::Nuts, 1, 0, 5);
     assert_eq!(skill_stats(Skill::Nuts, &log).total_attempts, 0);
     assert!(recent_results(&log).is_empty());
-    assert!(due_items(&log, DAY * 90).is_empty());
+    assert!(due_families(&log, DAY * 90).is_empty());
     assert_eq!(poker_trainer::progress::next_baseline_run(&log), 1);
     assert!(!poker_trainer::progress::has_baseline(&log));
 }
@@ -624,7 +629,7 @@ fn drill_attempts_log_the_band_and_signed_error() {
     let signed = row.extra.signed_error.unwrap();
     assert!((signed - (30.0 - 100.0 * 15.0 / 44.0)).abs() < 1e-9);
     let line = format_attempt(&row);
-    assert_eq!(line.split('\t').count(), 18);
+    assert_eq!(line.split('\t').count(), 24);
     let (parsed, _) = parse_log(&line);
     assert_eq!(parsed[0].extra.band, Some(7));
 }
@@ -1015,9 +1020,9 @@ fn anchor_passes_at_ninety_percent_within_tolerance_and_is_step_two() {
 }
 
 #[test]
-fn anchor_misses_retry_once_but_are_not_scheduled_by_due_items() {
+fn anchor_misses_retry_once_but_are_not_scheduled_by_due_families() {
     let log = vec![card_row(0, 0, false)];
-    assert!(due_items(&log, DAY * 9).is_empty());
+    assert!(due_families(&log, DAY * 9).is_empty());
     let mut session = Session::new(vec![Skill::Anchor], &[], 0, 5);
     let first = session.try_next_item().unwrap();
     session.record(first, false);
@@ -1250,7 +1255,7 @@ fn a_session_applies_the_board_protocol_and_never_reuses_a_miss() {
 fn board_type_misses_are_never_scheduled_for_review() {
     let category = BoardCategory::ALL[0];
     let log = vec![board_row(category, 1, false, 1000)];
-    assert!(due_items(&log, DAY * 30).is_empty());
+    assert!(due_families(&log, DAY * 30).is_empty());
 }
 
 #[test]
@@ -1267,7 +1272,7 @@ fn existing_generators_are_unchanged_by_the_new_skills() {
     // Skill::Spot's generator seed must not shift because new variants were added.
     assert_eq!(Skill::SpotMw as usize, 9);
     assert_eq!(Skill::BoardType as usize, 10);
-    assert_eq!(baseline::to_text(&baseline::generate_baseline()), baseline::BASELINE_TEXT);
+    assert_eq!(baseline::to_text(&baseline::load().unwrap()), baseline::BASELINE_TEXT);
 }
 
 #[test]

@@ -51,12 +51,12 @@ fn drill_logs_each_answer_and_ignores_invalid_input() {
     let rows = log_rows(&home);
     assert_eq!(rows.len(), 5, "invalid input must not count");
     for row in &rows {
-        assert_eq!(row.len(), 11);
+        assert_eq!(row.len(), 24);
         assert!(row[1] == "drill" || row[1] == "drill-retry");
         assert_eq!(row[2], "");
         assert_eq!(row[3], "price", "--skill deals only the named skill");
         assert!(row[4].parse::<u64>().is_ok());
-        assert_eq!(row[5], "1");
+        assert_eq!(row[5], "2");
         assert!(row[6] == "0" || row[6] == "1");
         assert!(row[9].parse::<u32>().unwrap() <= 60_000);
     }
@@ -109,7 +109,7 @@ fn spot_mw_prompt_states_nobody_can_raise() {
     let out = run(&home, &["drill", "--items", "8", "--seed", "5", "--skill", "spot_mw"], &"c\nr\n".repeat(30));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("Everyone else has acted and nobody can raise."), "{stdout}");
-    assert!(stdout.contains("Assume opponent 1 has"), "{stdout}");
+    assert!(stdout.contains("Opponent 1 is a"), "{stdout}");
     assert!(stdout.contains("averaged over all possible remaining cards and combos"), "{stdout}");
     let _ = fs::remove_dir_all(&home);
 }
@@ -155,7 +155,7 @@ fn a_checkup_gives_no_feedback_until_the_end_and_logs_its_form() {
     assert!(!stdout.contains("Correct.") && !stdout.contains("Not quite."), "no feedback during the test");
     let rows = log_rows(&home);
     assert_eq!(rows.len(), 50);
-    assert!(rows.iter().all(|r| r[1] == "check" && r.len() == 18));
+    assert!(rows.iter().all(|r| r[1] == "check" && r.len() == 24));
     let again = run(&home, &["check", "--skill", "price"], "q\n");
     assert!(String::from_utf8_lossy(&again.stdout).contains("form 1"));
     let progress = run(&home, &["progress"], "");
@@ -188,7 +188,7 @@ fn board_type_and_equity_drills_run_and_log() {
     assert_eq!(rows.iter().filter(|r| r[3] == "board_type").count(), 8);
     let equity: Vec<_> = rows.iter().filter(|r| r[3] == "equity").collect();
     assert_eq!(equity.len(), 3);
-    assert!(equity.iter().all(|r| r.len() == 18 && !r[15].is_empty()));
+    assert!(equity.iter().all(|r| r.len() == 24 && !r[15].is_empty()));
     let _ = fs::remove_dir_all(&home);
 }
 
@@ -213,7 +213,7 @@ fn a_cut_off_last_line_cannot_swallow_the_next_record() {
     let text = fs::read_to_string(home.join("attempts.tsv")).unwrap();
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 2, "{text}");
-    assert_eq!(lines[1].split('\t').count(), 11, "{text}");
+    assert_eq!(lines[1].split('\t').count(), 24, "{text}");
     let _ = fs::remove_dir_all(&home);
 }
 

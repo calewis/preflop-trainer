@@ -1,13 +1,18 @@
 //! Pure scheduling: which skill and item to deal next, and which items are due.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
+use std::rc::Rc;
 
 use crate::anchors;
 use crate::board_type::{category_of_seed, seed_with_category, CategoryDealer, BOARD_TYPE_TARGET_MS};
+use crate::beats_me::beats_me_rung;
 use crate::equity_skill::{equity_band, equity_rung, next_band};
+use crate::family::{family_of, find_sibling};
 use crate::generate::generate;
 use crate::item::{
-    equity_rung_of_seed, equity_seed_with_rung, is_held_out, Item, Question, Skill, GEN_VERSION, HELD_OUT_BIT,
+    beats_me_seed_with_rung, chain_seed_for_stage, equity_rung_of_seed, CHAIN_STAGES, equity_seed_with_rung, is_held_out, ChainStage, Item, Question, Skill,
+    GEN_VERSION, HELD_OUT_BIT,
 };
 use crate::log::{Attempt, ItemRef, Mode};
 use crate::rng::Rng;
@@ -18,8 +23,12 @@ pub const RETRY_MIN_GAP: u64 = 3;
 pub const RETRY_MAX_GAP: u64 = 6;
 /// At most one dealt item in this many may be a same-session retry.
 pub const MAX_RETRY_ONE_IN: u64 = 3;
-pub const FIRST_REVIEW_MS: u64 = 86_400_000;
-pub const SECOND_REVIEW_MS: u64 = 3 * FIRST_REVIEW_MS;
+/// Days to the next review of a (skill, family) after each correct review. Starting guesses.
+pub const FAMILY_LADDER_DAYS: [u64; 5] = [1, 3, 7, 14, 30];
+pub const DAY_MS: u64 = 86_400_000;
+/// Recent attempts in a family when judging how slow it is, and in the skill for its median.
+pub const FAMILY_RESPONSE_WINDOW: usize = 10;
+pub const SKILL_RESPONSE_WINDOW: usize = 40;
 
 const BASE_WEIGHT_PER_MILLE: u64 = 100;
 
@@ -61,16 +70,19 @@ impl SessionLimits {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct DueItem {
+/// A (skill, family) whose review has come due.
+#[derive(Clone, PartialEq, Debug)]
+pub struct DueFamily {
     pub skill: Skill,
-    pub seed: u64,
+    pub family: String,
+    pub due_at_ms: u64,
+    /// This family's median recent response time over its skill's. Higher is slower.
+    pub slowness: f64,
 }
 
 #[derive(Clone, Copy)]
-enum ReviewState {
-    NeverMissed,
-    Waiting { stage: u8, due_at: u64 },
+enum LadderState {
+    Waiting { stage: usize, due_at: u64 },
     Retired,
 }
 
@@ -78,8 +90,6 @@ enum ReviewState {
 pub const LEITNER_INTERVAL_DAYS: [u64; 5] = [1, 3, 7, 14, 30];
 /// New anchor cards one session may introduce. Starting guess.
 pub const MAX_NEW_ANCHORS_PER_SESSION: u32 = 5;
-
-const DAY_MS: u64 = 86_400_000;
 
 /// Where one anchor card stands, for a GUI to show.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -123,44 +133,94 @@ pub fn anchors_new(attempts: &[Attempt]) -> Vec<usize> {
     anchor_status(attempts).iter().filter(|s| s.due_at_ms.is_none()).map(|s| s.card).collect()
 }
 
-/// Items due for review at `now_ms`. Baseline and checkup items, held-out seeds
-/// and items from a different [`GEN_VERSION`] are skipped, as are `anchor` (it
-/// has its own boxes), `board_type` (boards are not reused on purpose) and `table`
-/// (a reviewed spot would repeat inside its no-repeat window).
-/// Attempts must be in time order.
-pub fn due_items(attempts: &[Attempt], now_ms: u64) -> Vec<DueItem> {
-    let mut states: HashMap<DueItem, ReviewState> = HashMap::new();
-    let mut order: Vec<DueItem> = Vec::new();
+/// True for the skills reviewed by family. `anchor`, `board_type` and `table`
+/// keep their own scheduling, and a missed `chain` is simply followed by new hands.
+pub const fn reviewed_by_family(skill: Skill) -> bool {
+    !matches!(skill, Skill::Anchor | Skill::BoardType | Skill::Table | Skill::Chain)
+}
+
+fn median_ms(times: &mut [u32]) -> u32 {
+    times.sort_unstable();
+    match times.len() {
+        0 => 0,
+        len if len % 2 == 1 => times[len / 2],
+        len => (times[len / 2 - 1] + times[len / 2]) / 2,
+    }
+}
+
+/// Families due for review at `now_ms`, slowest (relative to the skill's median)
+/// first, and among equally slow ones the longest overdue first.
+///
+/// Replays the log: a miss starts or resets a family's ladder at 1 day, a correct
+/// first-time answer at or after the due time moves it up, and a correct answer
+/// at the 30-day step retires it. A later miss starts the ladder again, since a
+/// family is a kind of problem, not one board. Baseline and checkup attempts,
+/// held-out seeds, other [`GEN_VERSION`]s and rows with no family (from before
+/// families were logged) don't count. Attempts must be in time order.
+pub fn due_families(attempts: &[Attempt], now_ms: u64) -> Vec<DueFamily> {
+    let mut states: HashMap<(Skill, String), LadderState> = HashMap::new();
+    let mut order: Vec<(Skill, String)> = Vec::new();
     for attempt in attempts {
         let ItemRef::Seed(seed) = attempt.item else { continue };
         if attempt.gen_version != GEN_VERSION
-            || matches!(attempt.mode, Mode::Baseline | Mode::Check)
+            || !matches!(attempt.mode, Mode::Drill | Mode::DrillRetry)
             || is_held_out(seed)
-            || matches!(attempt.skill, Skill::Anchor | Skill::BoardType | Skill::Table)
+            || !reviewed_by_family(attempt.skill)
         {
             continue;
         }
-        let key = DueItem { skill: attempt.skill, seed };
-        let state = states.entry(key).or_insert_with(|| {
-            order.push(key);
-            ReviewState::NeverMissed
-        });
-        *state = match (*state, attempt.ok()) {
-            (ReviewState::Retired, _) => ReviewState::Retired,
-            (_, false) => ReviewState::Waiting { stage: 1, due_at: attempt.timestamp_ms.saturating_add(FIRST_REVIEW_MS) },
-            (ReviewState::Waiting { stage: 1, due_at }, true) if attempt.timestamp_ms >= due_at => {
-                ReviewState::Waiting { stage: 2, due_at: attempt.timestamp_ms.saturating_add(SECOND_REVIEW_MS) }
+        let Some(family) = attempt.extra.family.clone() else { continue };
+        let key = (attempt.skill, family);
+        let at = attempt.timestamp_ms;
+        if !attempt.ok() {
+            if !states.contains_key(&key) {
+                order.push(key.clone());
             }
-            (ReviewState::Waiting { stage: 2, due_at }, true) if attempt.timestamp_ms >= due_at => {
-                ReviewState::Retired
+            states.insert(key, LadderState::Waiting { stage: 0, due_at: at.saturating_add(DAY_MS) });
+            continue;
+        }
+        if attempt.mode != Mode::Drill {
+            continue;
+        }
+        if let Some(LadderState::Waiting { stage, due_at }) = states.get(&key).copied() {
+            if at >= due_at {
+                states.insert(key, match stage + 1 {
+                    next if next < FAMILY_LADDER_DAYS.len() => {
+                        LadderState::Waiting { stage: next, due_at: at.saturating_add(FAMILY_LADDER_DAYS[next] * DAY_MS) }
+                    }
+                    _ => LadderState::Retired,
+                });
             }
-            (state, true) => state,
-        };
+        }
     }
-    order
+    let mut due: Vec<DueFamily> = order
         .into_iter()
-        .filter(|key| matches!(states[key], ReviewState::Waiting { due_at, .. } if now_ms >= due_at))
-        .collect()
+        .filter_map(|key| match states[&key] {
+            LadderState::Waiting { due_at, .. } if now_ms >= due_at => {
+                let slowness = slowness(attempts, key.0, &key.1);
+                Some(DueFamily { skill: key.0, family: key.1, due_at_ms: due_at, slowness })
+            }
+            _ => None,
+        })
+        .collect();
+    due.sort_by(|a, b| b.slowness.total_cmp(&a.slowness).then(a.due_at_ms.cmp(&b.due_at_ms)));
+    due
+}
+
+/// A family's median recent response time divided by its skill's median.
+fn slowness(attempts: &[Attempt], skill: Skill, family: &str) -> f64 {
+    let rows = || attempts.iter().rev().filter(|a| a.skill == skill && matches!(a.mode, Mode::Drill | Mode::DrillRetry));
+    let mut family_times: Vec<u32> = rows()
+        .filter(|a| a.extra.family.as_deref() == Some(family))
+        .take(FAMILY_RESPONSE_WINDOW)
+        .map(|a| a.response_ms)
+        .collect();
+    let mut skill_times: Vec<u32> = rows().take(SKILL_RESPONSE_WINDOW).map(|a| a.response_ms).collect();
+    let skill_median = median_ms(&mut skill_times);
+    if skill_median == 0 {
+        return 1.0;
+    }
+    f64::from(median_ms(&mut family_times)) / f64::from(skill_median)
 }
 
 /// Each skill's last [`MISS_WINDOW`] results. Only `drill` attempts count: the
@@ -191,13 +251,33 @@ pub struct Planned {
     pub origin: Origin,
 }
 
+#[derive(Clone)]
 struct Requeued {
     skill: Skill,
+    /// The missed item's seed, and its family when one should be found again.
     seed: u64,
+    family: Option<String>,
     remaining: u64,
 }
 
-/// One drill session's dealing state.
+/// A finished sibling search, shared between a session and copies of it, so
+/// looking ahead doesn't redo the search.
+#[derive(Clone, Copy)]
+struct SiblingSearch {
+    result: Option<u64>,
+}
+
+type SiblingMemo = Rc<RefCell<HashMap<(Skill, String, u64), SiblingSearch>>>;
+
+/// `beats` stays in drills at this share of a skill's normal weight, per mille.
+pub const BEATS_WEIGHT_PER_MILLE: u64 = 500;
+
+/// In the default drill, `preflop` is at least this share of the items dealt.
+pub const MIN_PREFLOP_PERCENT: u64 = 25;
+
+/// One drill session's dealing state. Cloning is cheap: a copy can look ahead
+/// without changing the real session.
+#[derive(Clone)]
 pub struct Session {
     rng: Rng,
     allowed: Vec<Skill>,
@@ -205,7 +285,16 @@ pub struct Session {
     dealt: Vec<Skill>,
     requeue: Vec<Requeued>,
     retries_dealt: u64,
-    due: Vec<DueItem>,
+    due: Vec<DueFamily>,
+    sibling_memo: SiblingMemo,
+    /// `chain`: the hand being played and the stage to deal next, if any.
+    chain: Option<(u64, ChainStage)>,
+    /// True for the default drill: `preflop` keeps its minimum share.
+    preflop_floor: bool,
+    /// False on a look-ahead copy, so a guess at the next item can't start a slow search.
+    searches_siblings: bool,
+    /// `beats_me`: the rung new items are dealt at.
+    beats_me_rung: u8,
     /// `equity`: the rung new items are dealt at, and each rung's current band.
     equity_rung: u8,
     equity_bands: [u8; 2],
@@ -235,7 +324,7 @@ impl Session {
     pub fn new(allowed: Vec<Skill>, attempts: &[Attempt], now_ms: u64, seed: u64) -> Session {
         assert!(!allowed.is_empty(), "a session needs at least one skill");
         let recent = recent_results(attempts);
-        let due = due_items(attempts, now_ms)
+        let due = due_families(attempts, now_ms)
             .into_iter()
             .filter(|d| allowed.contains(&d.skill))
             .collect();
@@ -247,6 +336,11 @@ impl Session {
             requeue: Vec::new(),
             retries_dealt: 0,
             due,
+            sibling_memo: Rc::new(RefCell::new(HashMap::new())),
+            chain: None,
+            preflop_floor: false,
+            searches_siblings: true,
+            beats_me_rung: beats_me_rung(attempts),
             equity_rung: equity_rung(attempts),
             equity_bands: [equity_band(attempts, 0), equity_band(attempts, 1)],
             anchors_due: anchors_due(attempts, now_ms).into(),
@@ -255,6 +349,37 @@ impl Session {
             board_dealer: CategoryDealer::new(attempts),
             table_recent: table_recent_from(attempts),
         }
+    }
+
+    /// A look-ahead copy: it uses sibling searches already done and starts none.
+    pub fn without_sibling_search(mut self) -> Session {
+        self.searches_siblings = false;
+        self
+    }
+
+    /// The default drill: `preflop` keeps at least [`MIN_PREFLOP_PERCENT`] of the deal.
+    pub fn with_preflop_floor(mut self) -> Session {
+        self.preflop_floor = true;
+        self
+    }
+
+    /// True when dealing anything but `preflop` next would drop it below its share.
+    fn preflop_owed(&self, blocked: Option<Skill>) -> bool {
+        let dealt = self.dealt.iter().filter(|s| **s == Skill::Preflop).count() as u64;
+        self.preflop_floor
+            && self.allowed.contains(&Skill::Preflop)
+            && blocked != Some(Skill::Preflop)
+            && dealt * 100 < (self.dealt.len() as u64 + 1) * MIN_PREFLOP_PERCENT
+    }
+
+    /// False if starting a chain now would leave `preflop` under its share after
+    /// the chain's last stage.
+    fn chain_fits_preflop_floor(&self) -> bool {
+        if !self.preflop_floor || !self.allowed.contains(&Skill::Preflop) {
+            return true;
+        }
+        let preflop = self.dealt.iter().filter(|s| **s == Skill::Preflop).count() as u64;
+        preflop * 100 >= (self.dealt.len() as u64 + CHAIN_STAGES) * MIN_PREFLOP_PERCENT
     }
 
     /// The fully specified item for a plan from this session: an `equity` item
@@ -286,20 +411,31 @@ impl Session {
         }
     }
 
+    /// True while the current `chain` hand still has stages to deal.
+    pub fn chain_in_progress(&self) -> bool {
+        self.chain.is_some()
+    }
+
     /// The next item, or `None` when no allowed skill can be dealt and no
     /// same-session retry is waiting. Only `anchor` can run out.
     pub fn try_next_item(&mut self) -> Option<Planned> {
+        // A chain's stages come straight after each other, ahead of anything else.
+        if let Some((hand, stage)) = self.chain {
+            self.chain = ChainStage::from_index(stage.index() + 1).map(|next| (hand, next));
+            return Some(self.deal(Skill::Chain, chain_seed_for_stage(hand, stage), Origin::New));
+        }
         let blocked = self.blocked();
+        let preflop_owed = self.preflop_owed(blocked);
         // Dealing a retry now must keep retries at or under 1 in MAX_RETRY_ONE_IN.
         let retry_allowed =
             (self.retries_dealt + 1) * MAX_RETRY_ONE_IN <= self.dealt.len() as u64 + 1;
         let ready = self
             .requeue
             .iter()
-            .position(|r| retry_allowed && r.remaining == 0 && Some(r.skill) != blocked);
+            .position(|r| !preflop_owed && retry_allowed && r.remaining == 0 && Some(r.skill) != blocked);
         if let Some(index) = ready {
             let retry = self.requeue.remove(index);
-            return Some(self.deal(retry.skill, retry.seed, Origin::SessionRetry));
+            return Some(self.deal_retry(retry));
         }
         let eligible: Vec<Skill> = self.allowed.iter().copied().filter(|&s| self.can_deal(s)).collect();
         if eligible.is_empty() {
@@ -307,16 +443,59 @@ impl Session {
             // nothing else to deal the waiting retries are served now.
             let index = (0..self.requeue.len()).min_by_key(|&i| self.requeue[i].remaining)?;
             let retry = self.requeue.remove(index);
-            return Some(self.deal(retry.skill, retry.seed, Origin::SessionRetry));
+            return Some(self.deal_retry(retry));
         }
         // The no-three-in-a-row rule can't apply with one dealable skill.
         let blocked = blocked.filter(|_| eligible.len() >= 2);
-        let skill = self.choose_skill(&eligible, blocked);
+        let mut skill = if preflop_owed { Skill::Preflop } else { self.choose_skill(&eligible, blocked) };
+        // A chain's stages come in a row, so it only starts if the floor survives them all.
+        if skill == Skill::Chain && !self.chain_fits_preflop_floor() {
+            if blocked == Some(Skill::Preflop) {
+                let others: Vec<Skill> = eligible.iter().copied().filter(|&s| s != Skill::Chain).collect();
+                skill = self.choose_skill(&others, blocked);
+            } else {
+                skill = Skill::Preflop;
+            }
+        }
         if let Some(index) = self.due.iter().position(|d| d.skill == skill) {
-            let item = self.due.remove(index);
-            return Some(self.deal(item.skill, item.seed, Origin::Due));
+            let due = self.due.remove(index);
+            let base = self.rng.next_u64();
+            return Some(match self.sibling(skill, &due.family, base, HELD_OUT_BIT) {
+                Some(seed) => self.deal(skill, seed, Origin::Due),
+                // None found: this family waits for another session, and a plain item goes out now.
+                None => self.deal_fresh(skill),
+            });
         }
         Some(self.deal_fresh(skill))
+    }
+
+    /// A previously searched sibling, or a new search. `avoid` is the missed
+    /// item's own seed, or an impossible seed for a later-day review.
+    fn sibling(&self, skill: Skill, family: &str, base: u64, avoid: u64) -> Option<u64> {
+        let key = (skill, family.to_string(), base);
+        let found = self.sibling_memo.borrow().get(&key).copied();
+        if let Some(search) = found {
+            return search.result;
+        }
+        if !self.searches_siblings {
+            return None;
+        }
+        let result = find_sibling(skill, family, base, avoid);
+        self.sibling_memo.borrow_mut().insert(key, SiblingSearch { result });
+        result
+    }
+
+    /// A same-session retry: a fresh sibling, the same item when it has no
+    /// family (`anchor`), or a plain new item if no sibling turned up.
+    fn deal_retry(&mut self, retry: Requeued) -> Planned {
+        let seed = match retry.family.as_deref() {
+            Some(family) => self.sibling(retry.skill, family, retry.seed, retry.seed),
+            None => Some(retry.seed),
+        };
+        match seed {
+            Some(seed) => self.deal(retry.skill, seed, Origin::SessionRetry),
+            None => self.deal_fresh(retry.skill),
+        }
     }
 
     /// A new item for `skill`, or an `anchor` card from its boxes. Seeds keep
@@ -339,8 +518,13 @@ impl Session {
             return self.deal(skill, seed, Origin::New);
         }
         let mut seed = self.rng.next_u64() & !HELD_OUT_BIT;
+        if skill == Skill::Chain {
+            self.chain = ChainStage::from_index(1).map(|next| (seed, next));
+            seed = chain_seed_for_stage(seed, ChainStage::Hand);
+        }
         match skill {
             Skill::Equity => seed = equity_seed_with_rung(seed, self.equity_rung),
+            Skill::BeatsMe => seed = beats_me_seed_with_rung(seed, self.beats_me_rung),
             Skill::BoardType => seed = seed_with_category(seed, self.board_dealer.deal(&mut self.rng)),
             _ => {}
         }
@@ -364,7 +548,8 @@ impl Session {
                     .recent
                     .get(&s)
                     .map_or_else(Vec::new, |w| w.iter().copied().collect());
-                (s, skill_weight(&recent))
+                let weight = skill_weight(&recent);
+                (s, if s == Skill::Beats { weight * BEATS_WEIGHT_PER_MILLE / 1000 } else { weight })
             })
             .collect();
         let total: u64 = choices.iter().map(|&(_, w)| w).sum();
@@ -385,9 +570,21 @@ impl Session {
         self.record_timed(planned, ok, u32::MAX);
     }
 
-    /// [`Session::record`] with the response time, which `board_type` needs to
-    /// tell a retiring answer from a merely correct one.
+    /// [`Session::record_with_family`] for callers that haven't kept the family;
+    /// a miss regenerates the item to find it.
     pub fn record_timed(&mut self, planned: Planned, ok: bool, response_ms: u32) {
+        let family = if !ok && retries_with_sibling(planned.skill) && planned.origin != Origin::SessionRetry {
+            family_of(&generate(planned.skill, planned.seed))
+        } else {
+            None
+        };
+        self.record_with_family(planned, ok, response_ms, family);
+    }
+
+    /// [`Session::record`] with the response time, which `board_type` needs to
+    /// tell a retiring answer from a merely correct one, and the item's family
+    /// from the attempt log. A miss with no family is retried as the same item.
+    pub fn record_with_family(&mut self, planned: Planned, ok: bool, response_ms: u32, family: Option<String>) {
         for retry in &mut self.requeue {
             retry.remaining = retry.remaining.saturating_sub(1);
         }
@@ -411,10 +608,16 @@ impl Session {
             window.pop_front();
         }
         // Boards are not reused on purpose, so a missed one does not come back;
-        // a table spot would repeat inside its no-repeat window.
-        if !ok && !matches!(planned.skill, Skill::BoardType | Skill::Table) {
+        // a table spot would repeat inside its no-repeat window, and a missed
+        // chain stage is followed by the rest of its own hand.
+        if !ok && !matches!(planned.skill, Skill::BoardType | Skill::Table | Skill::Chain) {
             let remaining = self.rng.range(RETRY_MIN_GAP, RETRY_MAX_GAP);
-            self.requeue.push(Requeued { skill: planned.skill, seed: planned.seed, remaining });
+            self.requeue.push(Requeued { skill: planned.skill, seed: planned.seed, family, remaining });
         }
     }
+}
+
+/// True for the skills whose retries deal a fresh sibling rather than the same item.
+fn retries_with_sibling(skill: Skill) -> bool {
+    reviewed_by_family(skill)
 }

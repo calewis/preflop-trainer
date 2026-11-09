@@ -8,13 +8,13 @@ use poker_trainer::checkup::{
 };
 use poker_trainer::generate::generate;
 use poker_trainer::grade::{ev_band, grade, EvBand, Outcome, Reveal};
-use poker_trainer::item::{is_held_out, Item, Question, Skill, HELD_OUT_BIT};
+use poker_trainer::item::{is_held_out, Item, Question, Skill, GEN_VERSION, HELD_OUT_BIT};
 use poker_trainer::log::{
     format_attempt, parse_log, Attempt, AttemptExtra, CheckRef, ItemRef, Mode, CHECKUP_LOG_HEADER, LOG_HEADER,
 };
 use poker_trainer::progress::{baseline_runs, pass_mark, skill_stats, step_passed, all_stats, STEPS};
 use poker_trainer::rng::Rng;
-use poker_trainer::schedule::{due_items, Origin, Planned, Session, FIRST_REVIEW_MS};
+use poker_trainer::schedule::{due_families, Origin, Planned, Session, DAY_MS};
 use poker_trainer::table::{
     self, bb_text, checkup_form_reuses_spots, drill_pool, is_reserved_for_checkups, parse_library, seed_with_index,
     spot_by_id, spot_of_seed, spots, suit_perm_for_seed, TableActionKind, TableGrade, TableQuestion, TableSeat,
@@ -667,8 +667,10 @@ fn table_spots_get_no_same_session_retry_and_no_later_review() {
         assert_eq!(planned.origin, Origin::New, "a missed spot must not repeat inside the window");
         session.record(planned, false);
     }
-    let miss = Attempt { correct: false, ..table_attempt(0, 1000, 20.0, Verdict::Robust) };
-    assert!(due_items(&[miss], FIRST_REVIEW_MS * 5).is_empty());
+    let mut miss = Attempt { correct: false, ..table_attempt(0, 1000, 20.0, Verdict::Robust) };
+    miss.gen_version = GEN_VERSION;
+    miss.extra.family = Some("flop:hu".to_string());
+    assert!(due_families(&[miss], DAY_MS * 5).is_empty());
 }
 
 #[test]
@@ -798,7 +800,8 @@ fn table_counts_as_step_four_and_does_not_disturb_the_baseline_steps() {
     assert_eq!(STEPS.len(), 4);
     assert_eq!(STEPS[3], &[Skill::Table]);
     assert_eq!(Skill::Table as u64, 13, "added last so existing seeds don't shift");
-    assert_eq!(Skill::ALL.last(), Some(&Skill::Table));
+    assert_eq!(Skill::ALL.last(), Some(&Skill::BeatsMe), "new skills go last");
+    assert_eq!(Skill::Chain as u64, 14);
     assert!(!step_passed(4, &all_stats(&forty(0.5))));
     let log = vec![baseline_row(1, "b01", Skill::Nuts), baseline_row(1, "b02", Skill::Price), baseline_row(1, "b03", Skill::Spot)];
     let runs = baseline_runs(&log, poker_trainer::baseline::BASELINE_SIZE);

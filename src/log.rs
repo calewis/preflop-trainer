@@ -2,7 +2,8 @@
 
 use crate::baseline::BaselineItem;
 use crate::grade::{Outcome, Reveal};
-use crate::item::{Skill, GEN_VERSION};
+use crate::item::{ChainStage, Skill, GEN_VERSION};
+use crate::reflection::ReflectState;
 use crate::schedule::{Origin, Planned};
 use crate::table::Verdict;
 
@@ -10,16 +11,20 @@ use crate::table::Verdict;
 pub const MAX_RESPONSE_MS: u32 = 60_000;
 
 /// First line of a new log file. Parsers skip it.
-pub const LOG_HEADER: &str = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer\tcheck_run\tcheck_form\tcheck_slot\tband\tsigned_error\ttruth_pct\topponents\ttable_spot\ttable_verdict";
+pub const LOG_HEADER: &str = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer\tcheck_run\tcheck_form\tcheck_slot\tband\tsigned_error\ttruth_pct\topponents\ttable_spot\ttable_verdict\tfamily\tstage\tconfidence\treflect";
+/// The header of logs written before the family, stage and reflection columns existed.
+pub const TABLE_LOG_HEADER: &str = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer\tcheck_run\tcheck_form\tcheck_slot\tband\tsigned_error\ttruth_pct\topponents\ttable_spot\ttable_verdict";
 /// The header of logs written before the table columns existed.
 pub const CHECKUP_LOG_HEADER: &str = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer\tcheck_run\tcheck_form\tcheck_slot\tband\tsigned_error\ttruth_pct\topponents";
 /// The header of logs written before the extra columns existed.
 pub const LEGACY_LOG_HEADER: &str = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer";
 
-/// Columns in a line with no extras, in one with the original extras, and in a table row.
+/// Columns in a line with no extras, in one with the original extras, in a table
+/// row, and in a row with the family, stage, confidence and reflection columns.
 const BASE_COLUMNS: usize = 11;
 const FULL_COLUMNS: usize = 18;
 const TABLE_COLUMNS: usize = 20;
+const NOTES_COLUMNS: usize = 24;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Mode {
@@ -29,6 +34,9 @@ pub enum Mode {
     DrillRetry,
     /// A held-out checkup item. Never counted as drill practice.
     Check,
+    /// Not an attempt: the player's answers to a reflection form. Everything that
+    /// counts attempts filters by the modes above, so these rows are invisible to it.
+    Reflect,
 }
 
 impl Mode {
@@ -38,6 +46,7 @@ impl Mode {
             Mode::Drill => "drill",
             Mode::DrillRetry => "drill-retry",
             Mode::Check => "check",
+            Mode::Reflect => "reflect",
         }
     }
 
@@ -47,6 +56,7 @@ impl Mode {
             "drill" => Some(Mode::Drill),
             "drill-retry" => Some(Mode::DrillRetry),
             "check" => Some(Mode::Check),
+            "reflect" => Some(Mode::Reflect),
             _ => None,
         }
     }
@@ -66,8 +76,48 @@ pub struct CheckRef {
     pub slot: u32,
 }
 
+/// How sure the player said they were, on the skills that ask.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Confidence {
+    Low,
+    Medium,
+    High,
+}
+
+impl Confidence {
+    pub const ALL: [Confidence; 3] = [Confidence::Low, Confidence::Medium, Confidence::High];
+
+    pub fn code(self) -> &'static str {
+        match self {
+            Confidence::Low => "low",
+            Confidence::Medium => "medium",
+            Confidence::High => "high",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Confidence> {
+        Confidence::ALL.into_iter().find(|c| c.code() == code)
+    }
+
+    /// The chance of being right that this level is treated as. Starting guesses.
+    pub fn treated_pct(self) -> f64 {
+        match self {
+            Confidence::Low => 55.0,
+            Confidence::Medium => 75.0,
+            Confidence::High => 95.0,
+        }
+    }
+}
+
+/// The skills that may ask for a confidence tap. `spot`, `spot_mw` and `table`
+/// are left out on purpose: those decks are near break-even, so a rating would
+/// measure the deck more than the player.
+pub const fn asks_confidence(skill: Skill) -> bool {
+    matches!(skill, Skill::Made | Skill::Outs | Skill::Price | Skill::Equity)
+}
+
 /// Columns added after the original eleven. An empty value means not applicable.
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Clone, PartialEq, Debug, Default)]
 pub struct AttemptExtra {
     pub check: Option<CheckRef>,
     /// The `equity` tolerance band served, in points.
@@ -80,11 +130,23 @@ pub struct AttemptExtra {
     /// no-repeat window don't need the spot library.
     pub table_spot: Option<u16>,
     pub table_verdict: Option<Verdict>,
+    /// The item's family, so scheduling and comparisons needn't regenerate it.
+    pub family: Option<String>,
+    /// `chain`: which of the four stages this row answers.
+    pub stage: Option<ChainStage>,
+    /// `made`, `outs`, `price`, `equity`: the player's rating, if they gave one.
+    pub confidence: Option<Confidence>,
+    /// Whether the reflection form applied, or the outcome of one.
+    pub reflect: Option<ReflectState>,
 }
 
 impl AttemptExtra {
     fn is_empty(&self) -> bool {
         *self == AttemptExtra::default()
+    }
+
+    fn has_notes(&self) -> bool {
+        self.family.is_some() || self.stage.is_some() || self.confidence.is_some() || self.reflect.is_some()
     }
 }
 
@@ -153,13 +215,14 @@ impl Attempt {
             signed_error: Some(e.signed_error),
             truth_pct: Some(e.truth_pct),
             opponents: Some(e.opponents),
-            table_spot: None,
-            table_verdict: None,
+            ..AttemptExtra::default()
         });
         if let Reveal::Table(graded) = &outcome.reveal {
             extra.table_spot = Some(graded.spot.id);
             extra.table_verdict = Some(graded.spot.verdict);
         }
+        extra.family = outcome.family.clone();
+        extra.stage = outcome.chain_stage;
         Attempt {
             timestamp_ms,
             mode,
@@ -197,10 +260,23 @@ fn optional<T: ToString>(value: Option<T>) -> String {
 fn extra_columns(extra: &AttemptExtra) -> String {
     let table = match (extra.table_spot, extra.table_verdict) {
         (Some(spot), Some(verdict)) => format!("\t{spot}\t{}", verdict.code()),
+        // A later column needs the table columns, even when they are empty.
+        _ if extra.has_notes() => "\t\t".to_string(),
         _ => String::new(),
     };
+    let notes = if extra.has_notes() {
+        format!(
+            "\t{}\t{}\t{}\t{}",
+            extra.family.as_deref().unwrap_or(""),
+            extra.stage.map_or("", ChainStage::code),
+            extra.confidence.map_or("", Confidence::code),
+            extra.reflect.map_or("", ReflectState::code),
+        )
+    } else {
+        String::new()
+    };
     format!(
-        "\t{}\t{}\t{}\t{}\t{}\t{}\t{}{table}",
+        "\t{}\t{}\t{}\t{}\t{}\t{}\t{}{table}{notes}",
         optional(extra.check.map(|c| c.run)),
         optional(extra.check.map(|c| c.form)),
         optional(extra.check.map(|c| c.slot)),
@@ -252,7 +328,7 @@ fn parse_line(line: &str) -> Option<Attempt> {
     let fields: Vec<&str> = line.split('\t').collect();
     let extra = match fields.len() {
         BASE_COLUMNS => AttemptExtra::default(),
-        FULL_COLUMNS | TABLE_COLUMNS => parse_extra(&fields[BASE_COLUMNS..])?,
+        FULL_COLUMNS | TABLE_COLUMNS | NOTES_COLUMNS => parse_extra(&fields[BASE_COLUMNS..])?,
         _ => return None,
     };
     let mode = Mode::from_code(fields[1])?;
@@ -319,6 +395,19 @@ fn parse_extra(fields: &[&str]) -> Option<AttemptExtra> {
         opponents: parse_optional(fields[6])?,
         table_spot: parse_table_spot(fields)?,
         table_verdict: parse_table_verdict(fields)?,
+        family: fields.get(9).filter(|f| !f.is_empty()).map(|f| f.to_string()),
+        stage: match fields.get(10).copied().unwrap_or("") {
+            "" => None,
+            code => Some(ChainStage::from_code(code)?),
+        },
+        confidence: match fields.get(11).copied().unwrap_or("") {
+            "" => None,
+            code => Some(Confidence::from_code(code)?),
+        },
+        reflect: match fields.get(12).copied().unwrap_or("") {
+            "" => None,
+            code => Some(ReflectState::from_code(code)?),
+        },
     })
 }
 
@@ -339,7 +428,7 @@ pub fn parse_log(text: &str) -> (Vec<Attempt>, Vec<String>) {
     let mut attempts = Vec::new();
     let mut warnings = Vec::new();
     for (index, line) in text.lines().enumerate() {
-        if line.is_empty() || line == LOG_HEADER || line == CHECKUP_LOG_HEADER || line == LEGACY_LOG_HEADER {
+        if line.is_empty() || line == LOG_HEADER || line == TABLE_LOG_HEADER || line == CHECKUP_LOG_HEADER || line == LEGACY_LOG_HEADER {
             continue;
         }
         match parse_line(line) {

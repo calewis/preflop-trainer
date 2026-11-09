@@ -8,14 +8,16 @@ use std::time::Instant;
 
 use trainer_web::dispatch;
 
-const SKILLS: [&str; 14] = [
+const SKILLS: [&str; 16] = [
     "preflop", "nuts", "possible", "made", "beats", "outs", "price", "hit", "spot", "spot_mw",
-    "board_type", "equity", "anchor", "table",
+    "board_type", "equity", "anchor", "table", "chain", "beats_me",
 ];
 /// Answers tried for items that aren't simple choices.
-const FREE_ANSWERS: [&str; 16] = [
-    "AKs", "QJ", "Ahx", "Ax", "AhKh", "KK", "f", "fs", "fsh", "none", "0", "4", "9", "25", "33.3", "50",
+const FREE_ANSWERS: [&str; 18] = [
+    "AKs", "QJ", "Ahx", "Ax", "AhKh", "KK", "f", "fs", "fsh", "none", "0", "4", "9", "25", "33.3", "50", "Asxs", "Kdxh",
 ];
+/// Answers tried on `beats_me`: subsets of the letters, ways counts and bands.
+const BEATS_ME_ANSWERS: [&str; 11] = ["none", "a", "ab", "abcd", "pk", "ptfh", "6", "3", "16", "e", "b"];
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -26,6 +28,10 @@ fn main() {
     }
     let mut out = Out { commands: Vec::new() };
     drills(&mut out, count);
+    origins(&mut out);
+    chain_session(&mut out);
+    retried_session(&mut out);
+    start_over_notes(&mut out);
     baselines(&mut out);
     session(&mut out, 40);
     checkup(&mut out);
@@ -33,8 +39,21 @@ fn main() {
     table_session(&mut out);
     table_checkup(&mut out);
     for (command, reply) in out.commands {
-        println!("{}\t{reply}", command.replace('\x1f', "\\x1f").replace('\t', "\\t"));
+        // One request per output line: a JSON reply never holds a raw newline.
+        assert!(!reply.contains('\n'), "a reply holds a raw newline: {reply}");
+        println!("{}\t{reply}", escape_command(&command));
     }
+}
+
+/// Makes a command one tab-free line. `load` commands carry whole log texts, so
+/// a command can hold tabs and newlines as well as the field separator.
+fn escape_command(command: &str) -> String {
+    command
+        .replace('\\', "\\\\")
+        .replace('\x1f', "\\x1f")
+        .replace('\t', "\\t")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 struct Out {
@@ -51,7 +70,7 @@ impl Out {
 }
 
 fn is_free_form(skill: &str) -> bool {
-    matches!(skill, "nuts" | "possible" | "outs" | "price" | "hit" | "equity" | "anchor" | "board_type")
+    matches!(skill, "nuts" | "possible" | "outs" | "price" | "hit" | "equity" | "anchor" | "board_type" | "chain" | "beats_me")
 }
 
 /// Answers for one skill: `board_type` tries its codes at target, slow and too-slow
@@ -63,6 +82,8 @@ fn answers_for(skill: &str) -> Vec<(&'static str, &'static str)> {
             ("rc", "7000"), ("rc", "13000"), ("rp", "1000"),
         ],
         "equity" => vec![("10", "0"), ("45", "0"), ("90", "0")],
+        "chain" => ["hc", "top", "2p", "4", "9", "25", "33", "c", "f", "zzz"].into_iter().map(|a| (a, "0")).collect(),
+        "beats_me" => BEATS_ME_ANSWERS.iter().map(|&a| (a, "0")).collect(),
         _ => FREE_ANSWERS.iter().map(|&a| (a, "0")).collect(),
     }
 }
@@ -71,7 +92,9 @@ fn drills(out: &mut Out, count: u64) {
     for &skill in &SKILLS {
         let items = if skill == "equity" { count / 3 } else { count };
         for i in 0..items {
-            let seed = (i * 2_654_435_761 + 17).to_string();
+            // beats_me carries its rung in the top bits of the seed.
+            let rung_bits = if skill == "beats_me" { (i % 4) << 60 } else { 0 };
+            let seed = (rung_bits + i * 2_654_435_761 + 17).to_string();
             let prepared = out.call(&["prepare", skill, &seed]);
             if skill == "table" {
                 for code in option_codes(&prepared) {
@@ -84,6 +107,18 @@ fn drills(out: &mut Out, count: u64) {
                 for (answer, response) in answers_for(skill) {
                     out.call(&["grade", skill, &seed, answer, response]);
                 }
+            }
+        }
+    }
+}
+
+/// The optional origin on `prepare`: it decides whether a miss offers a reflection.
+fn origins(out: &mut Out) {
+    for skill in ["made", "beats", "spot", "spot_mw", "preflop", "chain"] {
+        for i in 0..6u64 {
+            let seed = (i * 2_654_435_761 + 71).to_string();
+            for origin in ["new", "due", "retry", "unknown"] {
+                out.call(&["prepare", skill, &seed, origin]);
             }
         }
     }
@@ -112,6 +147,7 @@ fn scripted_answer(skill: &str) -> &'static str {
         "price" | "hit" => "25",
         "equity" | "anchor" => "42",
         "board_type" => "td",
+        "chain" => "c",
         _ => "",
     }
 }
@@ -207,6 +243,80 @@ fn option_codes(prepared: &str) -> Vec<String> {
         let tail = &format[i + needle.len()..];
         tail[..tail.find('"').unwrap_or(0)].to_string()
     }).collect()
+}
+
+/// A whole chain session: stages in order, each logged with its stage.
+fn chain_session(out: &mut Out) {
+    out.call(&["load", ""]);
+    out.call(&["session_open", "31337", "1000000", "chain"]);
+    out.call(&["session_start", "15"]);
+    for step in 0..16u64 {
+        let next = out.call(&["session_next", &(step * 1000).to_string()]);
+        let (Some(skill), Some(seed)) = (field(&next, "skill"), field(&next, "seed")) else { break };
+        let (skill, seed) = (skill.to_string(), seed.to_string());
+        out.call(&["session_peek", "1"]);
+        out.call(&["prepare", &skill, &seed]);
+        let reply = out.call(&["grade", &skill, &seed, ["hc", "6", "25", "c"][(step % 4) as usize], "1500"]);
+        let Some(template) = first_template(&reply) else { break };
+        out.call(&["commit", &template, &(2_000_000 + step).to_string(), "1500"]);
+    }
+    out.call(&["session_summary"]);
+    out.call(&["progress", "2100000"]);
+    out.call(&["export"]);
+}
+
+/// Misses come back as siblings, confidence and reflections are logged, and
+/// every sibling search and later-day review goes through the bridge.
+fn retried_session(out: &mut Out) {
+    out.call(&["load", ""]);
+    out.call(&["session_open", "9009", "1000000", "made,spot,price"]);
+    out.call(&["session_start", "15"]);
+    for step in 0..30u64 {
+        let next = out.call(&["session_next", &(step * 1000).to_string()]);
+        let (Some(skill), Some(seed)) = (field(&next, "skill"), field(&next, "seed")) else { break };
+        let (skill, seed) = (skill.to_string(), seed.to_string());
+        out.call(&["session_peek", "0"]);
+        let answer = if skill == "price" { "99" } else if skill == "made" { "sf" } else { "c" };
+        let reply = out.call(&["grade", &skill, &seed, answer, "1500"]);
+        let Some(template) = first_template(&reply) else { break };
+        // The confidence field is optional, and a code that means nothing is dropped.
+        let time = (2_000_000 + step).to_string();
+        match step % 5 {
+            0 => out.call(&["commit", &template, &time, "1500"]),
+            1 => out.call(&["commit", &template, &time, "1500", ""]),
+            2 => out.call(&["commit", &template, &time, "1500", "bogus"]),
+            3 => out.call(&["commit", &template, &time, "1500", "medium"]),
+            _ => out.call(&["commit", &template, &time, "1500", "high"]),
+        };
+        if step % 3 == 0 {
+            out.call(&["reflect_commit", &template, &(2_000_500 + step).to_string(), "supported:price,against:opp"]);
+        }
+    }
+    out.call(&["session_summary"]);
+    out.call(&["progress", "2100000"]);
+    out.call(&["export"]);
+    // A later-day session reviews the families it just missed.
+    out.call(&["session_open", "9010", "400000000", "made,spot,price"]);
+    out.call(&["session_start", "15"]);
+    for step in 0..12u64 {
+        let next = out.call(&["session_next", &(step * 1000).to_string()]);
+        let (Some(skill), Some(seed)) = (field(&next, "skill"), field(&next, "seed")) else { break };
+        let (skill, seed) = (skill.to_string(), seed.to_string());
+        let reply = out.call(&["grade", &skill, &seed, "1", "1500"]);
+        let Some(template) = first_template(&reply) else { break };
+        out.call(&["commit", &template, &(500_000_000 + step).to_string(), "1500"]);
+    }
+    out.call(&["progress", "600000000"]);
+}
+
+/// The table checkup start screen: no form in progress, form 4 in progress, form 5 in progress.
+fn start_over_notes(out: &mut Out) {
+    out.call(&["load", ""]);
+    out.call(&["check_info", "table"]);
+    for form in [4u32, 5] {
+        out.call(&["load", &format!("1\tcheck\t\ttable\t7\t2\t1\t0\t\t1000\tfold\t1\t{form}\t0\t\t\t\t\n")]);
+        out.call(&["check_info", "table"]);
+    }
 }
 
 /// A `table`-only session through the bridge: dealing order, recency and logging.

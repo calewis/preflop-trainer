@@ -31,14 +31,15 @@ exhaustive 7-card count and regenerating the anchor deck with its full preflop s
 - `card`: prints the preflop card and its notes.
 - `drill [--skill NAME]... [--minutes N] [--items N] [--seed N]`: defaults to 10 minutes.
   `--skill` deals only the named skills. Without it, `preflop` plus every skill up to
-  your current step is in rotation.
+  your current step is in rotation, and `preflop` is at least 25% of the items
+  (`MIN_PREFLOP_PERCENT`).
 - `check --skill NAME`: a held-out checkup. 40 new items plus 10 repeats, no feedback
   until the end, then a score with its standard error.
 - `progress`: last-40 stats against the pass marks, current step, baseline and checkup
   history, and how your equity estimates are biased once there are 30 of them.
 
-Skills are `preflop`, `nuts`, `possible`, `made`, `beats`, `board_type`, `outs`, `price`,
-`hit`, `equity`, `anchor`, `spot`, `spot_mw` and `table`. Type `q` at any question to quit; every
+Skills are `preflop`, `nuts`, `possible`, `made`, `beats`, `beats_me`, `board_type`, `outs`, `price`,
+`hit`, `equity`, `anchor`, `spot`, `spot_mw`, `chain` and `table`. Type `q` at any question to quit; every
 answer is already saved.
 
 Preflop drills are mostly 4-5 players with occasional 6-7. Your seat comes from how
@@ -49,9 +50,16 @@ append-only log. Colour is used only on a terminal with `NO_COLOR` unset.
 
 ## What the spot grading assumes
 
-`spot` and `spot_mw` state what each opponent holds as a hand class, and grade against
-that assumption. Your share is averaged over every combo in the class and every
-remaining card, so the actual next card doesn't matter.
+`spot` and `spot_mw` state each opponent as a tight, average or loose player and a mix of
+hands that player could hold, such as "They're a loose player. Assume they have one of: top
+pair, second pair, a flush draw, or nothing much." Your share is averaged over every
+card-disjoint combo in the mix and every remaining card, so the actual next card doesn't
+matter, and the reveal names the groups used. Your hand is always worth a real decision: a
+pair or better, a flush draw, an open-ended straight draw, or a gutshot with two overcards.
+Call and fold are each right about half the time: the deal picks a side of break-even,
+then a bet that puts the price on that side and within 20 points of break-even. Hands where
+your all-in equity is under 15% or over 85% are left out. The frozen baseline keeps its
+single stated hand class, and a chain's second opponent is a mix like these.
 
 - All-in spots: no more betting, all remaining cards run out, X = 0.
 - Next-card spots: you see one more card. If you then have the best hand you collect
@@ -87,6 +95,13 @@ for review.
 
 ## New skills
 
+- `nuts` (step 1): a holding is the nuts if no other holding disjoint from it, given the
+  board, beats it, so card removal can make a lesser holding unbeatable (K7 on K-K-7).
+  Name a holding, a card or rank plus any card (`Ahx`, `Ax`), or a card plus any card of a
+  suit (`Asxs`, the ace of spades with any spade). Forms that say "any" must hold for
+  every unseen holding they describe. Others count if one holding they describe is the
+  nuts.
+
 - `equity` (step 2): estimate your all-in equity with 1 to 3 opponents, as a percent.
   Rung 0 shows exact hands; rung 1 states classes as in `spot`, averaged over every
   card-disjoint combo. Hits stay near 86% through a tolerance staircase per rung
@@ -96,6 +111,16 @@ for review.
 - `anchor` (step 2): 40 memorized numbers in `data/anchors_v1.txt`, covering bet prices,
   flop matchups and preflop equities. Leitner boxes of 1, 3, 7, 14 and 30 days, at most
   5 new cards per session. Pass mark: 90% within tolerance over 40.
+- `beats_me` (step 1, "What beats you?"): a ladder that replaces `beats` in the step 1 gate.
+  Rung 0 shows four specific hands to pick from, rung 1 asks which kinds of hand beat you,
+  rung 2 asks how many ways a named holding type can be held, and rung 3 asks if you are
+  ahead of a stated mix of hands (over 60%, 40-60%, under 40%, with ties counting half).
+  A rung is passed when 20 straight attempts at it are at least 85% correct, and the
+  ladder only goes up. Pass mark: at least 85% correct over the last 40 attempts at
+  rungs 2-3. Checkups take 10 items per rung from held-out seeds.
+- `beats` stays in drills as a feel for how far ahead you are, at half a skill's normal
+  scheduling weight (`BEATS_WEIGHT_PER_MILLE`), and no longer counts toward any step.
+  Its reveal notes that the percentage is against random hands.
 - `board_type` (step 1): name a flop's suit and rank pattern from four choices. Eight
   categories exist, because a paired flop cannot be monotone. Answers over 12 seconds
   count as misses. A category retires after 3 straight correct answers inside 6 seconds,
@@ -137,6 +162,54 @@ The library is produced by the engine's `library` binary (`library 20261108 8000
 desktop) and copied here. The format is documented in the file's header. It is compiled into
 the library with `include_str!` and parsed strictly on first use. To replace it, rerun
 that, copy the new file over, and update the expected counts in `tests/table.rs`.
+
+## Review by family, and other research-ranked additions
+
+The additions in this section come from a research report that ranked small changes likely
+to help a player weak at reading boards, pot odds and equity. None has been tested on poker
+learners, so they are built to be judged later, and their thresholds are named constants
+documented as starting guesses in the modules that use them.
+
+Missed items no longer return as the same seed. `family_of` gives each item a family (a
+`made` answer class, a `price` bet size, an `outs` band with whether a tempting card exists,
+and so on), logged in a new column. A same-session retry and a later-day review deal a fresh
+sibling: a new non-held-out seed in the same family, found by bounded rejection sampling (200
+tries, and at most 3 exact equities for `equity`). If none turns up the player gets a plain new
+item of that skill, and a later-day family waits for another session. `anchor`, `board_type`, `table` and `chain` keep
+their own scheduling. Later-day review is per (skill, family): due 1, 3, 7, 14 and 30 days
+after each correct review, reset to 1 day by a miss, retired after a correct 30-day review,
+and a retired family can come back on a new miss. Among due families the slowest relative to
+the skill's median come first. Rows logged before families existed are not reviewed.
+
+Spot reveals add library-computed flip facts: the largest call that breaks even, from
+`C* = share * (P + X) / (1 - share)`, and on heads-up spots how many next cards put hero
+ahead of the price. They never change the grade.
+
+In the web app, a wrong `spot` or `spot_mw` answer, and a `table` robust spot that wasn't the
+best play, may offer three one-tap reflection prompts with cues drawn from the item's facts.
+Half of eligible misses are offered the form, by a pure function of the seed. Reflecting never
+blocks the drill and adds no response time. A reflection is logged as its own row (mode
+`reflect`), which everything that counts attempts ignores. Once 60 misses have had a later
+sibling attempted, Progress compares how often those siblings were right after answering the
+form and after no form; it is one player's noisy data and says so. Reflection and confidence
+are web-only; the terminal drill neither shows them nor logs them as offered.
+
+`chain` (step 3) plays one hand through four stages, each committed before its reveal and
+logged as one row with a stage column: name your hand, count outs against a stated opponent
+hand, the equity a stated price needs, then call or fold with the all-in or next-card
+assumption stated. Hands are ones the preflop card plays, with hero behind and at least 4
+outs, 1 or 2 opponents and varied bet sizes. Pass mark: 85% of the last 40 stages right, outs
+within 1 counting. A checkup counts stages as items: 10 hands (40 stages) plus 10 repeated
+stages placed between hands. A missed stage is not retried or reviewed; the next chain is a
+new hand.
+
+Optional confidence tap (Home, default off): after answering `made`, `outs`, `price` or
+`equity` in a drill, one tap for Low, Medium or High (treated as 55%, 75%, 95%) comes before
+the reveal. Progress shows a reliability table by level and skill once a row has 30 ratings.
+It is not asked on `spot`, `spot_mw` or `table`, whose decks are near break-even by design.
+
+New log columns (`family`, `stage`, `confidence`, `reflect`) go after the table columns; older
+rows, with 11, 18 or 20 columns, still parse.
 
 ## Web app
 

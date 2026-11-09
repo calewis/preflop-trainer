@@ -438,3 +438,15 @@ button:focus-visible, a:focus-visible, label:focus-visible { outline: 2px solid 
 @media (prefers-reduced-motion: no-preference) {
   .btn, .seg, .tab, .slot-rank, .slot-suit { transition: background-color .12s, border-color .12s; }
 }
+
+/* Whole-hand chains and the one-tap prompts after an answer. */
+.chain-part { font-weight: 600; }
+.reveal-tie { font-weight: 600; margin-top: 8px; }
+.confidence-ask .hint { display: inline; }
+.reflect { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.reflect-title { font-size: 1rem; margin: 0; }
+.reflect-cues { display: grid; gap: 8px; }
+.btn.cue { min-height: 44px; text-align: left; white-space: normal; }
+.btn.cue-skip { min-height: 44px; }
+.beats-me-hands { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.slot-rank.any { font-size: 0.75rem; }

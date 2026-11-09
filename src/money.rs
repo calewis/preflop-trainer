@@ -20,6 +20,16 @@ pub fn break_even(pot: f64, call: f64) -> f64 {
     break_even_with_x(pot, call, 0.0)
 }
 
+/// The largest call that still breaks even, solving `share * (P + C + X) = C`
+/// for `C`. `None` if `share` is 1 (a call can never lose) or 0.
+pub fn break_even_call(share: f64, pot: f64, extra: f64) -> Option<f64> {
+    if share <= 0.0 || share >= 1.0 {
+        None
+    } else {
+        Some(share * (pot + extra) / (1.0 - share))
+    }
+}
+
 /// The later winnings at which a call breaks even, or `None` if `share` is 0
 /// (no amount of later winnings can help a hand that never gets there).
 pub fn break_even_x(share: f64, pot: f64, call: f64) -> Option<f64> {

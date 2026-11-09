@@ -5,8 +5,9 @@ use poker_trainer::answer::{answer_format, AnswerFormat, AnswerOption};
 use poker_trainer::cards::{rank_char, Card, Holding};
 use poker_trainer::checkup::{CheckupMetric, CheckupScore};
 use poker_trainer::equity_skill::{EquityBias, BIAS_MIN_ATTEMPTS};
-use poker_trainer::grade::{EquityAnalysis, EvBand, Outcome, Reveal};
-use poker_trainer::item::{EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question, Skill, SpotMode, SpotQuestion};
+use poker_trainer::beats_me::{mix_method, prompt_text, ways_method, Standing};
+use poker_trainer::grade::{any_of_suit_text, BeatsMeReveal, EquityAnalysis, EvBand, FlipFacts, Outcome, Reveal, BEATS_RANDOM_NOTE};
+use poker_trainer::item::{BeatsMeAsk, BeatsMeQuestion, ChainHand, ChainQuestion, ChainStage, EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question, Skill, SpotMode, SpotQuestion};
 use poker_trainer::preflop::{action_label, Action, PreflopReason, Seat, Range, Situation, CARD};
 use poker_trainer::progress::{pass_mark, BaselineRun, SkillStats, PASS_ATTEMPTS, STEPS};
 use poker_trainer::table::{bb_text, checkup_form_reuses_spots, ev_bb_text, REUSE_NOTE, TableAction, TableActionKind, TableGrade, TableQuestion, TableSeat, TableStreetName, Verdict, ASSUMPTION_NOTE};
@@ -135,6 +136,7 @@ pub fn question(item: &Item, style: Style) -> String {
             style.holding(*hero),
             style.cards(board)
         ),
+        Question::BeatsMe(q) => beats_me_question(q, style),
         Question::Beats { hero, board } => format!(
             "Your hand: {}\nBoard: {}\nWhat share of all unseen 2-card holdings are strictly ahead of you right now?",
             style.holding(*hero),
@@ -175,7 +177,40 @@ pub fn question(item: &Item, style: Style) -> String {
             format!("Flop: {}\nName its suit pattern and rank pattern.", style.cards(board))
         }
         Question::Table(q) => table_question(q, style),
+        Question::Chain(q) => chain_question(item, q, style),
     }
+}
+
+/// One chain stage. The first three stages read exactly like their own skills.
+fn chain_question(item: &Item, q: &ChainQuestion, style: Style) -> String {
+    let h = &q.hand;
+    let (hero, board, villain) = (h.hero, h.board.clone(), h.villain);
+    let stage = match q.stage {
+        ChainStage::Hand => Question::Made { hero, board },
+        ChainStage::Outs => Question::Outs { hero, board, villain },
+        ChainStage::Price => Question::Price { pot_before: h.pot_before, bet: h.bet, callers: h.callers() },
+        ChainStage::Decide => return chain_decide_question(h, style),
+    };
+    question(&Item { skill: item.skill, seed: item.seed, question: stage }, style)
+}
+
+fn chain_decide_question(h: &ChainHand, style: Style) -> String {
+    let mut lines = vec![
+        format!("Your hand: {}", style.holding(h.hero)),
+        format!("Board: {}", style.cards(&h.board)),
+        format!("Opponent shows: {}", style.holding(h.villain)),
+    ];
+    if let Some(mix) = &h.second {
+        lines.push(mix.other_opponent());
+    }
+    lines.push(format!("Pot (including the bet): ${}. To call: ${}.", h.pot(), h.bet));
+    lines.push(match h.mode {
+        SpotMode::AllIn => "All-in: there is no more betting and all remaining cards run out.".to_string(),
+        SpotMode::NextCard { x: 0 } => "You see one more card. If you then have the best hand you collect nothing more; otherwise you give up.".to_string(),
+        SpotMode::NextCard { x } => format!("You see one more card. If you then have the best hand you collect about ${x} more; otherwise you give up."),
+    });
+    lines.push("Call or fold?".to_string());
+    lines.join("\n")
 }
 
 fn table_seat_name(seat: TableSeat, hero: TableSeat) -> &'static str {
@@ -262,14 +297,14 @@ fn spot_question(q: &SpotQuestion, style: Style) -> String {
         ),
     ];
     if q.opponents.len() == 1 {
-        lines.push(format!("Assume they have {}.", q.opponents[0].description()));
+        lines.push(q.opponents[0].assumption(None));
     } else {
         lines.push(format!(
             "{} opponents. Everyone else has acted and nobody can raise.",
             q.opponents.len()
         ));
-        for (i, &class) in q.opponents.iter().enumerate() {
-            lines.push(format!("Assume opponent {} has {}.", i + 1, class.description()));
+        for (i, mix) in q.opponents.iter().enumerate() {
+            lines.push(mix.assumption(Some(i + 1)));
         }
     }
     match q.mode {
@@ -285,12 +320,77 @@ fn spot_question(q: &SpotQuestion, style: Style) -> String {
                 (OpponentLabel::Average, true) => "average players",
                 (OpponentLabel::CallingStation, true) => "calling stations",
             };
+            // A mix already names each opponent's type.
+            let against = if q.opponents.iter().any(|m| m.player.is_some()) { String::new() } else { format!(" You are up against {label}.") };
             lines.push(format!(
-                "More betting is coming. You see one more card. If you then have the best hand you collect about ${x} more; otherwise you give up. You are up against {label}."
+                "More betting is coming. You see one more card. If you then have the best hand you collect about ${x} more; otherwise you give up.{against}"
             ));
         }
     }
     lines.join("\n")
+}
+
+fn beats_me_question(q: &BeatsMeQuestion, style: Style) -> String {
+    let mut lines = vec![
+        format!("Your hand: {}", style.holding(q.hero)),
+        format!("Board: {} ({})", style.cards(&q.board), street_name(q.board.len())),
+    ];
+    if let BeatsMeAsk::Which(hands) = &q.ask {
+        for (hand, letter) in hands.iter().zip('A'..='D') {
+            lines.push(format!("Hand {letter}: {}", style.holding(*hand)));
+        }
+    }
+    lines.push(prompt_text(q));
+    lines.join("\n")
+}
+
+fn beats_me_reveal(lines: &mut Vec<String>, reveal: &BeatsMeReveal, style: Style) {
+    match reveal {
+        BeatsMeReveal::Which { hero_rank, hands, answer } => {
+            lines.push(format!("Answer: {answer}. You have {}.", hero_rank.describe()));
+            for hand in hands {
+                let verb = match hand.standing {
+                    Standing::Ahead => "beats",
+                    Standing::Tied => "matches",
+                    Standing::Behind => "loses to",
+                };
+                lines.push(format!(
+                    "Hand {}: {} has {}: {}, because it {verb} {}.",
+                    hand.letter.to_ascii_uppercase(),
+                    style.holding(hand.holding),
+                    hand.rank.describe(),
+                    standing_words(hand.standing),
+                    hero_rank.describe()
+                ));
+            }
+        }
+        BeatsMeReveal::Kinds { hero_rank, rows } => {
+            lines.push(format!("You have {}.", hero_rank.describe()));
+            if rows.is_empty() {
+                lines.push("Nothing beats you right now.".to_string());
+            }
+            for row in rows {
+                lines.push(format!("{}: {} ways, such as {}.", row.kind.label(), row.ways, style.holding(row.example)));
+            }
+        }
+        BeatsMeReveal::Ways { high, low, count, hero_rank } => {
+            lines.push(format!("Answer: {} ways. You have {}.", count.ways, hero_rank.describe()));
+            lines.extend(ways_method(*high, *low, *count));
+        }
+        BeatsMeReveal::Mix { standing, mix, hero_rank } => {
+            lines.push(format!("Answer: {}. You have {}.", standing.band.label(), hero_rank.describe()));
+            lines.push(mix_method(standing));
+            lines.push(format!("Hands counted: {}.", mix.listed()));
+        }
+    }
+}
+
+fn standing_words(s: Standing) -> &'static str {
+    match s {
+        Standing::Ahead => "ahead of you",
+        Standing::Tied => "tied with you",
+        Standing::Behind => "behind you",
+    }
 }
 
 /// The answer format reminder shown on the prompt line.
@@ -304,12 +404,12 @@ pub fn answer_hint(item: &Item) -> String {
             options.iter().map(|o| o.code).collect::<Vec<_>>().join(" ")
         }
         AnswerFormat::Choice(options) => joined(&options),
-        AnswerFormat::MultiSelect { options, none_code } => {
+        AnswerFormat::MultiSelect { options, none_code, .. } => {
             format!("any of {}, or {none_code}", joined(&options))
         }
         AnswerFormat::Integer { .. } => "whole number".to_string(),
         AnswerFormat::Percent => "percent, such as 25".to_string(),
-        AnswerFormat::Holding => "QJ, AKs, AhKh, Ahx or Ax".to_string(),
+        AnswerFormat::Holding => "QJ, AKs, AhKh, Ahx, Ax or Asxs".to_string(),
     }
 }
 
@@ -331,11 +431,13 @@ pub fn reveal(outcome: &Outcome, style: Style) -> String {
             preflop_reveal(&mut lines, *seat, *situation, *action, *reason);
         }
         Reveal::Nuts { analysis, used_x, consistent, consistent_nuts } => {
-            lines.push(format!(
-                "The nuts: {}, held by {}.",
-                analysis.top.describe(),
-                style.holdings(&analysis.top_holdings, 6)
-            ));
+            lines.push(match analysis.any_of_suit {
+                Some((card, suit)) => format!("The nuts: {}, {}.", analysis.top.describe().split(" (").next().unwrap_or(""), any_of_suit_text(card, suit)),
+                None => format!("The nuts: {}, held by {}.", analysis.top.describe(), style.holdings(&analysis.top_holdings, 6)),
+            });
+            if analysis.any_of_suit.is_none() && !analysis.by_card_removal.is_empty() {
+                lines.push(format!("Also can't be beaten, because they hold a card the better hand needs: {}.", style.holdings(&analysis.by_card_removal, 6)));
+            }
             if let Some((rank, holdings)) = &analysis.next {
                 lines.push(format!(
                     "Next best: {}, held by {}.",
@@ -344,7 +446,7 @@ pub fn reveal(outcome: &Outcome, style: Style) -> String {
                 ));
             }
             let rule = if *used_x {
-                "With x, every holding you describe has to make the nuts"
+                "With x or any, every holding you describe has to make the nuts"
             } else {
                 "Without x, one holding you describe making the nuts is enough"
             };
@@ -378,6 +480,7 @@ pub fn reveal(outcome: &Outcome, style: Style) -> String {
             lines.push(format!("Answer: {}. {}", class.code(), class.description()));
             lines.push(format!("Your best five cards make {}.", rank.describe()));
         }
+        Reveal::BeatsMe(r) => beats_me_reveal(&mut lines, r, style),
         Reveal::Beats(a) => {
             lines.push(format!(
                 "Answer: {}. Strictly ahead right now: {} of {} unseen holdings, {:.1}%. You have {}.",
@@ -387,6 +490,7 @@ pub fn reveal(outcome: &Outcome, style: Style) -> String {
                 a.pct,
                 a.hero_rank.describe()
             ));
+            lines.push(BEATS_RANDOM_NOTE.to_string());
             if a.kinds.is_empty() {
                 lines.push("Nothing beats you right now.".to_string());
             } else {
@@ -441,7 +545,7 @@ pub fn reveal(outcome: &Outcome, style: Style) -> String {
                 ));
             }
         }
-        Reveal::Spot { analysis, chosen, best, loss_pct, loss_money, band } => {
+        Reveal::Spot { analysis, chosen, best, loss_pct, loss_money, band, flip } => {
             let a = analysis;
             lines.push(format!("Best play: {}.", if *best == Action::Call { "call" } else { "fold" }));
             lines.push(needed_equity_line(a.pot, a.call, a.price));
@@ -455,6 +559,7 @@ pub fn reveal(outcome: &Outcome, style: Style) -> String {
                 if a.sampled { " (estimated from a 300,000-outcome sample)" } else { "" },
                 a.combos_per_opponent.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(" x ")
             ));
+            lines.extend(a.groups.iter().cloned());
             lines.push(format!("EV of calling: {}. EV of folding: {}.", money(a.ev_call), money(a.ev_fold)));
             if *chosen == *best {
                 lines.push("EV lost: $0.00. You chose the better action.".to_string());
@@ -481,6 +586,14 @@ pub fn reveal(outcome: &Outcome, style: Style) -> String {
                 }
             }
             lines.push("This decision was averaged over all possible remaining cards and combos, so the actual next card doesn't matter.".to_string());
+            if let Some(FlipFacts { break_even_call, cards_ahead }) = flip {
+                if let Some(c) = break_even_call {
+                    lines.push(format!("Calling stops being right above about ${c:.0}."));
+                }
+                if let Some((ahead, unseen)) = cards_ahead {
+                    lines.push(format!("{ahead} of {unseen} next cards put you ahead of the price."));
+                }
+            }
         }
         Reveal::Equity { analysis, estimate_pct, signed_error, band, hit } => {
             equity_reveal(&mut lines, analysis, *estimate_pct, *signed_error, *band, *hit);
@@ -499,6 +612,7 @@ pub fn reveal(outcome: &Outcome, style: Style) -> String {
         }
         Reveal::Table(graded) => table_reveal(&mut lines, graded),
     }
+    lines.extend(outcome.chain_tie.clone());
     lines.join("\n")
 }
 
@@ -675,7 +789,9 @@ fn mark_text(stats: &SkillStats) -> String {
     if let Some(m) = mark.min_correct_pct {
         parts.push(format!("at least {m:.0}% correct"));
     }
-    if let Some(m) = mark.min_within_one_pct {
+    if let (Some(m), Skill::Chain) = (mark.min_within_one_pct, stats.skill) {
+        parts.push(format!("at least {m:.0}% of stages right (outs within 1 count)"));
+    } else if let Some(m) = mark.min_within_one_pct {
         parts.push(format!("at least {m:.0}% within 1"));
     }
     if let Some(m) = mark.max_median_ms {
@@ -697,7 +813,11 @@ fn pass_status(stats: &SkillStats) -> String {
     if stats.passed {
         "Passed.".to_string()
     } else if stats.total_attempts < PASS_ATTEMPTS {
-        format!("Not passed yet: needs {PASS_ATTEMPTS} attempts, has {}.", stats.total_attempts)
+        if stats.skill == Skill::BeatsMe {
+            format!("Not passed yet: counts levels 3 and 4 only, needs {PASS_ATTEMPTS} attempts there, has {}.", stats.total_attempts)
+        } else {
+            format!("Not passed yet: needs {PASS_ATTEMPTS} attempts, has {}.", stats.total_attempts)
+        }
     } else if !stats.drill_passed {
         "Not passed yet.".to_string()
     } else if stats.checkup_passed.is_none() {
@@ -892,7 +1012,7 @@ pub fn baseline_report(run: &BaselineRun, earlier: &[BaselineRun]) -> String {
 mod tests {
     use super::*;
     use poker_trainer::cards::{parse_cards, parse_holding};
-    use poker_trainer::classes::OppClass;
+    use poker_trainer::classes::{OppClass, OppMix};
     use poker_trainer::generate::generate_preflop;
     use poker_trainer::grade::grade;
     use poker_trainer::item::Skill;
@@ -915,7 +1035,7 @@ mod tests {
             pot: 150,
             call: 50,
             mode,
-            opponents,
+            opponents: opponents.into_iter().map(OppMix::single).collect(),
         });
         Item { skill: Skill::Spot, seed: 1, question }
     }
@@ -1040,6 +1160,32 @@ mod tests {
         };
         let text = revealed(&item, "17");
         assert!(text.contains("Needed equity = call / (pot + call) = 150 / (750 + 150) = 16.7%. The pot already includes the bet."), "{text}");
+    }
+
+    #[test]
+    fn the_nuts_reveal_keeps_card_removal_apart_from_the_best_hand() {
+        let item = Item { skill: Skill::Nuts, seed: 1, question: Question::Nuts { board: cards("KhKd7c") } };
+        let text = revealed(&item, "KK");
+        let held = text.lines().find(|l| l.starts_with("The nuts:")).expect("a nuts line");
+        assert!(!held.contains('7'), "held by only the best hand: {held}");
+        assert!(text.contains("Also can't be beaten, because they hold a card the better hand needs:"), "{text}");
+        assert!(text.contains("Next best: a full house, sevens full of kings"), "{text}");
+    }
+
+    #[test]
+    fn a_multiway_mix_names_each_opponent_once() {
+        use poker_trainer::classes::PlayerType;
+        let mix = |player| OppMix { player: Some(player), classes: vec![OppClass::Top, OppClass::Mid] };
+        let question = Question::Spot(SpotQuestion {
+            hero: hand("AhQh"),
+            board: cards("Kh7h2c"),
+            pot: 150,
+            call: 50,
+            mode: SpotMode::NextCard { x: 40 },
+            opponents: vec![mix(PlayerType::Tight), mix(PlayerType::Loose)],
+        });
+        let text = super::question(&Item { skill: Skill::SpotMw, seed: 1, question }, super::Style { color: false });
+        assert!(!text.contains("You are up against"), "{text}");
     }
 
     #[test]

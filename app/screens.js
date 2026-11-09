@@ -62,6 +62,17 @@ export async function showHome() {
   let minutes = store.readMinutes();
   if (![5, 10, 15].includes(minutes)) minutes = 10;
 
+  let confident = store.readConfidence();
+  const confidenceBtn = h('button', {
+    class: 'btn ghost', 'aria-pressed': String(confident),
+    onclick: () => {
+      confident = !confident;
+      store.writeConfidence(confident);
+      confidenceBtn.setAttribute('aria-pressed', String(confident));
+      confidenceBtn.textContent = confidenceLabel(confident);
+    },
+  }, confidenceLabel(confident));
+
   const lengthButtons = [5, 10, 15].map(m => h('button', {
     class: 'seg', 'aria-pressed': String(m === minutes),
     onclick: () => {
@@ -81,6 +92,7 @@ export async function showHome() {
       h('h2', { class: 'panel-title' }, "Today's drill"),
       h('div', { class: 'seg-group', role: 'group', 'aria-label': 'Drill length' }, lengthButtons),
       h('button', { class: 'btn primary', onclick: () => startDrill(minutes) }, 'Start drill'),
+      confidenceBtn,
       h('p', { class: 'hint' }, 'In rotation: ', home.rotation.join(', '), '.')),
     home.checkups.length ? h('section', { class: 'panel', 'data-checkup-offers': '' },
       h('h2', { class: 'panel-title' }, 'Checkups'),
@@ -94,6 +106,10 @@ export async function showHome() {
       link('#baseline', home.has_baseline ? 'Take baseline again' : 'Baseline'),
       link('#backup', 'Backup')),
   );
+}
+
+function confidenceLabel(on) {
+  return `Ask how sure I am: ${on ? 'on' : 'off'}`;
 }
 
 function link(href, text) { return h('a', { class: 'home-link', href }, text); }
@@ -219,12 +235,12 @@ async function nextDrillItem() {
   let timer;
   try {
     const elapsed = Math.round(activeNow() - state.startedAt);
+    // Only show the waiting message if the item isn't already prepared.
+    timer = setTimeout(() => { if (drill === state) renderLoading(leave); }, 150);
     const next = await engine.call('session_next', elapsed);
     if (drill !== state) return;
     if (next.finished) { await finishDrill(next.out_of_items); return; }
     const planned = next.planned;
-    // Only show the waiting message if the item isn't already prepared.
-    timer = setTimeout(() => { if (drill === state) renderLoading(leave); }, 150);
     const bundle = await prepareDrill(planned, true);
     if (drill !== state) return;
     showItem(planned, bundle);
@@ -294,7 +310,39 @@ function showItem(planned, bundle) {
       await trackAnswer(commitAnswer(outcome, response));
       return;
     }
-    showReveal(outcome, response);
+    if (bundle.confidence && store.readConfidence()) askConfidence(outcome, response);
+    else showReveal(outcome, response);
+  }
+
+  function askConfidence(outcome, response) {
+    lockControls();
+    onKey = null;
+    // If the drill ends here, the answer still counts, just without a rating.
+    // Hiding the page saves the answer and closes the tap, so it can't be saved twice.
+    let settled = false;
+    pendingConfidence = reveal => {
+      settled = true;
+      const saved = trackAnswer(commitAnswer(outcome, response));
+      if (reveal && drill === owner) showReveal(outcome, response, undefined, saved);
+    };
+    const tapShownAt = performance.now();
+    const choose = code => {
+      if (settled || performance.now() - tapShownAt < MIN_ANSWER_MS) return;
+      settled = true;
+      pendingConfidence = null;
+      showReveal(outcome, response, code);
+    };
+    const levels = bundle.confidence;
+    screen(
+      drillHeader(bundle.title, tag),
+      h('section', { class: 'question' }, questionView(bundle.question)),
+      status,
+      h('section', { class: 'answers confidence-ask' },
+        h('p', { class: 'prompt' }, 'How sure are you?'),
+        h('div', { class: 'choice-grid' }, levels.map((level, i) => h('button', {
+          class: 'btn choice', onclick: () => choose(level.code),
+        }, h('kbd', { class: 'key-hint' }, String(i + 1)), `${level.label} `, h('span', { class: 'hint' }, level.hint))))));
+    onKey = event => { const level = levels[Number(event.key) - 1]; if (level) choose(level.code); };
   }
 
   const controls = answerControls(bundle.format, trackedSubmit(submit, () => locked));
@@ -306,14 +354,18 @@ function showItem(planned, bundle) {
   onKey = controls.onKey;
   const lockControls = () => controls.el.querySelectorAll('button').forEach(b => { b.disabled = true; });
 
-  function showReveal(outcome, response) {
+  function showReveal(outcome, response, confidence, alreadySaved) {
     lockControls();
     onKey = null;
-    const commitPromise = trackAnswer(commitAnswer(outcome, response));
+    const commitPromise = alreadySaved || trackAnswer(commitAnswer(outcome, response, confidence));
     const nextBtn = h('button', { class: 'btn primary', onclick: goNext }, 'Next');
+    const reflection = reflectionForm(outcome);
+    pendingReflection = reflection.finish;
     async function goNext() {
       if (nextBtn.disabled) return;
       nextBtn.disabled = true;
+      pendingReflection = null;
+      reflection.finish();
       await commitPromise;
       await nextDrillItem();
     }
@@ -322,13 +374,52 @@ function showItem(planned, bundle) {
       drillHeader(bundle.title, tag),
       h('section', { class: 'question revealed' }, questionView(bundle.question)),
       status,
-      h('section', { class: 'answers' }, revealNode),
+      h('section', { class: 'answers' }, revealNode, reflection.el),
       h('div', { class: 'action-bar' }, nextBtn));
     status.textContent = revealNode.querySelector('.verdict').textContent;
     scrollRevealIntoView(revealNode);
     onKey = event => { if (event.key === 'Enter') goNext(); };
     nextBtn.focus({ preventScroll: true });
   }
+}
+
+// One-tap questions after some missed spots. The answer is already saved and timed,
+// so nothing here can hold up the drill: Next works at any point.
+function reflectionForm(outcome) {
+  const prompts = outcome.reflection || [];
+  if (!prompts.length) return { el: null, finish() {} };
+  const picks = [];
+  let index = 0;
+  let logged = false;
+  const log = () => {
+    if (logged) return;
+    logged = true;
+    trackAnswer(engine.call('reflect_commit', outcome.attempt, Date.now(), picks.join(',')).then(result => {
+      store.appendLogLine(result.line);
+      noticeIfStorageLost();
+    }));
+  };
+  const el = h('section', { class: 'reflect', 'data-reflect': '' });
+  const showPrompt = () => {
+    const current = prompts[index];
+    const promptAt = performance.now();
+    const tooSoon = () => performance.now() - promptAt < MIN_ANSWER_MS;
+    el.replaceChildren(
+      h('h2', { class: 'reflect-title' }, current.text),
+      h('div', { class: 'reflect-cues' }, current.cues.map(cue => h('button', {
+        class: 'btn cue',
+        onclick: () => {
+          if (tooSoon()) return;
+          picks.push(`${current.id}:${cue.id}`);
+          index += 1;
+          if (index < prompts.length) showPrompt();
+          else { log(); el.replaceChildren(h('p', { class: 'hint' }, 'Noted. Next when you are ready.')); }
+        },
+      }, cue.text))),
+      h('button', { class: 'btn ghost cue-skip', onclick: () => { if (tooSoon()) return; log(); el.replaceChildren(h('p', { class: 'hint' }, 'Skipped.')); } }, 'Skip'));
+  };
+  showPrompt();
+  return { el, finish() { if (picks.length) log(); } };
 }
 
 // A reveal below the fold scrolls up so the answer is the first thing read.
@@ -341,11 +432,11 @@ function scrollRevealIntoView(node) {
   window.scrollBy(0, rect.top - (header ? header.offsetHeight + 8 : 8));
 }
 
-async function commitAnswer(outcome, response) {
+async function commitAnswer(outcome, response, confidence) {
   const state = drill;
   let result;
   try {
-    result = await engine.call('commit', outcome.attempt, Date.now(), response);
+    result = await engine.call('commit', outcome.attempt, Date.now(), response, confidence || '');
   } catch (err) {
     showFatalNotice(err.message || String(err));
     return;
@@ -364,9 +455,25 @@ function endDrill() {
   finishDrill();
 }
 
+// Set while the confidence tap is showing: the answer that still has to be saved.
+let pendingConfidence = null;
+
+// Set while a reveal is up: saves any reflection cues tapped so far.
+let pendingReflection = null;
+
+function flushConfidence(reveal) {
+  const flush = pendingConfidence;
+  pendingConfidence = null;
+  if (flush) flush(reveal);
+}
+
+document.addEventListener('visibilitychange', () => { if (document.hidden) flushConfidence(true); });
+
 async function finishDrill(outOfItems) {
   const state = drill;
   if (!state) return;
+  flushConfidence(false);
+  if (pendingReflection) { pendingReflection(); pendingReflection = null; }
   if (state.clock) clearInterval(state.clock);
   drill = null;
   await answersSettled();
@@ -573,7 +680,8 @@ export async function showCheckup(skill) {
         : h('button', { class: 'btn primary', onclick: () => beginCheckup(info, false) }, 'Begin'),
       info.in_progress
         ? h('button', { class: 'btn', onclick: () => beginCheckup(info, false) }, 'Start over with new questions')
-        : null),
+        : null,
+      info.start_over_note ? h('p', { class: 'hint', 'data-start-over-note': '' }, info.start_over_note) : null),
     info.history.length ? h('section', { class: 'panel' },
       h('h2', { class: 'panel-title' }, 'Earlier checkups'),
       h('ul', { class: 'facts' }, info.history.slice().reverse().map(checkupLine))) : null);
@@ -817,6 +925,8 @@ export async function showProgress() {
     boardTypePanel(data.board_types),
     equityPanel(data.equity),
     anchorPanel(data.anchors),
+    reliabilityPanel(data.reliability),
+    reflectionPanel(data.reflection),
     h('section', { class: 'panel' },
       h('h2', { class: 'panel-title' }, 'Checkup history'),
       data.checkups.length
@@ -878,6 +988,30 @@ function anchorPanel(info) {
         h('p', {}, `${info.seen} of ${info.deck} cards seen. ${info.due} due now. ${info.new} still new.`),
         miniTable(['Box', 'Cards'], info.boxes.map(b => [b.label, b.count])),
       ]);
+}
+
+function reliabilityPanel(info) {
+  return h('section', { class: 'panel', 'data-reliability': '' },
+    h('h2', { class: 'panel-title' }, 'How sure you said you were'),
+    info.enough_data
+      ? [
+        miniTable(['Skill', 'You said', 'Right', 'Ratings'],
+          info.rows.map(r => [r.skill, `${r.level} (about ${r.treated})`, r.right, r.ratings])),
+        h('ul', { class: 'facts' }, info.rows.map(r => h('li', {}, r.sentence))),
+      ]
+      : h('p', { class: 'hint' }, `Not enough data (most-used level has ${info.most} of ${info.needed} ratings).`));
+}
+
+function reflectionPanel(info) {
+  return h('section', { class: 'panel', 'data-reflection-panel': '' },
+    h('h2', { class: 'panel-title' }, 'Reflecting on missed spots'),
+    info.enough_data
+      ? [
+        h('p', {}, info.summary),
+        miniTable(['What happened', 'Next similar question right', 'Share'], info.rows.map(r => [r.label, r.right, r.pct])),
+        h('p', { class: 'hint' }, 'This is one player\'s noisy data, so small differences mean little. Which misses get the form is chosen at random, but skipped forms are counted apart.'),
+      ]
+      : h('p', { class: 'hint' }, `Not enough data (${info.counted} of ${info.needed} misses have had a later similar question).`));
 }
 
 // --- Backup ----------------------------------------------------------------
@@ -979,6 +1113,7 @@ export function noticeIfStorageLost() {
 }
 
 export function endEverything() {
+  flushConfidence();
   if (drill && drill.clock) clearInterval(drill.clock);
   drill = null;
   baseline = null;

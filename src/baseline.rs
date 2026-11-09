@@ -1,8 +1,7 @@
 //! The frozen 36-item baseline test.
 
 use crate::cards::{cards_to_string, parse_cards, parse_holding, Card, Holding};
-use crate::classes::OppClass;
-use crate::generate::generate;
+use crate::classes::{OppClass, OppMix};
 use crate::item::{HitStreet, Item, Question, Skill, SpotMode, SpotQuestion};
 use crate::rng::Rng;
 
@@ -27,19 +26,6 @@ pub struct BaselineItem {
     pub item: Item,
 }
 
-/// Runs the generators once. Only `gen-baseline` uses this.
-pub fn generate_baseline() -> Vec<BaselineItem> {
-    let mut items = Vec::with_capacity(BASELINE_SIZE);
-    let mut rng = Rng::new(BASELINE_SEED);
-    for (skill, count) in BASELINE_MIX {
-        for _ in 0..count {
-            let id = format!("b{:02}", items.len() + 1);
-            items.push(BaselineItem { id, item: generate(skill, rng.next_u64()) });
-        }
-    }
-    items
-}
-
 fn holding_text(h: &Holding) -> String {
     format!("{}{}", h[0], h[1])
 }
@@ -51,6 +37,8 @@ fn item_line(entry: &BaselineItem) -> String {
         | Question::Equity(_)
         | Question::Anchor { .. }
         | Question::Table(_)
+        | Question::Chain(_)
+        | Question::BeatsMe(_)
         | Question::BoardType { .. } => unreachable!("this skill is not part of the baseline"),
         Question::Nuts { board } | Question::Possible { board } => {
             format!("board={}", cards_to_string(board))
@@ -76,7 +64,7 @@ fn item_line(entry: &BaselineItem) -> String {
             u8::from(*both)
         ),
         Question::Spot(q) => {
-            let classes: Vec<&str> = q.opponents.iter().map(|c| c.code()).collect();
+            let classes: Vec<&str> = q.opponents.iter().map(|m| m.classes[0].code()).collect();
             let mode = match q.mode {
                 SpotMode::AllIn => "allin".to_string(),
                 SpotMode::NextCard { x } => format!("next:{x}"),
@@ -148,7 +136,7 @@ fn parse_line(line: &str) -> Result<BaselineItem, String> {
     let fields = Fields(pairs);
     let seed: u64 = fields.get("seed")?.parse().map_err(|_| "bad seed")?;
     let question = match skill {
-        Skill::Preflop | Skill::BoardType | Skill::Equity | Skill::Anchor | Skill::Table => {
+        Skill::Preflop | Skill::BoardType | Skill::Equity | Skill::Anchor | Skill::Table | Skill::Chain | Skill::BeatsMe => {
             return Err(format!("{skill_name} is not part of the baseline"));
         }
         Skill::Nuts => Question::Nuts { board: fields.board()? },
@@ -184,7 +172,7 @@ fn parse_line(line: &str) -> Result<BaselineItem, String> {
             };
             let mut opponents = Vec::new();
             for code in fields.get("opponents")?.split(',') {
-                opponents.push(OppClass::from_code(code).ok_or("unknown class")?);
+                opponents.push(OppMix::single(OppClass::from_code(code).ok_or("unknown class")?));
             }
             Question::Spot(SpotQuestion {
                 hero: fields.holding("hero")?,

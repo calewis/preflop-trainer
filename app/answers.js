@@ -39,7 +39,7 @@ function choiceControls(format, submit) {
 
 function multiControls(format, submit) {
   const picked = new Set();
-  const submitBtn = h('button', { class: 'btn primary', onclick: go }, 'None of these');
+  const submitBtn = h('button', { class: 'btn primary', onclick: go }, format.none_label);
   const buttons = format.options.map((option, i) => {
     const btn = h('button', {
       class: 'btn toggle',
@@ -53,7 +53,7 @@ function multiControls(format, submit) {
     const code = format.options[i].code;
     if (picked.has(code)) picked.delete(code); else picked.add(code);
     buttons[i].setAttribute('aria-pressed', String(picked.has(code)));
-    submitBtn.textContent = picked.size === 0 ? 'None of these' : 'Submit';
+    submitBtn.textContent = picked.size === 0 ? format.none_label : 'Submit';
   }
 
   function go() {
@@ -156,14 +156,15 @@ function holdingPicker(submit) {
   }
 
   function toggleSuit(i, suit) {
-    if (!slots[i].rank) return;
+    if (!slots[i].rank && !(i === 1 && slots[1].any)) return;
     slots[i].suit = slots[i].suit === suit ? null : suit;
     refresh();
   }
 
   function setAny() {
     slots[1].any = !slots[1].any;
-    if (slots[1].any) { slots[1].rank = null; slots[1].suit = null; }
+    slots[1].rank = null;
+    slots[1].suit = null;
     refresh();
   }
 
@@ -171,6 +172,9 @@ function holdingPicker(submit) {
     const [a, b] = slots;
     if (!a.rank) return { text: null };
     const first = a.rank + (a.suit || '');
+    if (b.any && b.suit) {
+      return a.suit ? { text: `${first}x${b.suit}` } : { text: null, need: 'To say any of a suit, give the first card a suit too.' };
+    }
     if (b.any) return { text: `${first}x` };
     if (!b.rank) return { text: null };
     const bothSuits = a.suit && b.suit;
@@ -184,10 +188,11 @@ function holdingPicker(submit) {
     slotEls.forEach((el, i) => {
       const slot = slots[i];
       el.rankBtn.textContent = slot.any ? 'any' : slot.rank ? (slot.rank === 'T' ? '10' : slot.rank) : '-';
+      el.rankBtn.classList.toggle('any', !!slot.any);
       el.row.classList.toggle('active', active === i);
       el.suitBtns.forEach((btn, j) => {
         btn.setAttribute('aria-pressed', String(slot.suit === SUITS[j]));
-        btn.disabled = !slot.rank;
+        btn.disabled = !slot.rank && !slot.any;
       });
       if (el.anyBtn) el.anyBtn.setAttribute('aria-pressed', String(slot.any));
     });
@@ -211,6 +216,9 @@ function holdingPicker(submit) {
     const words = { A: 'A', K: 'K', Q: 'Q', J: 'J', T: '10' };
     const rank = r => words[r] || r;
     const suit = s => ({ s: '♠', h: '♥', d: '♦', c: '♣' }[s]) + '\uFE0E';
+    if (text.length === 4 && text[2] === 'x') {
+      return `${rank(text[0])}${suit(text[1])} with any other ${{ s: 'spade', h: 'heart', d: 'diamond', c: 'club' }[text[3]]}`;
+    }
     if (text.length === 4) return `${rank(text[0])}${suit(text[1])} ${rank(text[2])}${suit(text[3])}`;
     if (text.endsWith('x')) {
       const head = text.length === 3 ? `${rank(text[0])}${suit(text[1])}` : rank(text[0]);

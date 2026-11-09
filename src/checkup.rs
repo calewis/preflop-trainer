@@ -5,7 +5,7 @@
 use crate::anchors;
 use crate::board_type::{seed_with_category, BoardCategory};
 use crate::generate::generate;
-use crate::item::{equity_seed_with_rung, Item, Question, Skill, HELD_OUT_BIT};
+use crate::item::{beats_me_seed_with_rung, chain_seed_for_stage, equity_seed_with_rung, ChainStage, BEATS_ME_RUNGS, GEN_VERSION, Item, Question, Skill, HELD_OUT_BIT};
 use crate::log::{Attempt, CheckRef, Mode};
 use crate::progress::{meets_mark, pass_mark, window_metrics, PassMark, WindowMetrics};
 use crate::rng::Rng;
@@ -53,6 +53,8 @@ fn original_seeds(skill: Skill, form: u32, rng: &mut Rng) -> Vec<u64> {
             match skill {
                 // A fixed composition keeps the score comparable between forms.
                 Skill::Equity => equity_seed_with_rung(seed, (i % 2) as u8),
+                // Ten items per rung.
+                Skill::BeatsMe => beats_me_seed_with_rung(seed, (i % usize::from(BEATS_ME_RUNGS)) as u8),
                 Skill::BoardType => seed_with_category(seed, BoardCategory::ALL[i % BoardCategory::ALL.len()]),
                 Skill::Anchor => anchors::seed_with_card(seed, i % deck_len),
                 // A fixed robust and close mix, walking the reserved spots form by form.
@@ -73,10 +75,72 @@ fn non_identity_perm(rng: &mut Rng) -> [u8; 4] {
     }
 }
 
+/// Hands in a `chain` checkup: four stages each make the 40 scored items.
+pub const CHAIN_CHECKUP_HANDS: usize = CHECKUP_ORIGINALS / 4;
+
+/// `chain` keeps a hand's four stages together, in order, and places its repeats
+/// only between hands. Repeats copy single stages from earlier hands.
+fn chain_plan(form: u32, rng: &mut Rng) -> CheckupPlan {
+    let mut stages: Vec<CheckupSlot> = Vec::with_capacity(CHECKUP_LEN);
+    for _ in 0..CHAIN_CHECKUP_HANDS {
+        let hand = rng.next_u64() | HELD_OUT_BIT;
+        for stage in ChainStage::ALL {
+            stages.push(CheckupSlot { seed: chain_seed_for_stage(hand, stage), repeat_of: None, perm: IDENTITY });
+        }
+    }
+    // Copy from the first six hands, so every repeat fits at least ten slots later.
+    let mut pool: Vec<usize> = (0..24).collect();
+    rng.shuffle(&mut pool);
+    pool.truncate(CHECKUP_REPEATS);
+    pool.sort_unstable();
+    let mut slots = Vec::with_capacity(CHECKUP_LEN);
+    let mut pending: Vec<usize> = pool;
+    for hand in 0..CHAIN_CHECKUP_HANDS {
+        for stage in 0..4 {
+            slots.push(stages[hand * 4 + stage]);
+        }
+        let boundaries_left = CHAIN_CHECKUP_HANDS - hand;
+        let quota = pending.len().div_ceil(boundaries_left);
+        let mut placed = 0;
+        pending.retain(|&stage_index| {
+            let original_position = position_of_original(&slots, stage_index);
+            match original_position {
+                Some(at) if placed < quota && slots.len() >= at + MIN_REPEAT_GAP => {
+                    let seed = stages[stage_index].seed;
+                    let perm = non_identity_perm(rng);
+                    slots.push(CheckupSlot { seed, repeat_of: Some(at), perm });
+                    placed += 1;
+                    false
+                }
+                _ => true,
+            }
+        });
+    }
+    debug_assert!(pending.is_empty(), "every repeat was placed");
+    CheckupPlan { skill: Skill::Chain, form, slots }
+}
+
+/// The position of the `stage_index`th original stage among the slots so far.
+fn position_of_original(slots: &[CheckupSlot], stage_index: usize) -> Option<usize> {
+    let mut seen = 0;
+    for (position, slot) in slots.iter().enumerate() {
+        if slot.repeat_of.is_none() {
+            if seen == stage_index {
+                return Some(position);
+            }
+            seen += 1;
+        }
+    }
+    None
+}
+
 /// Builds form `form` of `skill`. The same arguments always give the same plan.
 pub fn checkup_plan(skill: Skill, form: u32) -> CheckupPlan {
     let mix = (skill as u64 + 1).wrapping_mul(SKILL_MIX) ^ (u64::from(form) + 1).wrapping_mul(FORM_MIX);
     let mut rng = Rng::new(mix ^ FORM_SALT);
+    if skill == Skill::Chain {
+        return chain_plan(form, &mut rng);
+    }
     let mut seeds = original_seeds(skill, form, &mut rng);
     rng.shuffle(&mut seeds);
 
@@ -178,6 +242,9 @@ pub struct CheckupScore {
     pub agreement: RepeatAgreement,
     /// Complete and meets the skill's pass mark on the originals.
     pub passed: bool,
+    /// Started under an older generator: its items can't be regenerated, so it
+    /// ends where it stopped rather than resuming on different questions.
+    pub stale: bool,
 }
 
 /// The next form index for `skill`, one past every form ever started, so no
@@ -287,6 +354,7 @@ fn score_run(skill: Skill, check: CheckRef, rows: &[&Attempt]) -> CheckupScore {
         metrics,
         agreement: agreement(&plan, &by_slot),
         passed: complete && meets_mark(&mark, &metrics),
+        stale: rows.iter().any(|a| a.gen_version != GEN_VERSION),
     }
 }
 

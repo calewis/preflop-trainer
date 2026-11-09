@@ -4,9 +4,11 @@ use poker_trainer::answer::{answer_format, AnswerFormat};
 use poker_trainer::baseline;
 use poker_trainer::cards::{holding_mask, parse_cards, parse_holding, unseen_holdings, Card, Holding};
 use poker_trainer::classes::{
+    mix_combos, OppMix,
     combos_in_class, is_flush_draw, is_oesd, made_class, matches_opp_class, MadeClass, OppClass,
 };
 use poker_trainer::equity::{equity_all_in, equity_next_card};
+use poker_trainer::family::family_of;
 use poker_trainer::eval::Category;
 use poker_trainer::generate::{
     board_texture, drill_players, generate, generate_preflop, MIN_CLASS_COMBOS, SPOT_NEAR_PCT,
@@ -20,13 +22,13 @@ use poker_trainer::log::{format_attempt, parse_log, Attempt, CheckRef, ItemRef, 
 use poker_trainer::money;
 use poker_trainer::preflop::{action_label, preflop_answer, Action, Seat, Situation, CARD};
 use poker_trainer::progress::{
-    all_stats, baseline_runs, current_step, drill_skills, has_baseline, next_baseline_run, pass_mark,
+    all_stats, baseline_runs, current_step, current_step_for, drill_skills, has_baseline, next_baseline_run, pass_mark,
     skill_stats,
     skills_up_to_step, step_passed,
 };
 use poker_trainer::rng::Rng;
 use poker_trainer::schedule::{
-    due_items, recent_results, skill_weight, Origin, Planned, Session, SessionLimits, FIRST_REVIEW_MS, SECOND_REVIEW_MS,
+    due_families, recent_results, skill_weight, Origin, Planned, Session, SessionLimits, DAY_MS,
 };
 
 fn cards(text: &str) -> Vec<Card> {
@@ -350,7 +352,8 @@ fn a_pocket_pair_under_a_paired_board_is_not_two_pair() {
     assert!(matches_opp_class(OppClass::Mid, hand("9h9d"), &board));
     assert!(!matches_opp_class(OppClass::TwoPair, hand("9h9d"), &board));
     // Below both board ranks it is in no pair-type class.
-    assert!(OppClass::ALL.iter().all(|&c| !matches_opp_class(c, hand("4h4d"), &board)));
+    assert!(OppClass::SINGLE.iter().all(|&c| !matches_opp_class(c, hand("4h4d"), &board)));
+    assert!(matches_opp_class(OppClass::Low, hand("4h4d"), &board));
 }
 
 #[test]
@@ -464,11 +467,12 @@ fn nuts_on_a_paired_board_is_quads_then_kings_full() {
     assert_eq!(analysis.top.category(), Category::Quads);
     let (next, holdings) = analysis.next.unwrap();
     assert_eq!(next.category(), Category::FullHouse);
-    assert_eq!((next.field(0), next.field(1)), (11, 5));
-    // K-7 with both unseen kings and all three unseen sevens.
-    assert_eq!(holdings.len(), 6);
+    // K-7 can't be beaten by anything disjoint from it, so next is sevens full of kings.
+    assert_eq!((next.field(0), next.field(1)), (5, 11));
+    assert_eq!(holdings.len(), 3, "the three pairs of the unseen sevens");
     assert!(answer(&nuts_item("KhKd7c"), "KK").correct);
-    assert!(!answer(&nuts_item("KhKd7c"), "K7").correct);
+    // Card removal: with one king left nobody can have KK against K-7, so it is the nuts.
+    assert!(answer(&nuts_item("KhKd7c"), "K7").correct);
 }
 
 #[test]
@@ -768,6 +772,7 @@ fn hit_generator_only_asks_both_cards_on_the_flop() {
 // ----- Spot -----
 
 fn spot(mode: SpotMode, opponents: Vec<OppClass>, pot: u32, call: u32) -> SpotQuestion {
+    let opponents = opponents.into_iter().map(OppMix::single).collect();
     SpotQuestion { hero: hand("AhQh"), board: cards("Kh7h2c"), pot, call, mode, opponents }
 }
 
@@ -861,8 +866,10 @@ fn spot_generator_meets_the_brief() {
         assert_eq!(q.opponents.len(), 1);
         assert!((3..=4).contains(&q.board.len()), "never the river");
         assert_spot_quality(q, seed);
-        for &class in &q.opponents {
-            assert!(combos_in_class(class, q.hero, &q.board).len() >= MIN_CLASS_COMBOS);
+        for mix in &q.opponents {
+            for &class in &mix.classes {
+                assert!(combos_in_class(class, q.hero, &q.board).len() >= MIN_CLASS_COMBOS);
+            }
         }
         let a = spot_analysis(q, seed).unwrap();
         if (a.required - a.share).abs() <= SPOT_NEAR_PCT {
@@ -870,14 +877,20 @@ fn spot_generator_meets_the_brief() {
         }
         if let SpotMode::NextCard { .. } = q.mode {
             next_card += 1;
-            let lists = vec![combos_in_class(q.opponents[0], q.hero, &q.board)];
+            let lists = vec![mix_combos(&q.opponents[0], q.hero, &q.board)];
             let all_in = equity_all_in(q.hero, &q.board, &lists, seed).unwrap();
             assert!(all_in.share < 0.5, "seed {seed}: next-card spot at {}", all_in.share);
         }
-        match q.opponent_label() {
-            poker_trainer::item::OpponentLabel::Tight => assert_eq!(q.x(), 0),
-            poker_trainer::item::OpponentLabel::Average => assert!(q.x() > 0 && q.x() <= q.pot + q.call),
-            poker_trainer::item::OpponentLabel::CallingStation => assert!(q.x() > q.pot + q.call),
+        // Tight players pay nothing more, loose players pay the most; rounded to $5.
+        let after_calling = q.pot + q.call;
+        if matches!(q.mode, SpotMode::NextCard { .. }) {
+            match q.opponent_label() {
+                poker_trainer::item::OpponentLabel::Tight => assert_eq!(q.x(), 0),
+                poker_trainer::item::OpponentLabel::Average => assert!(q.x().abs_diff(after_calling / 4) <= 3, "{q:?}"),
+                poker_trainer::item::OpponentLabel::CallingStation => assert!(q.x().abs_diff(after_calling / 3) <= 3, "{q:?}"),
+            }
+        } else {
+            assert_eq!(q.x(), 0);
         }
     }
     assert!(near * 100 >= total * 70, "{near} of {total} near break-even");
@@ -891,24 +904,6 @@ fn assert_spot_quality(q: &SpotQuestion, seed: u64) {
     assert!((0.08..=0.92).contains(&share), "seed {seed}: share {share}");
 }
 
-/// At most one set, two pair or trips, and no repeat unless the board forced one.
-fn assert_multiway_classes(q: &SpotQuestion) {
-    let strong = |c: &&OppClass| matches!(c, OppClass::Set | OppClass::TwoPair | OppClass::Trips);
-    assert!(q.opponents.iter().filter(strong).count() <= 1, "{:?}", q.opponents);
-    let mut distinct = q.opponents.clone();
-    distinct.sort_by_key(|c| c.code());
-    distinct.dedup();
-    if distinct.len() == q.opponents.len() {
-        return;
-    }
-    let available: Vec<OppClass> = OppClass::ALL
-        .into_iter()
-        .filter(|&c| combos_in_class(c, q.hero, &q.board).len() >= MIN_CLASS_COMBOS)
-        .collect();
-    let plain = available.iter().filter(|c| !strong(c)).count();
-    let usable = plain + usize::from(available.iter().any(|c| strong(&c)));
-    assert!(usable < q.opponents.len(), "{:?} repeated with {available:?} available", q.opponents);
-}
 
 #[test]
 fn the_card_plays_real_hands_only() {
@@ -923,9 +918,6 @@ fn baseline_spots_meet_the_quality_rules() {
     for entry in baseline::load().unwrap() {
         if let Question::Spot(q) = &entry.item.question {
             assert_spot_quality(q, entry.item.seed);
-            if q.opponents.len() > 1 {
-                assert_multiway_classes(q);
-            }
         }
     }
 }
@@ -951,7 +943,7 @@ fn every_answer_format_offers_codes_the_grader_accepts() {
                         assert!(grade(&item, o.code).is_ok(), "{skill:?} {}", o.code);
                     }
                 }
-                AnswerFormat::MultiSelect { options, none_code } => {
+                AnswerFormat::MultiSelect { options, none_code, .. } => {
                     assert!(grade(&item, none_code).is_ok());
                     let all: String = options.iter().map(|o| o.code).collect();
                     assert!(grade(&item, &all).is_ok());
@@ -1090,7 +1082,7 @@ fn multiway_weights_every_disjoint_tuple_equally() {
         pot: 200,
         call: 50,
         mode: SpotMode::AllIn,
-        opponents: vec![OppClass::Set, OppClass::Top],
+        opponents: vec![OppMix::single(OppClass::Set), OppMix::single(OppClass::Top)],
     };
     let a = spot_analysis(&q, 1).unwrap();
     assert!(!a.sampled);
@@ -1185,9 +1177,10 @@ fn spot_mw_generator_meets_the_brief() {
         sizes[q.opponents.len()] += 1;
         assert!((3..=4).contains(&q.board.len()));
         assert_spot_quality(q, seed);
-        assert_multiway_classes(q);
-        for &class in &q.opponents {
-            assert!(combos_in_class(class, q.hero, &q.board).len() >= MIN_CLASS_COMBOS);
+        for mix in &q.opponents {
+            for &class in &mix.classes {
+                assert!(combos_in_class(class, q.hero, &q.board).len() >= MIN_CLASS_COMBOS);
+            }
         }
         let a = spot_analysis(q, seed).unwrap();
         if (a.required - a.share).abs() <= SPOT_NEAR_PCT {
@@ -1195,7 +1188,7 @@ fn spot_mw_generator_meets_the_brief() {
         }
         if let SpotMode::NextCard { .. } = q.mode {
             let lists: Vec<Vec<Holding>> =
-                q.opponents.iter().map(|&c| combos_in_class(c, q.hero, &q.board)).collect();
+                q.opponents.iter().map(|m| mix_combos(m, q.hero, &q.board)).collect();
             let all_in = equity_all_in(q.hero, &q.board, &lists, seed).unwrap();
             assert!(all_in.share < 0.5, "seed {seed}: next-card spot at {}", all_in.share);
         }
@@ -1277,22 +1270,29 @@ fn never_three_of_one_skill_in_a_row() {
 fn a_miss_returns_after_three_to_six_others() {
     let allowed = vec![Skill::Preflop, Skill::Nuts, Skill::Price, Skill::Hit];
     let mut session = Session::new(allowed, &[], 0, 11);
-    let mut asked: Vec<(u64, Origin)> = Vec::new();
+    // (skill, family, position) of each miss still waiting for its retry.
+    let mut waiting: Vec<(Skill, String, usize)> = Vec::new();
     let mut retries = 0;
     for i in 0..4000 {
         let planned = session.try_next_item().unwrap();
+        let family = family_of(&generate(planned.skill, planned.seed));
         if planned.origin == Origin::SessionRetry {
             retries += 1;
-            let first = asked
+            let key = (planned.skill, family.clone().expect("a retried skill has a family"));
+            let index = waiting
                 .iter()
-                .rposition(|&(seed, _)| seed == planned.seed)
-                .expect("a retry follows its first ask");
-            let others = asked.len() - first - 1;
+                .position(|(s, f, _)| (*s, f.clone()) == key)
+                .expect("a retry is a sibling of an earlier miss");
+            let (_, _, missed_at) = waiting.remove(index);
+            let others = i - missed_at - 1;
             assert!((3..=8).contains(&others), "retry after {others} others");
         }
-        asked.push((planned.seed, planned.origin));
         // Miss every fifth item, and get every retry right.
-        session.record(planned, planned.origin == Origin::SessionRetry || i % 5 != 0);
+        let ok = planned.origin == Origin::SessionRetry || i % 5 != 0;
+        if !ok {
+            waiting.push((planned.skill, family.clone().unwrap(), i));
+        }
+        session.record(planned, ok);
     }
     assert!(retries > 100);
 }
@@ -1329,20 +1329,26 @@ fn retries_never_crowd_out_new_items() {
     assert!(retries >= 30, "{retries} retries in 120, so the cap should be close to full");
 }
 
+/// `attempt`, in a family, so the review ladder sees it.
+fn in_family(mut row: Attempt, family: &str) -> Attempt {
+    row.extra.family = Some(family.to_string());
+    row
+}
+
 #[test]
 fn a_retry_missed_again_is_due_on_a_later_day() {
-    let mut retry = attempt(Skill::Nuts, 5, 100, false);
+    let mut retry = in_family(attempt(Skill::Nuts, 5, 100, false), "flush");
     retry.mode = Mode::DrillRetry;
-    let log = vec![attempt(Skill::Nuts, 5, 0, false), retry];
-    assert!(due_items(&log, 100 + FIRST_REVIEW_MS - 1).is_empty());
-    assert_eq!(due_items(&log, 100 + FIRST_REVIEW_MS).len(), 1);
+    let log = vec![in_family(attempt(Skill::Nuts, 5, 0, false), "flush"), retry];
+    assert!(due_families(&log, 100 + DAY_MS - 1).is_empty());
+    assert_eq!(due_families(&log, 100 + DAY_MS).len(), 1);
 }
 
 #[test]
 fn timestamps_near_the_limit_saturate() {
-    let miss = attempt(Skill::Nuts, 1, u64::MAX - 5, false);
-    assert!(due_items(std::slice::from_ref(&miss), u64::MAX - 1).is_empty());
-    assert_eq!(due_items(&[miss], u64::MAX).len(), 1);
+    let miss = in_family(attempt(Skill::Nuts, 1, u64::MAX - 5, false), "flush");
+    assert!(due_families(std::slice::from_ref(&miss), u64::MAX - 1).is_empty());
+    assert_eq!(due_families(&[miss], u64::MAX).len(), 1);
 }
 
 #[test]
@@ -1360,72 +1366,151 @@ fn only_drill_attempts_count_for_the_miss_rate() {
 }
 
 #[test]
-fn review_ladder_is_one_day_then_three_then_retired() {
-    let (skill, seed) = (Skill::Nuts, 77);
-    let day = FIRST_REVIEW_MS;
-    let due = |attempts: &[Attempt], now: u64| !due_items(attempts, now).is_empty();
+fn review_ladder_runs_one_three_seven_fourteen_thirty_then_retires() {
+    let row = |seed: u64, t: u64, ok: bool| in_family(attempt(Skill::Nuts, seed, t, ok), "straight");
+    let due = |attempts: &[Attempt], now: u64| !due_families(attempts, now).is_empty();
+    let day = DAY_MS;
 
-    let miss = attempt(skill, seed, 0, false);
+    let miss = row(77, 0, false);
     assert!(!due(std::slice::from_ref(&miss), day - 1));
     assert!(due(std::slice::from_ref(&miss), day));
 
-    // A correct answer before the due time doesn't advance it.
-    let early = attempt(skill, seed, day / 2, true);
-    assert!(due(&[miss.clone(), early.clone()], day));
+    // A correct answer before the due time doesn't advance it, and doesn't need the same seed.
+    let early = row(5, day / 2, true);
+    assert!(due(&[miss.clone(), early], day));
 
-    let first = attempt(skill, seed, day, true);
-    let log = vec![miss.clone(), first.clone()];
-    assert!(!due(&log, day + SECOND_REVIEW_MS - 1));
-    assert!(due(&log, day + SECOND_REVIEW_MS));
+    let mut log = vec![miss];
+    // Each correct review, on a later seed in the family, moves up the ladder.
+    let mut now = day;
+    for (index, &gap) in FAMILY_GAPS.iter().enumerate() {
+        log.push(row(100 + index as u64, now, true));
+        assert!(!due(&log, now + day * gap - 1), "after review {index}, not yet due");
+        assert!(due(&log, now + day * gap), "after review {index}, due at {gap} days");
+        now += day * gap;
+    }
+    // Correct at the 30-day step retires it.
+    log.push(row(200, now, true));
+    assert!(!due(&log, now + day * 365), "retired after the 30-day review");
 
-    let second = attempt(skill, seed, day + SECOND_REVIEW_MS, true);
-    let log = vec![miss.clone(), first.clone(), second];
-    assert!(!due(&log, day * 365), "retired after the second correct review");
+    // A miss during the ladder starts it again at 1 day.
+    let relapse = vec![row(77, 0, false), row(7, day, true), row(8, day + day, false)];
+    assert!(!due(&relapse, day * 3 - 1));
+    assert!(due(&relapse, day * 3));
+}
 
-    // A miss during the ladder starts it again.
-    let relapse = attempt(skill, seed, day, false);
-    let log = vec![miss, relapse];
-    assert!(due(&log, day * 2));
-    assert!(!due(&log, day * 2 - 1));
+/// Days between reviews after the first correct one.
+const FAMILY_GAPS: [u64; 4] = [3, 7, 14, 30];
+
+#[test]
+fn a_miss_resets_the_ladder_to_the_first_rung() {
+    let row = |t: u64, ok: bool| in_family(attempt(Skill::Nuts, t, t, ok), "straight");
+    let day = DAY_MS;
+    // Miss, review right at 1 day (now 3 days away), miss at day 2.
+    let log = vec![row(0, false), row(day, true), row(day * 2, false)];
+    assert!(due_families(&log, day * 3 - 1).is_empty());
+    assert!(!due_families(&log, day * 3).is_empty(), "due again 1 day after the reset");
+    // The review after the reset is the first rung, so the next gap is 3 days.
+    let mut log = log;
+    log.push(row(day * 3, true));
+    assert!(due_families(&log, day * 6 - 1).is_empty());
+    assert!(!due_families(&log, day * 6).is_empty());
 }
 
 #[test]
-fn never_missed_items_are_never_due() {
-    assert!(due_items(&[attempt(Skill::Nuts, 1, 0, true)], u64::MAX / 2).is_empty());
+fn a_retired_family_comes_back_after_a_new_miss() {
+    let row = |t: u64, ok: bool| in_family(attempt(Skill::Nuts, t, t, ok), "straight");
+    let day = DAY_MS;
+    let mut log = vec![row(0, false)];
+    let mut now = day;
+    for gap in [1, 3, 7, 14, 30] {
+        log.push(row(now, true));
+        now += day * gap;
+    }
+    log.push(row(now, true));
+    assert!(due_families(&log, now + day * 400).is_empty(), "retired");
+    log.push(row(now + day * 400, false));
+    assert_eq!(due_families(&log, now + day * 401).len(), 1, "back at the first step");
+}
+
+#[test]
+fn a_correct_retry_does_not_move_the_ladder() {
+    let day = DAY_MS;
+    let miss = in_family(attempt(Skill::Nuts, 1, 0, false), "straight");
+    let mut retry = in_family(attempt(Skill::Nuts, 2, day, true), "straight");
+    retry.mode = Mode::DrillRetry;
+    assert_eq!(due_families(&[miss, retry], day).len(), 1, "a retry is not a review");
+}
+
+#[test]
+fn rows_from_before_families_were_logged_are_left_out() {
+    assert!(due_families(&[attempt(Skill::Nuts, 7, 0, false)], DAY_MS * 9).is_empty());
+}
+
+#[test]
+fn due_families_put_the_slowest_relative_to_the_skill_first() {
+    let row = |skill: Skill, seed: u64, t: u64, ok: bool, ms: u32, family: &str| {
+        let mut a = in_family(attempt(skill, seed, t, ok), family);
+        a.response_ms = ms;
+        a
+    };
+    // Nuts has two due families: one answered slowly, one quickly, around a 2s median.
+    let log = vec![
+        row(Skill::Nuts, 1, 0, true, 2_000, "flush"),
+        row(Skill::Nuts, 2, 1, true, 2_000, "straight"),
+        row(Skill::Nuts, 3, 2, false, 1_000, "flush"),
+        row(Skill::Nuts, 4, 3, false, 6_000, "straight"),
+    ];
+    let due = due_families(&log, DAY_MS * 2);
+    assert_eq!(due.len(), 2);
+    assert_eq!(due[0].family, "straight", "slowest first: {due:?}");
+    assert!(due[0].slowness > due[1].slowness);
+    // The slowness ratio is the family's median over the skill's median.
+    assert!((due[0].slowness - 4_000.0 / 2_000.0).abs() < 1e-9, "{}", due[0].slowness);
+}
+
+#[test]
+fn never_missed_families_are_never_due() {
+    assert!(due_families(&[in_family(attempt(Skill::Nuts, 1, 0, true), "straight")], u64::MAX / 2).is_empty());
 }
 
 #[test]
 fn items_from_another_gen_version_are_skipped() {
-    let mut old = attempt(Skill::Nuts, 7, 0, false);
+    let mut old = in_family(attempt(Skill::Nuts, 7, 0, false), "straight");
     old.gen_version = GEN_VERSION + 1;
-    assert!(due_items(&[old], FIRST_REVIEW_MS * 9).is_empty());
+    assert!(due_families(&[old], DAY_MS * 9).is_empty());
 }
 
 #[test]
 fn baseline_misses_are_not_scheduled() {
-    let mut a = attempt(Skill::Nuts, 7, 0, false);
+    let mut a = in_family(attempt(Skill::Nuts, 7, 0, false), "straight");
     a.mode = Mode::Baseline;
     a.item = ItemRef::Baseline("b01".to_string());
     a.baseline_run = Some(1);
-    assert!(due_items(&[a], FIRST_REVIEW_MS * 9).is_empty());
+    assert!(due_families(&[a], DAY_MS * 9).is_empty());
 }
 
 #[test]
 fn outs_within_one_is_not_a_miss() {
-    let mut a = attempt(Skill::Outs, 7, 0, false);
+    let mut a = in_family(attempt(Skill::Outs, 7, 0, false), "5-8:plain");
     a.close = true;
-    assert!(due_items(&[a], FIRST_REVIEW_MS * 9).is_empty());
+    assert!(due_families(&[a], DAY_MS * 9).is_empty());
 }
 
 #[test]
 fn session_deals_due_items_for_allowed_skills_only() {
-    let log = vec![attempt(Skill::Nuts, 7, 0, false), attempt(Skill::Spot, 8, 0, false)];
-    let mut session = Session::new(vec![Skill::Preflop, Skill::Nuts], &log, FIRST_REVIEW_MS, 3);
+    let family = family_of(&generate(Skill::Nuts, 7)).unwrap();
+    let log = vec![in_family(attempt(Skill::Nuts, 7, 0, false), &family), in_family(attempt(Skill::Spot, 8, 0, false), "allin:top")];
+    let mut session = Session::new(vec![Skill::Preflop, Skill::Nuts], &log, DAY_MS, 3);
     let mut saw_due = false;
     for _ in 0..200 {
         let planned = session.try_next_item().unwrap();
         assert_ne!(planned.skill, Skill::Spot);
-        saw_due |= planned.origin == Origin::Due && planned.seed == 7;
+        if planned.origin == Origin::Due {
+            assert_eq!(planned.skill, Skill::Nuts);
+            assert_ne!(planned.seed, 7, "a fresh sibling, not the same seed");
+            assert_eq!(family_of(&generate(Skill::Nuts, planned.seed)).unwrap(), family);
+            saw_due = true;
+        }
         session.record(planned, true);
     }
     assert!(saw_due);
@@ -1436,7 +1521,9 @@ fn session_deals_due_items_for_allowed_skills_only() {
 fn filled(skill: Skill, n: usize, correct: bool, ms: u32) -> Vec<Attempt> {
     (0..n)
         .map(|i| {
-            let mut a = attempt(skill, i as u64, i as u64, correct);
+            // Only rungs 2-3 of beats_me count for its mark.
+            let seed = if skill == Skill::BeatsMe { i as u64 | (3 << 60) } else { i as u64 };
+            let mut a = attempt(skill, seed, i as u64, correct);
             a.response_ms = ms;
             a
         })
@@ -1530,9 +1617,9 @@ fn steps_unlock_in_order() {
     assert_eq!(current_step(&all_stats(&[])), 1);
     assert_eq!(
         skills_up_to_step(1),
-        vec![Skill::Preflop, Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats, Skill::BoardType]
+        vec![Skill::Preflop, Skill::Beats, Skill::Nuts, Skill::Possible, Skill::Made, Skill::BeatsMe, Skill::BoardType]
     );
-    let step_one = [Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats, Skill::BoardType];
+    let step_one = [Skill::Nuts, Skill::Possible, Skill::Made, Skill::BeatsMe, Skill::BoardType];
     let mut log = Vec::new();
     for skill in step_one {
         log.extend(filled(skill, 40, true, 1000));
@@ -1547,7 +1634,42 @@ fn steps_unlock_in_order() {
     assert!(step_passed(1, &stats));
     assert!(!step_passed(2, &stats));
     assert_eq!(current_step(&stats), 2);
-    assert_eq!(skills_up_to_step(2).len(), 11);
+    assert_eq!(skills_up_to_step(2).len(), 12);
+}
+
+/// Rows that passed one skill, logged under the old generator.
+fn passed_under_old_gates(skill: Skill, run: u32) -> Vec<Attempt> {
+    let mut rows = filled(skill, 40, true, 1000);
+    rows.extend(completed_checkup(skill, run, 0, true));
+    for row in &mut rows {
+        row.gen_version = 1;
+    }
+    rows
+}
+
+#[test]
+fn a_step_earned_under_the_old_gates_is_kept() {
+    let mut log = Vec::new();
+    for (run, skill) in [Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats, Skill::BoardType].into_iter().enumerate() {
+        log.extend(passed_under_old_gates(skill, run as u32 + 1));
+    }
+    assert_eq!(current_step(&all_stats(&log)), 1, "today's gates alone would send this player back");
+    assert_eq!(current_step_for(&log), 2);
+    let dealt = drill_skills(&[], &log);
+    assert!([Skill::Outs, Skill::Price, Skill::Hit, Skill::Equity, Skill::Anchor].iter().all(|s| dealt.contains(s)), "{dealt:?}");
+}
+
+#[test]
+fn passing_beats_now_does_not_skip_beats_me() {
+    let mut log = Vec::new();
+    for (run, skill) in [Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats, Skill::BoardType].into_iter().enumerate() {
+        let mut rows = passed_under_old_gates(skill, run as u32 + 1);
+        for row in &mut rows {
+            row.gen_version = GEN_VERSION;
+        }
+        log.extend(rows);
+    }
+    assert_eq!(current_step_for(&log), 1, "beats no longer gates step 1 for rows logged today");
 }
 
 #[test]
@@ -1659,7 +1781,7 @@ fn correct_answer(item: &Item) -> String {
         Skill::Preflop | Skill::Spot | Skill::SpotMw => "f",
         Skill::Equity | Skill::Anchor => "50",
         Skill::BoardType => "rp",
-        Skill::Table => "fold",
+        Skill::Table | Skill::Chain | Skill::BeatsMe => "fold",
     };
     let reveal = match &item.question {
         // Two ranks may name no unseen holding, so ask a generic exact holding.
@@ -1691,8 +1813,9 @@ fn baseline_items_all_grade_and_their_correct_answers_pass() {
 }
 
 #[test]
-fn frozen_baseline_file_matches_the_generator() {
-    assert_eq!(baseline::to_text(&baseline::generate_baseline()), baseline::BASELINE_TEXT);
+fn frozen_baseline_file_still_loads_and_round_trips() {
+    // The generators moved on; the frozen file is what old runs are compared against.
+    assert_eq!(baseline::to_text(&baseline::load().unwrap()), baseline::BASELINE_TEXT);
 }
 
 #[test]
@@ -1783,7 +1906,7 @@ fn reveal_key(skill: Skill) -> &'static str {
         Skill::Spot | Skill::SpotMw => "f",
         Skill::Equity | Skill::Anchor => "50",
         Skill::BoardType => "rp",
-        Skill::Table => "fold",
+        Skill::Table | Skill::Chain | Skill::BeatsMe => "fold",
     }
 }
 

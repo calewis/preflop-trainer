@@ -9,10 +9,16 @@ use poker_trainer::cards::{Card, Holding};
 use poker_trainer::checkup::{CheckupMetric, CheckupScore, RepeatAgreement};
 use poker_trainer::equity_skill::BiasBucket;
 use poker_trainer::eval::HandRank;
-use poker_trainer::grade::{AheadKind, EquityAnalysis, EvBand, Outcome, Reveal};
+use poker_trainer::beats_me::{mix_method, prompt_text, ways_method, Standing};
+use poker_trainer::grade::{any_of_suit_text, AheadKind, BeatsMeReveal, EquityAnalysis, EvBand, FlipFacts, Outcome, Reveal, BEATS_RANDOM_NOTE};
 use poker_trainer::item::{
-    EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question, Skill, SpotMode, SpotQuestion,
+    BeatsMeAsk, BeatsMeQuestion,
+    ChainHand, ChainQuestion, ChainStage, EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question,
+    Skill, SpotMode, SpotQuestion, CHAIN_STAGES,
 };
+use poker_trainer::log::Confidence;
+use poker_trainer::progress::{ReliabilityRow, RELIABILITY_MIN_RATINGS};
+use poker_trainer::reflection::{Prompt, ReflectionComparison, ReflectionGroup, REFLECTION_MIN_MISSES};
 use poker_trainer::preflop::{action_label, Action, PreflopReason, Seat, Situation, CARD};
 use poker_trainer::table::{bb_text, ev_bb_text, TableAction, TableActionKind, TableGrade, TableQuestion, TableSeat, TableStreetName, Verdict, ASSUMPTION_NOTE};
 
@@ -34,6 +40,8 @@ pub fn skill_title(skill: Skill) -> &'static str {
         Skill::Equity => "Estimating equity",
         Skill::Anchor => "Key numbers",
         Skill::Table => "Table spots",
+        Skill::Chain => "Whole hand",
+        Skill::BeatsMe => "What beats you?",
     }
 }
 
@@ -125,6 +133,7 @@ pub fn question(q: &Question) -> V {
         Question::Beats { hero, board } => {
             obj! { "kind": "beats", "hero": holding(hero), "board": cards(board) }
         }
+        Question::BeatsMe(q) => beats_me_question(q),
         Question::Outs { hero, board, villain } => obj! {
             "kind": "outs",
             "hero": holding(hero),
@@ -153,6 +162,57 @@ pub fn question(q: &Question) -> V {
             "target_seconds": BOARD_TYPE_TARGET_MS / 1000,
         },
         Question::Table(q) => table_question(q),
+        Question::Chain(q) => chain_question(q),
+    }
+}
+
+/// One stage, as the player sees it. Each stage shows only what has been stated so
+/// far, so an earlier stage can't give away a later one.
+fn chain_question(q: &ChainQuestion) -> V {
+    let h = &q.hand;
+    let common = |stage: ChainStage| {
+        vec![
+            ("kind".to_string(), V::from("chain")),
+            ("stage".to_string(), V::from(stage.code())),
+            ("part".to_string(), V::from(stage.index() + 1)),
+            ("parts".to_string(), V::from(CHAIN_STAGES as usize)),
+            ("hero".to_string(), holding(&h.hero)),
+            ("board".to_string(), cards(&h.board)),
+            ("street".to_string(), V::from(street_name(h.board.len()))),
+        ]
+    };
+    let mut fields = common(q.stage);
+    let mut add = |key: &str, value: V| fields.push((key.to_string(), value));
+    match q.stage {
+        ChainStage::Hand => {}
+        ChainStage::Outs => add("villain", holding(&h.villain)),
+        ChainStage::Price => {
+            add("pot_before", V::from(h.pot_before));
+            add("bet", V::from(h.bet));
+            add("callers", V::from(h.callers()));
+        }
+        ChainStage::Decide => {
+            add("villain", holding(&h.villain));
+            add("second", V::from(h.second.as_ref().map(|m| m.other_opponent())));
+            add("pot", V::from(h.pot()));
+            add("call", V::from(h.bet));
+            add("all_in", V::from(matches!(h.mode, SpotMode::AllIn)));
+            add("x", V::from(h.x()));
+            add("next_card_line", V::from(chain_next_card_line(h)));
+        }
+    }
+    V::Obj(fields)
+}
+
+fn chain_next_card_line(h: &ChainHand) -> String {
+    match h.mode {
+        SpotMode::AllIn => "All-in: there is no more betting and all remaining cards run out.".to_string(),
+        SpotMode::NextCard { x: 0 } => {
+            "You see one more card. If you then have the best hand you win the pot and nothing more; otherwise you give up.".to_string()
+        }
+        SpotMode::NextCard { x } => {
+            format!("You see one more card. If you then have the best hand you collect about ${x} more; otherwise you give up.")
+        }
     }
 }
 
@@ -278,6 +338,112 @@ fn anchor_question(index: usize) -> V {
     obj! { "kind": "anchor", "prompt": prompt, "matchup": matchup, "hand": hand }
 }
 
+fn beats_me_question(q: &BeatsMeQuestion) -> V {
+    let hands: Vec<V> = match &q.ask {
+        BeatsMeAsk::Which(list) => list
+            .iter()
+            .zip('A'..='D')
+            .map(|(h, letter)| obj! { "letter": letter.to_string(), "cards": holding(h) })
+            .collect(),
+        _ => Vec::new(),
+    };
+    obj! {
+        "kind": "beats_me",
+        "rung": u32::from(q.rung()),
+        "hero": holding(&q.hero),
+        "board": cards(&q.board),
+        "street": street_name(q.board.len()),
+        "hands": hands,
+        "prompt": prompt_text(q),
+    }
+}
+
+fn standing_words(standing: Standing) -> &'static str {
+    match standing {
+        Standing::Ahead => "ahead of you",
+        Standing::Tied => "tied with you",
+        Standing::Behind => "behind you",
+    }
+}
+
+fn standing_verb(standing: Standing) -> &'static str {
+    match standing {
+        Standing::Ahead => "beats",
+        Standing::Tied => "matches",
+        Standing::Behind => "loses to",
+    }
+}
+
+fn beats_me_reveal(reveal: &BeatsMeReveal) -> V {
+    let no_hands = V::Arr(Vec::new());
+    let no_examples = V::Arr(Vec::new());
+    match reveal {
+        BeatsMeReveal::Which { hero_rank, hands, answer } => {
+            let shown: Vec<V> = hands
+                .iter()
+                .map(|h| {
+                    obj! {
+                        "letter": h.letter.to_ascii_uppercase().to_string(),
+                        "cards": holding(&h.holding),
+                        "text": format!("has {}: {}, because it {} {}.", h.rank.describe(), standing_words(h.standing), standing_verb(h.standing), hero_rank.describe()),
+                    }
+                })
+                .collect();
+            let letters: Vec<String> = answer.chars().map(|c| c.to_ascii_uppercase().to_string()).collect();
+            let answer_text = if answer == "none" { "None of them".to_string() } else { format!("Hand {}", letters.join(", ")) };
+            obj! {
+                "kind": "beats_me",
+                "answer": answer_text,
+                "hero": describe(*hero_rank),
+                "lines": V::Arr(Vec::new()),
+                "hands": shown,
+                "examples": no_examples,
+            }
+        }
+        BeatsMeReveal::Kinds { hero_rank, rows } => {
+            let examples: Vec<V> = rows
+                .iter()
+                .map(|r| obj! { "label": r.kind.label(), "cards": holding(&r.example), "ways": r.ways })
+                .collect();
+            let answer = if rows.is_empty() {
+                "Nothing beats you".to_string()
+            } else {
+                rows.iter().map(|r| r.kind.label()).collect::<Vec<_>>().join(", ")
+            };
+            obj! {
+                "kind": "beats_me",
+                "answer": answer,
+                "hero": describe(*hero_rank),
+                "lines": V::Arr(Vec::new()),
+                "hands": no_hands,
+                "examples": examples,
+            }
+        }
+        BeatsMeReveal::Ways { high, low, count, hero_rank } => {
+            let lines: Vec<V> = ways_method(*high, *low, *count).into_iter().map(V::from).collect();
+            obj! {
+                "kind": "beats_me",
+                "answer": format!("{} ways", count.ways),
+                "hero": describe(*hero_rank),
+                "lines": lines,
+                "hands": no_hands,
+                "examples": no_examples,
+            }
+        }
+        BeatsMeReveal::Mix { standing, mix, hero_rank } => {
+            let lines = vec![V::from(mix_method(standing)), V::from(format!("Hands counted: {}.", mix.listed()))];
+            obj! {
+                "kind": "beats_me",
+                "answer": standing.band.label(),
+                "hero": describe(*hero_rank),
+                "lines": lines,
+                "hands": no_hands,
+                "examples": no_examples,
+            }
+        }
+    }
+}
+
 fn spot_question(q: &SpotQuestion) -> V {
     let many = q.opponents.len() > 1;
     let label = match (q.opponent_label(), many) {
@@ -288,7 +454,13 @@ fn spot_question(q: &SpotQuestion) -> V {
         (OpponentLabel::Average, true) => "average players",
         (OpponentLabel::CallingStation, true) => "calling stations",
     };
-    let opponents: Vec<V> = q.opponents.iter().map(|c| V::from(c.description())).collect();
+    let opponents: Vec<V> = q
+        .opponents
+        .iter()
+        .enumerate()
+        .map(|(i, mix)| V::from(mix.assumption(many.then_some(i + 1))))
+        .collect();
+    let label = if q.opponents.iter().any(|m| m.player.is_some()) { "" } else { label };
     obj! {
         "kind": "spot",
         "hero": holding(&q.hero),
@@ -314,10 +486,11 @@ pub fn format(q: &Question) -> V {
             "large": matches!(q, Question::BoardType { .. }),
             "options": options.iter().map(option).collect::<Vec<_>>(),
         },
-        AnswerFormat::MultiSelect { options, none_code } => obj! {
+        AnswerFormat::MultiSelect { options, none_code, none_label } => obj! {
             "type": "multi",
             "options": options.iter().map(option).collect::<Vec<_>>(),
             "none_code": none_code,
+            "none_label": none_label,
         },
         AnswerFormat::Integer { min, max } => obj! { "type": "integer", "min": min, "max": max },
         AnswerFormat::Percent => obj! { "type": "percent" },
@@ -332,9 +505,9 @@ fn picked(q: &Question, answer: &str) -> String {
             .iter()
             .find(|o| o.code == answer)
             .map_or_else(|| answer.to_string(), |o| o.label.to_string()),
-        AnswerFormat::MultiSelect { options, none_code } => {
+        AnswerFormat::MultiSelect { options, none_code, none_label } => {
             if answer == none_code {
-                return "none of these".to_string();
+                return none_label.to_lowercase();
             }
             let labels: Vec<&str> = options
                 .iter()
@@ -349,6 +522,15 @@ fn picked(q: &Question, answer: &str) -> String {
     }
 }
 
+fn suit_word(letter: char) -> &'static str {
+    match letter {
+        's' => "spade",
+        'h' => "heart",
+        'd' => "diamond",
+        _ => "club",
+    }
+}
+
 /// `ahkh`, `aks`, `qj`, `ahx` or `ax`, written the way a player writes them.
 fn holding_text(answer: &str) -> String {
     let rank = |c: char| c.to_ascii_uppercase();
@@ -356,6 +538,7 @@ fn holding_text(answer: &str) -> String {
     match chars.as_slice() {
         [a, x] if *x == 'x' => format!("{} with any other card", rank(*a)),
         [a, s, x] if *x == 'x' => format!("{}{s} with any other card", rank(*a)),
+        [a, s, x, t] if *x == 'x' => format!("{}{s} with any other {}", rank(*a), suit_word(*t)),
         [a, s, b, t] => format!("{}{s} {}{t}", rank(*a), rank(*b)),
         _ => chars.iter().enumerate().map(|(i, &c)| if i < 2 { rank(c) } else { c }).collect(),
     }
@@ -363,7 +546,7 @@ fn holding_text(answer: &str) -> String {
 
 /// `response_ms` is 0 when the answer is graded ahead of time; only `board_type`
 /// is timed, and it is graded when the answer arrives.
-pub fn outcome(item: &Item, o: &Outcome, attempt_template: String, response_ms: u32) -> V {
+pub fn outcome(item: &Item, o: &Outcome, attempt_template: String, response_ms: u32, reflection: V) -> V {
     obj! {
         "correct": o.correct,
         "close": o.close,
@@ -371,7 +554,22 @@ pub fn outcome(item: &Item, o: &Outcome, attempt_template: String, response_ms: 
         "picked": picked(&item.question, &o.answer),
         "reveal": reveal(item, o, response_ms),
         "attempt": attempt_template,
+        "tie_line": o.chain_tie.clone(),
+        "reflection": reflection,
     }
+}
+
+/// The three prompts of a reflection form, ready to show.
+pub fn reflection_form(prompts: &[Prompt]) -> V {
+    V::Arr(
+        prompts
+            .iter()
+            .map(|p| {
+                let cues: Vec<V> = p.cues.iter().map(|c| obj! { "id": c.id, "text": c.text.as_str() }).collect();
+                obj! { "id": p.id, "text": p.text, "cues": cues }
+            })
+            .collect(),
+    )
 }
 
 fn describe(rank: HandRank) -> V {
@@ -391,8 +589,14 @@ fn reveal(item: &Item, o: &Outcome, response_ms: u32) -> V {
             });
             obj! {
                 "kind": "nuts",
-                "top": describe(analysis.top),
+                "top": analysis.any_of_suit.map_or_else(
+                    || describe(analysis.top),
+                    |(card, suit)| V::from(format!("{}, {}", analysis.top.describe().split(" (").next().unwrap_or(""), any_of_suit_text(card, suit))),
+                ),
+                "grouped": analysis.any_of_suit.is_some(),
                 "holdings": holdings_short(&analysis.top_holdings, 6),
+                "by_card_removal": (analysis.any_of_suit.is_none() && !analysis.by_card_removal.is_empty())
+                    .then(|| holdings_short(&analysis.by_card_removal, 6)),
                 "next": next,
                 "used_x": *used_x,
                 "consistent": *consistent,
@@ -444,6 +648,7 @@ fn reveal(item: &Item, o: &Outcome, response_ms: u32) -> V {
                 "ahead": a.ahead,
                 "total": a.total,
                 "pct": format!("{:.1}%", a.pct),
+                "random_note": BEATS_RANDOM_NOTE,
                 "hero": describe(a.hero_rank),
                 "kinds": kinds,
             }
@@ -483,7 +688,7 @@ fn reveal(item: &Item, o: &Outcome, response_ms: u32) -> V {
             "shortcut": format!("{shortcut:.0}%"),
             "multiplier": if *both { 4u32 } else { 2u32 },
         },
-        Reveal::Spot { analysis: a, chosen, best, loss_pct, loss_money, band } => {
+        Reveal::Spot { analysis: a, chosen, best, loss_pct, loss_money, band, flip } => {
             let band_text = band.map(|b| match b {
                 EvBand::Close => "close, so it counts as correct",
                 EvBand::Small => "a small error",
@@ -514,9 +719,13 @@ fn reveal(item: &Item, o: &Outcome, response_ms: u32) -> V {
                 "band": band_text,
                 "next_card": a.next_card,
                 "break_even": break_even,
+                "groups": V::Arr(a.groups.iter().map(|g| V::from(g.as_str())).collect()),
+                "flip_call": flip.and_then(|f: FlipFacts| f.break_even_call).map(|c| format!("Calling stops being right above about ${c:.0}.")),
+                "flip_cards": flip.and_then(|f: FlipFacts| f.cards_ahead).map(|(ahead, unseen)| format!("{ahead} of {unseen} next cards put you ahead of the price.")),
             }
         }
         Reveal::Table(graded) => table_reveal(graded),
+        Reveal::BeatsMe(reveal) => beats_me_reveal(reveal),
         Reveal::Equity { analysis, estimate_pct, signed_error, band, hit } => {
             equity_reveal(analysis, *estimate_pct, *signed_error, *band, *hit)
         }
@@ -751,6 +960,9 @@ fn capitalized(text: &str) -> String {
 
 /// A checkup score in its own measure.
 pub fn checkup_score(s: &CheckupScore) -> String {
+    if s.skill == Skill::Chain {
+        return format!("{:.0}% of stages right", s.score);
+    }
     match s.metric {
         CheckupMetric::PercentCorrect => format!("{:.0}% correct", s.score),
         CheckupMetric::PercentWithinOne => format!("{:.0}% within one out", s.score),
@@ -819,12 +1031,95 @@ pub fn comparison(prior: &CheckupScore, now: &CheckupScore) -> String {
     }
 }
 
+fn group_row(label: &str, group: &ReflectionGroup) -> V {
+    obj! {
+        "label": label,
+        "right": format!("{} of {}", group.right, group.misses),
+        // No misses means no share: a 0% here would read as a result.
+        "pct": if group.misses == 0 { "-".to_string() } else { format!("{:.0}%", group.pct()) },
+    }
+}
+
+/// How the misses split by form, with the plain "one player's noisy data" framing.
+pub fn reflection_comparison(c: &ReflectionComparison) -> V {
+    let enough = c.enough_data();
+    let summary = enough.then(|| {
+        format!(
+            "After reflecting, the next similar question was right {:.0}% of the time ({} misses). With no form it was right {:.0}% of the time ({} misses).",
+            c.reflected.pct(),
+            c.reflected.misses,
+            c.not_offered.pct(),
+            c.not_offered.misses,
+        )
+    });
+    obj! {
+        "enough_data": enough,
+        "counted": c.counted,
+        "needed": REFLECTION_MIN_MISSES,
+        "waiting": c.waiting,
+        "rows": vec![
+            group_row("Reflected", &c.reflected),
+            group_row("Shown, skipped", &c.skipped),
+            group_row("Form not shown", &c.not_offered),
+        ],
+        "summary": summary,
+    }
+}
+
+/// The three levels, as the confidence prompt offers them.
+pub fn confidence_levels() -> V {
+    V::Arr(
+        Confidence::ALL
+            .into_iter()
+            .map(|level| {
+                obj! {
+                    "code": level.code(),
+                    "label": confidence_name(level),
+                    "hint": format!("about {:.0}%", level.treated_pct()),
+                }
+            })
+            .collect(),
+    )
+}
+
+fn confidence_name(level: Confidence) -> &'static str {
+    match level {
+        Confidence::Low => "Low",
+        Confidence::Medium => "Medium",
+        Confidence::High => "High",
+    }
+}
+
+/// The reliability table: rows with enough ratings, and how close the rest are.
+pub fn reliability(rows: &[ReliabilityRow]) -> V {
+    let ready: Vec<V> = rows
+        .iter()
+        .filter(|r| r.ratings >= RELIABILITY_MIN_RATINGS)
+        .map(|r| {
+            obj! {
+                "skill": skill_title(r.skill),
+                "level": confidence_name(r.level),
+                "treated": format!("{:.0}%", r.level.treated_pct()),
+                "right": format!("{:.0}%", r.right_pct()),
+                "ratings": r.ratings,
+                "sentence": format!("When you said {} on {}, you were right {:.0}% of the time.", confidence_name(r.level), skill_title(r.skill), r.right_pct()),
+            }
+        })
+        .collect();
+    obj! {
+        "enough_data": !ready.is_empty(),
+        "needed": RELIABILITY_MIN_RATINGS,
+        "most": rows.iter().map(|r| r.ratings).max().unwrap_or(0),
+        "rows": ready,
+    }
+}
+
 /// `300000` as `300,000`.
 fn with_commas(value: u64) -> String {
     let digits = value.to_string();
     let mut out = String::new();
     for (i, ch) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(ch);

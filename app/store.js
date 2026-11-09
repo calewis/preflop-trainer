@@ -1,6 +1,7 @@
 // The attempt log lives in localStorage as the library's TSV text.
 const KEY = 'poker-trainer.attempts.v1';
 const MINUTES_KEY = 'poker-trainer.minutes';
+const CONFIDENCE_KEY = 'poker-trainer.confidence';
 
 let memory = '';
 let available = true;
@@ -54,4 +55,12 @@ export function readMinutes() {
 
 export function writeMinutes(minutes) {
   safely(() => localStorage.setItem(MINUTES_KEY, String(minutes)));
+}
+
+export function readConfidence() {
+  return safely(() => localStorage.getItem(CONFIDENCE_KEY), null) === '1';
+}
+
+export function writeConfidence(on) {
+  safely(() => localStorage.setItem(CONFIDENCE_KEY, on ? '1' : '0'));
 }

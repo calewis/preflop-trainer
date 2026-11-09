@@ -1,9 +1,10 @@
 //! Pass marks and progress. All marks and EV bands are starting guesses, to be
 //! tuned once there is real data.
 
+use crate::beats_me::counts_for_beats_me_mark;
 use crate::checkup::latest_checkup;
 use crate::item::Skill;
-use crate::log::{Attempt, Mode};
+use crate::log::{asks_confidence, Attempt, Confidence, Mode};
 use crate::table::Verdict;
 
 /// Attempts considered for a pass mark.
@@ -70,6 +71,19 @@ pub const PASS_TABLE: PassMark = PassMark {
     max_blunders: Some(TABLE_MAX_BLUNDERS),
     max_mean_abs_error: None,
 };
+/// `beats_me`: over the last 40 attempts at rungs 2-3.
+pub const BEATS_ME_MIN_CORRECT_PCT: f64 = 85.0;
+pub const PASS_BEATS_ME: PassMark = accuracy(BEATS_ME_MIN_CORRECT_PCT, None);
+/// Stage accuracy over the last 40 stages, outs within 1 counting as right.
+/// Starting guess.
+pub const PASS_CHAIN: PassMark = PassMark {
+    min_correct_pct: None,
+    min_within_one_pct: Some(85.0),
+    max_median_ms: None,
+    max_mean_ev_loss_pct: None,
+    max_blunders: None,
+    max_mean_abs_error: None,
+};
 pub const PASS_BOARD_TYPE: PassMark = accuracy(95.0, Some(crate::board_type::BOARD_TYPE_TARGET_MS));
 pub const PASS_ANCHOR: PassMark = accuracy(90.0, None);
 pub const PASS_EQUITY: PassMark = PassMark {
@@ -96,6 +110,8 @@ pub fn pass_mark(skill: Skill) -> PassMark {
         Skill::Equity => PASS_EQUITY,
         Skill::Anchor => PASS_ANCHOR,
         Skill::Table => PASS_TABLE,
+        Skill::Chain => PASS_CHAIN,
+        Skill::BeatsMe => PASS_BEATS_ME,
     }
 }
 
@@ -103,6 +119,16 @@ pub fn pass_mark(skill: Skill) -> PassMark {
 const BLUNDER_PCT: f64 = crate::grade::EV_MISTAKE_PCT;
 
 pub const STEPS: [&[Skill]; 4] = [
+    &[Skill::Nuts, Skill::Possible, Skill::Made, Skill::BeatsMe, Skill::BoardType],
+    &[Skill::Outs, Skill::Price, Skill::Hit, Skill::Equity, Skill::Anchor],
+    &[Skill::Spot, Skill::SpotMw, Skill::Chain],
+    &[Skill::Table],
+];
+
+/// The generator version whose rows earned steps under [`OLD_STEPS`].
+const OLD_GEN_VERSION: u32 = 1;
+/// The step gates before `beats_me` replaced `beats` and `chain` joined step 3.
+const OLD_STEPS: [&[Skill]; 4] = [
     &[Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats, Skill::BoardType],
     &[Skill::Outs, Skill::Price, Skill::Hit, Skill::Equity, Skill::Anchor],
     &[Skill::Spot, Skill::SpotMw],
@@ -180,7 +206,9 @@ pub fn meets_mark(mark: &PassMark, m: &WindowMetrics) -> bool {
 /// Only `drill` attempts count for pass marks. The baseline is measured
 /// separately and same-session retries follow a reveal.
 fn counts_for_stats(attempt: &Attempt) -> bool {
-    attempt.mode == Mode::Drill && attempt.extra.table_verdict != Some(Verdict::Depends)
+    attempt.mode == Mode::Drill
+        && attempt.extra.table_verdict != Some(Verdict::Depends)
+        && (attempt.skill != Skill::BeatsMe || counts_for_beats_me_mark(attempt))
 }
 
 pub fn skill_stats(skill: Skill, attempts: &[Attempt]) -> SkillStats {
@@ -226,9 +254,22 @@ pub fn current_step(stats: &[SkillStats]) -> usize {
         .unwrap_or(STEPS.len())
 }
 
-/// `preflop` plus every skill up to and including `step`.
+/// The player's step: the higher of the step under today's gates and the step
+/// the old gates give from rows logged before they changed. A player never drops
+/// a step, and a new player can't skip `beats_me` by passing `beats`.
+pub fn current_step_for(attempts: &[Attempt]) -> usize {
+    let today = current_step(&all_stats(attempts));
+    let old_rows: Vec<Attempt> = attempts.iter().filter(|a| a.gen_version == OLD_GEN_VERSION).cloned().collect();
+    let old_stats = all_stats(&old_rows);
+    let passed_old = |step: &&[Skill]| step.iter().all(|skill| old_stats.iter().any(|s| s.skill == *skill && s.passed));
+    let earned = OLD_STEPS.iter().position(|step| !passed_old(step)).map_or(OLD_STEPS.len(), |i| i + 1);
+    today.max(earned)
+}
+
+/// `preflop`, `beats` (kept in drills but in no step's pass requirement) and every
+/// skill up to and including `step`.
 pub fn skills_up_to_step(step: usize) -> Vec<Skill> {
-    let mut out = vec![Skill::Preflop];
+    let mut out = vec![Skill::Preflop, Skill::Beats];
     for skills in &STEPS[..step] {
         out.extend_from_slice(skills);
     }
@@ -239,7 +280,7 @@ pub fn skills_up_to_step(step: usize) -> Vec<Skill> {
 /// requested, `preflop` plus every skill up to the player's current step.
 pub fn drill_skills(requested: &[Skill], attempts: &[Attempt]) -> Vec<Skill> {
     if requested.is_empty() {
-        return skills_up_to_step(current_step(&all_stats(attempts)));
+        return skills_up_to_step(current_step_for(attempts));
     }
     let mut skills: Vec<Skill> = Vec::with_capacity(requested.len());
     for &skill in requested {
@@ -339,4 +380,39 @@ pub fn baseline_runs(attempts: &[Attempt], baseline_size: usize) -> Vec<Baseline
 /// The run id for a new baseline attempt.
 pub fn next_baseline_run(attempts: &[Attempt]) -> u32 {
     attempts.iter().filter_map(|a| a.baseline_run).max().unwrap_or(0).saturating_add(1)
+}
+
+/// Ratings needed per (level, skill) row before it is shown. Starting guess.
+pub const RELIABILITY_MIN_RATINGS: usize = 30;
+
+/// One row of the reliability table: how often a confidence level was right.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct ReliabilityRow {
+    pub skill: Skill,
+    pub level: Confidence,
+    pub ratings: usize,
+    pub right: usize,
+}
+
+impl ReliabilityRow {
+    pub fn right_pct(&self) -> f64 {
+        100.0 * self.right as f64 / self.ratings.max(1) as f64
+    }
+}
+
+/// Every (level, skill) row with at least one rating, from `drill` attempts only,
+/// so a same-session retry after a reveal can't inflate the table.
+pub fn reliability_table(attempts: &[Attempt]) -> Vec<ReliabilityRow> {
+    let mut rows: Vec<ReliabilityRow> = Vec::new();
+    for attempt in attempts.iter().filter(|a| a.mode == Mode::Drill && asks_confidence(a.skill)) {
+        let Some(level) = attempt.extra.confidence else { continue };
+        if !rows.iter().any(|r| r.skill == attempt.skill && r.level == level) {
+            rows.push(ReliabilityRow { skill: attempt.skill, level, ratings: 0, right: 0 });
+        }
+        let row = rows.iter_mut().find(|r| r.skill == attempt.skill && r.level == level).expect("added above");
+        row.ratings += 1;
+        row.right += usize::from(attempt.ok());
+    }
+    rows.sort_by_key(|r| (Skill::ALL.iter().position(|s| *s == r.skill), Confidence::ALL.iter().position(|l| *l == r.level)));
+    rows
 }

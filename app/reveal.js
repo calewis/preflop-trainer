@@ -42,6 +42,8 @@ export function questionView(q) {
     case 'equity': return equityQuestion(q);
     case 'anchor': return anchorQuestion(q);
     case 'table': return tableQuestion(q);
+    case 'chain': return chainQuestion(q);
+    case 'beats_me': return beatsMeQuestion(q);
     default: return h('p', {}, 'Unknown question');
   }
 }
@@ -78,7 +80,7 @@ function spotQuestion(q) {
   const many = q.opponents.length > 1;
   const betting = q.all_in
     ? 'All-in: there is no more betting and all remaining cards run out.'
-    : `More betting is coming. You see one more card. If you then have the best hand you collect about ${money(q.x)} more; otherwise you give up. You are up against ${q.label}.`;
+    : `More betting is coming. You see one more card. If you then have the best hand you collect about ${money(q.x)} more; otherwise you give up.${q.label ? ` You are up against ${q.label}.` : ''}`;
   return h('div', { class: 'stack' },
     hand(q.hero),
     labelled(`Board (${q.street})`, cardRow(q.board, 'board')),
@@ -87,8 +89,7 @@ function spotQuestion(q) {
       chip('To call', money(q.call))),
     h('ul', { class: 'facts' },
       many ? h('li', {}, `${q.opponents.length} opponents. Everyone else has acted and nobody can raise.`) : null,
-      q.opponents.map((description, i) => h('li', {},
-        many ? `Assume opponent ${i + 1} has ${description}.` : `Assume they have ${description}.`)),
+      q.opponents.map(line => h('li', {}, line)),
       h('li', {}, betting)));
 }
 
@@ -147,6 +148,31 @@ function tableQuestion(q) {
     prompt(`You are ${q.seat_sentence}. What do you do?`));
 }
 
+function beatsMeQuestion(q) {
+  return h('div', { class: 'stack' }, hand(q.hero),
+    labelled(`Board (${q.street})`, cardRow(q.board, 'board')),
+    q.hands.length ? h('div', { class: 'stack beats-me-hands' }, q.hands.map(shown =>
+      labelled(`Hand ${shown.letter}`, cardRow(shown.cards, 'board')))) : null,
+    prompt(q.prompt));
+}
+
+function chainQuestion(q) {
+  const part = h('p', { class: 'context chain-part' }, `Part ${q.part} of ${q.parts}`);
+  const street = labelled(`Board (${q.street})`, cardRow(q.board, 'board'));
+  if (q.stage === 'hand') return h('div', { class: 'stack' }, part, hand(q.hero), street, prompt('What do you have?'));
+  if (q.stage === 'outs') {
+    return h('div', { class: 'stack' }, part, hand(q.hero), street, hand(q.villain, 'Opponent shows'),
+      prompt('You are behind. How many next cards leave you strictly ahead?'));
+  }
+  if (q.stage === 'price') return h('div', { class: 'stack' }, part, hand(q.hero), street, priceQuestion(q));
+  return h('div', { class: 'stack' }, part, hand(q.hero), street, hand(q.villain, 'Opponent shows'),
+    h('div', { class: 'chips' }, chip(`Pot, including the bet${q.second ? ' and the caller' : ''}`, money(q.pot)), chip('To call', money(q.call))),
+    h('ul', { class: 'facts' },
+      q.second ? h('li', {}, q.second) : null,
+      h('li', {}, q.next_card_line)),
+    prompt('Call or fold?'));
+}
+
 function holdingCards(cards) {
   return h('span', { class: 'mini-cards' }, cards.map(c => card(c, 'small')));
 }
@@ -169,6 +195,7 @@ function revealBody(r) {
     case 'possible': return possibleReveal(r);
     case 'made': return [answerLine(r.answer), p(r.description), p(`Your best five cards make ${r.rank}.`)];
     case 'beats': return beatsReveal(r);
+    case 'beats_me': return beatsMeReveal(r);
     case 'outs': return outsReveal(r);
     case 'price': return [
       answerLine(r.required),
@@ -187,11 +214,12 @@ function revealBody(r) {
 
 function nutsReveal(r) {
   const rule = r.used_x
-    ? 'When you say "any other card", every holding you describe has to make the nuts'
-    : 'Without "any other card", one holding you describe making the nuts is enough';
+    ? 'When you say "any", every holding you describe has to make the nuts'
+    : 'Without "any", one holding you describe making the nuts is enough';
   return [
     h('p', { class: 'reveal-answer' }, 'The nuts: ', h('strong', {}, r.top)),
-    p('Held by ', holdingsLine(r.holdings)),
+    r.grouped ? null : p('Held by ', holdingsLine(r.holdings)),
+    r.by_card_removal ? p('Also can\'t be beaten, because they hold a card the better hand needs: ', holdingsLine(r.by_card_removal)) : null,
     r.next ? p(`Next best: ${r.next.rank}, held by `, holdingsLine(r.next.holdings)) : null,
     p(`${rule}. Your answer covers ${plural(r.consistent, 'unseen holding', 'unseen holdings')}, of which ${r.consistent_nuts} ${r.consistent_nuts === 1 ? 'makes' : 'make'} the nuts.`),
   ];
@@ -212,12 +240,25 @@ function beatsReveal(r) {
   return [
     answerLine(r.answer),
     p(`Strictly ahead right now: ${r.ahead} of ${r.total} unseen holdings, ${r.pct}. You have ${r.hero}.`),
+    p(r.random_note),
     r.kinds.length === 0 ? p('Nothing beats you right now.') : [
       p('Strongest holdings that beat you:'),
       h('ul', { class: 'facts' }, r.kinds.map(k => h('li', {},
         `${k.category}: ${plural(k.count, 'holding', 'holdings')}, the best being `,
         holdingCards(k.example), ` (${k.best}).`))),
     ],
+  ];
+}
+
+function beatsMeReveal(r) {
+  return [
+    answerLine(r.answer),
+    p(`You have ${r.hero}.`),
+    r.hands.length ? h('ul', { class: 'facts' }, r.hands.map(hand => h('li', {},
+      `Hand ${hand.letter} `, holdingCards(hand.cards), ` ${hand.text}`))) : null,
+    r.examples.length ? h('ul', { class: 'facts' }, r.examples.map(ex => h('li', {},
+      `${ex.label}: ${ex.ways} ${ex.ways === 1 ? 'way' : 'ways'}, such as `, holdingCards(ex.cards), '.'))) : null,
+    r.lines.map(line => p(line)),
   ];
 }
 
@@ -263,10 +304,13 @@ function spotReveal(r) {
       ? 'You chose the better action.'
       : `That is ${r.band}.`),
     p(`Averaged over ${r.combos} possible combos${r.sampled ? ` (estimated from a ${r.sample_size}-outcome sample)` : ''}.`),
+    r.groups.map(line => p(line)),
     r.break_even === null || r.break_even === undefined ? null
       : r.break_even === '' ? p('Calling already breaks even without winning anything more.')
         : p(`You would need to win about ${r.break_even} more when you hit for calling to break even.`),
     p('This decision was averaged over all possible remaining cards and combos, so the actual next card doesn\'t matter.'),
+    r.flip_call ? p(r.flip_call) : null,
+    r.flip_cards ? p(r.flip_cards) : null,
   ];
 }
 
@@ -335,5 +379,6 @@ export function revealView(outcome) {
   const tone = outcome.correct ? 'good' : outcome.close ? 'close' : 'bad';
   return h('div', { class: `reveal ${tone}` },
     h('p', { class: 'verdict' }, verdict, ' ', h('span', { class: 'you' }, `You answered ${outcome.picked}.`)),
-    revealBody(outcome.reveal));
+    revealBody(outcome.reveal),
+    outcome.tie_line ? h('p', { class: 'reveal-tie' }, outcome.tie_line) : null);
 }

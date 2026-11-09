@@ -2,12 +2,12 @@
 
 use crate::board_type::BoardCategory;
 use crate::cards::{Card, Holding};
-use crate::classes::OppClass;
+use crate::classes::{OppClass, OppMix, PlayerType};
 use crate::preflop::{Seat, Situation};
 use crate::table::TableQuestion;
 
 /// Bump whenever a generator's output for a given seed changes.
-pub const GEN_VERSION: u32 = 1;
+pub const GEN_VERSION: u32 = 2;
 
 /// Seeds with this bit set are held out for checkups: drills and reviews never
 /// serve one. See [`is_held_out`].
@@ -40,6 +40,21 @@ pub const fn equity_seed_with_rung(seed: u64, rung: u8) -> u64 {
     }
 }
 
+/// How many rungs the [`Skill::BeatsMe`] ladder has.
+pub const BEATS_ME_RUNGS: u8 = 4;
+const BEATS_ME_RUNG_SHIFT: u32 = 60;
+const BEATS_ME_RUNG_MASK: u64 = 0b11 << BEATS_ME_RUNG_SHIFT;
+
+/// The rung a `beats_me` seed asks for, carried in its bits like `equity`.
+pub const fn beats_me_rung_of_seed(seed: u64) -> u8 {
+    ((seed & BEATS_ME_RUNG_MASK) >> BEATS_ME_RUNG_SHIFT) as u8
+}
+
+/// `seed` with its `beats_me` rung set to `rung`.
+pub const fn beats_me_seed_with_rung(seed: u64, rung: u8) -> u64 {
+    (seed & !BEATS_ME_RUNG_MASK) | ((rung as u64) << BEATS_ME_RUNG_SHIFT)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Skill {
     Preflop,
@@ -57,10 +72,12 @@ pub enum Skill {
     Equity,
     Anchor,
     Table,
+    Chain,
+    BeatsMe,
 }
 
 impl Skill {
-    pub const ALL: [Skill; 14] = [
+    pub const ALL: [Skill; 16] = [
         Skill::Preflop,
         Skill::Nuts,
         Skill::Possible,
@@ -75,6 +92,8 @@ impl Skill {
         Skill::Equity,
         Skill::Anchor,
         Skill::Table,
+        Skill::Chain,
+        Skill::BeatsMe,
     ];
 
     pub fn name(self) -> &'static str {
@@ -93,6 +112,8 @@ impl Skill {
             Skill::Equity => "equity",
             Skill::Anchor => "anchor",
             Skill::Table => "table",
+            Skill::Chain => "chain",
+            Skill::BeatsMe => "beats_me",
         }
     }
 
@@ -104,9 +125,9 @@ impl Skill {
     pub fn step(self) -> Option<u8> {
         match self {
             Skill::Preflop => None,
-            Skill::Nuts | Skill::Possible | Skill::Made | Skill::Beats | Skill::BoardType => Some(1),
+            Skill::Nuts | Skill::Possible | Skill::Made | Skill::Beats | Skill::BoardType | Skill::BeatsMe => Some(1),
             Skill::Outs | Skill::Price | Skill::Hit | Skill::Equity | Skill::Anchor => Some(2),
-            Skill::Spot | Skill::SpotMw => Some(3),
+            Skill::Spot | Skill::SpotMw | Skill::Chain => Some(3),
             Skill::Table => Some(4),
         }
     }
@@ -135,8 +156,8 @@ pub struct SpotQuestion {
     /// C: the amount to call.
     pub call: u32,
     pub mode: SpotMode,
-    /// One assumed class per opponent.
-    pub opponents: Vec<OppClass>,
+    /// One assumed mix of hands per opponent.
+    pub opponents: Vec<OppMix>,
 }
 
 /// How the opponent is labelled in a next-card spot, which sets X.
@@ -151,6 +172,13 @@ impl SpotQuestion {
     /// X = 0 is a tight player; up to the size of the pot after calling is
     /// average; anything larger is a calling station.
     pub fn opponent_label(&self) -> OpponentLabel {
+        if let Some(player) = self.opponents.first().and_then(|m| m.player) {
+            return match player {
+                PlayerType::Tight => OpponentLabel::Tight,
+                PlayerType::Average => OpponentLabel::Average,
+                PlayerType::Loose => OpponentLabel::CallingStation,
+            };
+        }
         match self.mode {
             SpotMode::NextCard { x } if x > self.pot + self.call => OpponentLabel::CallingStation,
             SpotMode::NextCard { x } if x > 0 => OpponentLabel::Average,
@@ -201,6 +229,151 @@ impl EquityQuestion {
             EquityOpponents::Classes(_) => 1,
         }
     }
+}
+
+/// The stages of one whole-hand [`Skill::Chain`] item, in the order they are asked.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ChainStage {
+    Hand,
+    Outs,
+    Price,
+    Decide,
+}
+
+impl ChainStage {
+    pub const ALL: [ChainStage; 4] = [ChainStage::Hand, ChainStage::Outs, ChainStage::Price, ChainStage::Decide];
+
+    pub const fn index(self) -> usize {
+        match self {
+            ChainStage::Hand => 0,
+            ChainStage::Outs => 1,
+            ChainStage::Price => 2,
+            ChainStage::Decide => 3,
+        }
+    }
+
+    pub fn from_index(index: usize) -> Option<ChainStage> {
+        ChainStage::ALL.get(index).copied()
+    }
+
+    /// The code logged in the attempt log's stage column.
+    pub fn code(self) -> &'static str {
+        match self {
+            ChainStage::Hand => "hand",
+            ChainStage::Outs => "outs",
+            ChainStage::Price => "price",
+            ChainStage::Decide => "decide",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<ChainStage> {
+        ChainStage::ALL.into_iter().find(|s| s.code() == code)
+    }
+}
+
+/// How many stages one chain has.
+pub const CHAIN_STAGES: u64 = 4;
+
+/// The low bits of a [`Skill::Chain`] seed name the stage, so one hand is four
+/// seeds that differ only there.
+pub const CHAIN_STAGE_MASK: u64 = CHAIN_STAGES - 1;
+
+/// The stage a chain seed asks for.
+pub const fn chain_stage_of_seed(seed: u64) -> ChainStage {
+    match seed & CHAIN_STAGE_MASK {
+        0 => ChainStage::Hand,
+        1 => ChainStage::Outs,
+        2 => ChainStage::Price,
+        _ => ChainStage::Decide,
+    }
+}
+
+/// The seed shared by all four stages of a chain.
+pub const fn chain_hand_seed(seed: u64) -> u64 {
+    seed & !CHAIN_STAGE_MASK
+}
+
+/// The seed of `stage` of the chain `hand_seed` belongs to.
+pub const fn chain_seed_for_stage(hand_seed: u64, stage: ChainStage) -> u64 {
+    chain_hand_seed(hand_seed) | stage.index() as u64
+}
+
+/// One hand followed through four stages. Facts common to every stage live here;
+/// each stage only chooses what to ask about them.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ChainHand {
+    pub hero: Holding,
+    pub board: Vec<Card>,
+    /// The opponent whose exact hand the outs stage is counted against.
+    pub villain: Holding,
+    /// A second opponent, by assumed mix of hands, when the pot is three-way.
+    pub second: Option<OppMix>,
+    /// Pot before the bet.
+    pub pot_before: u32,
+    pub bet: u32,
+    pub mode: SpotMode,
+}
+
+impl ChainHand {
+    /// Players other than hero and the opponent in front of them.
+    pub fn callers(&self) -> u32 {
+        u32::from(self.second.is_some())
+    }
+
+    pub fn opponents(&self) -> u32 {
+        self.callers() + 1
+    }
+
+    /// The pot hero faces: the pot before the bet, the bet and any callers.
+    pub fn pot(&self) -> u32 {
+        self.pot_before + self.bet * self.opponents()
+    }
+
+    pub fn x(&self) -> u32 {
+        match self.mode {
+            SpotMode::AllIn => 0,
+            SpotMode::NextCard { x } => x,
+        }
+    }
+}
+
+/// What a [`Skill::BeatsMe`] item asks about hero's hand.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum BeatsMeAsk {
+    /// Rung 0: which of these four shown hands are ahead?
+    Which([Holding; 4]),
+    /// Rung 1: which kinds of hand beat you?
+    Kinds,
+    /// Rung 2: how many ways can this one holding type be held? `high` and
+    /// `low` are ranks and are equal for a pair.
+    Ways { high: u8, low: u8 },
+    /// Rung 3: are you ahead of this realistic mix?
+    Mix(OppMix),
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct BeatsMeQuestion {
+    pub hero: Holding,
+    pub board: Vec<Card>,
+    pub ask: BeatsMeAsk,
+}
+
+impl BeatsMeQuestion {
+    pub fn rung(&self) -> u8 {
+        match self.ask {
+            BeatsMeAsk::Which(_) => 0,
+            BeatsMeAsk::Kinds => 1,
+            BeatsMeAsk::Ways { .. } => 2,
+            BeatsMeAsk::Mix(_) => 3,
+        }
+    }
+}
+
+/// One stage of a chain, as a question.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ChainQuestion {
+    pub hand: ChainHand,
+    pub stage: ChainStage,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -256,6 +429,10 @@ pub enum Question {
     },
     /// A spot from the graded library, with its seed's suit permutation applied.
     Table(TableQuestion),
+    /// One stage of a whole hand.
+    Chain(ChainQuestion),
+    /// A rung of the "What beats you?" ladder.
+    BeatsMe(BeatsMeQuestion),
 }
 
 impl Question {
@@ -309,6 +486,28 @@ impl Question {
                 ..q.clone()
             }),
             Question::Table(q) => Question::Table(q.with_suit_perm(perm)),
+            Question::BeatsMe(q) => Question::BeatsMe(BeatsMeQuestion {
+                hero: holding(&q.hero),
+                board: board(&q.board),
+                ask: match &q.ask {
+                    BeatsMeAsk::Which(list) => BeatsMeAsk::Which([
+                        holding(&list[0]),
+                        holding(&list[1]),
+                        holding(&list[2]),
+                        holding(&list[3]),
+                    ]),
+                    other => other.clone(),
+                },
+            }),
+            Question::Chain(q) => Question::Chain(ChainQuestion {
+                hand: ChainHand {
+                    hero: holding(&q.hand.hero),
+                    board: board(&q.hand.board),
+                    villain: holding(&q.hand.villain),
+                    ..q.hand.clone()
+                },
+                stage: q.stage,
+            }),
         }
     }
 }

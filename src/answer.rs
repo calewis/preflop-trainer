@@ -1,7 +1,8 @@
 //! How each item is answered, as data, so a front end can build its own controls.
 
+use crate::beats_me::{BeatKind, MixBand};
 use crate::classes::MadeClass;
-use crate::item::Question;
+use crate::item::{BeatsMeAsk, BeatsMeQuestion, ChainQuestion, ChainStage, Question};
 use crate::preflop::{action_label, Action, Seat, Situation};
 
 /// Largest answer an `outs` item accepts.
@@ -22,6 +23,7 @@ pub enum AnswerFormat {
     MultiSelect {
         options: Vec<AnswerOption>,
         none_code: &'static str,
+        none_label: &'static str,
     },
     /// A whole number in `min..=max`.
     Integer { min: u32, max: u32 },
@@ -50,6 +52,33 @@ fn preflop_options(behind: u8, situation: Situation) -> Vec<AnswerOption> {
     options
 }
 
+/// Largest answer a `beats_me` count accepts: two different ranks with all cards unseen.
+pub const MAX_WAYS: u32 = 16;
+
+fn beats_me_format(q: &BeatsMeQuestion) -> AnswerFormat {
+    match q.ask {
+        BeatsMeAsk::Which(_) => AnswerFormat::MultiSelect {
+            options: vec![option("a", "Hand A"), option("b", "Hand B"), option("c", "Hand C"), option("d", "Hand D")],
+            none_code: "none",
+            none_label: "None of them",
+        },
+        BeatsMeAsk::Kinds => AnswerFormat::MultiSelect {
+            options: BeatKind::ALL.iter().map(|k| option(KIND_CODES[k_index(*k)], k.label())).collect(),
+            none_code: "none",
+            none_label: "Nothing beats you",
+        },
+        BeatsMeAsk::Ways { .. } => AnswerFormat::Integer { min: 0, max: MAX_WAYS },
+        BeatsMeAsk::Mix(_) => AnswerFormat::Choice(MixBand::ALL.iter().map(|b| option(b.code(), b.label())).collect()),
+    }
+}
+
+/// The kinds' codes as static strings, in [`BeatKind::ALL`] order.
+const KIND_CODES: [&str; 7] = ["p", "k", "t", "s", "r", "f", "h"];
+
+fn k_index(kind: BeatKind) -> usize {
+    BeatKind::ALL.iter().position(|k| *k == kind).expect("in ALL")
+}
+
 /// How the given question is answered.
 pub fn answer_format(question: &Question) -> AnswerFormat {
     match question {
@@ -64,8 +93,9 @@ pub fn answer_format(question: &Question) -> AnswerFormat {
                 option("h", "full house or quads"),
             ],
             none_code: "none",
+            none_label: "None of these",
         },
-        Question::Made { .. } => {
+        Question::Made { .. } | Question::Chain(ChainQuestion { stage: ChainStage::Hand, .. }) => {
             AnswerFormat::Choice(MadeClass::ALL.iter().map(|c| option(c.code(), c.label())).collect())
         }
         Question::Beats { .. } => AnswerFormat::Choice(vec![
@@ -74,15 +104,21 @@ pub fn answer_format(question: &Question) -> AnswerFormat {
             option("c", "10-30%"),
             option("d", "over 30%"),
         ]),
-        Question::Outs { .. } => AnswerFormat::Integer { min: 0, max: MAX_OUTS },
+        Question::Outs { .. } | Question::Chain(ChainQuestion { stage: ChainStage::Outs, .. }) => {
+            AnswerFormat::Integer { min: 0, max: MAX_OUTS }
+        }
         Question::Price { .. }
         | Question::Hit { .. }
         | Question::Equity(_)
-        | Question::Anchor { .. } => AnswerFormat::Percent,
-        Question::Spot(_) => AnswerFormat::Choice(vec![option("c", "call"), option("f", "fold")]),
+        | Question::Anchor { .. }
+        | Question::Chain(ChainQuestion { stage: ChainStage::Price, .. }) => AnswerFormat::Percent,
+        Question::Spot(_) | Question::Chain(ChainQuestion { stage: ChainStage::Decide, .. }) => {
+            AnswerFormat::Choice(vec![option("c", "call"), option("f", "fold")])
+        }
         Question::BoardType { options, .. } => {
             AnswerFormat::Choice(options.iter().map(|c| option(c.code(), c.label())).collect())
         }
         Question::Table(q) => AnswerFormat::Choice(q.options.clone()),
+        Question::BeatsMe(q) => beats_me_format(q),
     }
 }

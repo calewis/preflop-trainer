@@ -16,7 +16,7 @@ use poker_trainer::grade::{grade_timed, Outcome};
 use poker_trainer::item::{Item, Skill};
 use poker_trainer::log::{format_attempt, parse_log, Attempt, CheckRef, LOG_HEADER};
 use poker_trainer::progress::{
-    all_stats, baseline_runs, current_step, drill_skills, has_baseline, next_baseline_run,
+    all_stats, baseline_runs, current_step_for, drill_skills, has_baseline, next_baseline_run,
 };
 use poker_trainer::rng::Rng;
 use poker_trainer::schedule::{Origin, Session, SessionLimits};
@@ -35,7 +35,7 @@ Usage:
   poker-trainer progress    show results against the pass marks
 
 Skills: preflop, nuts, possible, made, beats, board_type, outs, price, hit, equity,
-anchor, spot, spot_mw, table
+anchor, spot, spot_mw, chain, table
 Type q at any question to quit and save.";
 
 fn main() -> ExitCode {
@@ -49,10 +49,6 @@ fn main() -> ExitCode {
         Some("drill") => parse_drill_args(&args[1..]).and_then(run_drill),
         Some("check") => parse_check_args(&args[1..]).and_then(run_check),
         Some("progress") if args.len() == 1 => run_progress(),
-        Some("gen-baseline") if args.len() == 1 => {
-            print!("{}", baseline::to_text(&baseline::generate_baseline()));
-            Ok(())
-        }
         Some("gen-anchors") if args.len() == 1 => {
             print!("{}", anchors::to_text(&anchors::generate_deck()));
             Ok(())
@@ -251,6 +247,9 @@ fn run_drill(args: DrillArgs) -> Result<(), String> {
     let started = Instant::now();
     let seed = args.seed.unwrap_or_else(clock_seed);
     let mut session = Session::new(allowed, &attempts, now_ms(), seed);
+    if args.skills.is_empty() {
+        session = session.with_preflop_floor();
+    }
     let style = style();
     let stdin = io::stdin();
     let mut input = stdin.lock();
@@ -258,7 +257,7 @@ fn run_drill(args: DrillArgs) -> Result<(), String> {
     let (mut asked_count, mut ok_count) = (0u64, 0u64);
 
     loop {
-        if limits.finished(asked_count, started.elapsed().as_millis() as u64) {
+        if !session.chain_in_progress() && limits.finished(asked_count, started.elapsed().as_millis() as u64) {
             break;
         }
         let Some(planned) = session.try_next_item() else {
@@ -277,9 +276,10 @@ fn run_drill(args: DrillArgs) -> Result<(), String> {
             Asked::Quit => break,
             Asked::Answered { outcome, response_ms } => (outcome, response_ms),
         };
-        store.append(&Attempt::from_drill(planned, &outcome, now_ms(), response_ms));
+        let attempt = Attempt::from_drill(planned, &outcome, now_ms(), response_ms);
+        store.append(&attempt);
         let ok = outcome.ok();
-        session.record_timed(planned, ok, response_ms);
+        session.record_with_family(planned, ok, response_ms, attempt.extra.family);
         asked_count += 1;
         ok_count += u64::from(ok);
         println!("{}", render::reveal(&outcome, style));
@@ -361,6 +361,6 @@ fn run_progress() -> Result<(), String> {
     let runs = baseline_runs(&attempts, baseline::BASELINE_SIZE);
     let checkups = checkup_runs(&attempts);
     let bias = equity_bias(&attempts);
-    print!("{}", render::progress_text(&stats, current_step(&stats), &runs, &checkups, &bias));
+    print!("{}", render::progress_text(&stats, current_step_for(&attempts), &runs, &checkups, &bias));
     Ok(())
 }
