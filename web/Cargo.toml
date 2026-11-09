@@ -1,0 +1,27 @@
+[package]
+name = "poker-trainer-web"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Its own workspace, so the library's manifest and lockfile are untouched.
+[workspace]
+
+[lib]
+name = "trainer_web"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "diff_native"
+path = "src/bin/diff_native.rs"
+
+[dependencies]
+poker-trainer = { path = ".." }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
