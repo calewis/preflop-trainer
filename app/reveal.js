@@ -38,6 +38,9 @@ export function questionView(q) {
       h('p', { class: 'context' }, q.both ? 'All the money is in, so both remaining cards are coming.' : 'One card is coming.'),
       prompt('What is your chance of hitting?'));
     case 'spot': return spotQuestion(q);
+    case 'board_type': return boardTypeQuestion(q);
+    case 'equity': return equityQuestion(q);
+    case 'anchor': return anchorQuestion(q);
     default: return h('p', {}, 'Unknown question');
   }
 }
@@ -88,6 +91,45 @@ function spotQuestion(q) {
       h('li', {}, betting)));
 }
 
+function boardTypeQuestion(q) {
+  const fill = h('span', { class: 'target-fill' });
+  fill.style.animationDuration = `${q.target_ms}ms`;
+  return h('div', { class: 'stack' },
+    board(q),
+    h('div', { class: 'target' },
+      h('span', { class: 'target-text' }, `Target: ${q.target_seconds} seconds`),
+      h('span', { class: 'target-track', 'aria-hidden': 'true' }, fill)),
+    prompt('Name the suit pattern and the rank pattern.'));
+}
+
+function equityQuestion(q) {
+  const many = q.opponents > 1;
+  const against = q.rung === 0
+    ? h('div', { class: 'opp-row' }, q.exact.map((cards, i) => h('div', { class: 'stack tight' },
+      h('p', { class: 'label' }, many ? `Opponent ${i + 1} shows` : 'Opponent shows'), cardRow(cards, 'opp'))))
+    : h('ul', { class: 'facts' }, q.classes.map((text, i) => h('li', {},
+      many ? `Assume opponent ${i + 1} has ${text}.` : `Assume they have ${text}.`)));
+  return h('div', { class: 'stack compact' },
+    hand(q.hero),
+    labelled(`Board (${q.street})`, cardRow(q.board, 'board')),
+    against,
+    prompt('Everyone is all-in and all remaining cards run out. What is your equity?'));
+}
+
+function anchorQuestion(q) {
+  if (q.matchup) {
+    return h('div', { class: 'stack' },
+      h('p', { class: 'context anchor-label' }, q.matchup.label),
+      hand(q.matchup.hero),
+      labelled('Opponent shows', cardRow(q.matchup.villain, 'opp')),
+      labelled('Flop', cardRow(q.matchup.board, 'board')),
+      prompt(q.prompt));
+  }
+  return h('div', { class: 'stack' },
+    q.hand ? hand(q.hand) : null,
+    prompt(q.prompt));
+}
+
 function holdingCards(cards) {
   return h('span', { class: 'mini-cards' }, cards.map(c => card(c, 'small')));
 }
@@ -118,6 +160,9 @@ function revealBody(r) {
     ];
     case 'hit': return hitReveal(r);
     case 'spot': return spotReveal(r);
+    case 'board_type': return boardTypeReveal(r);
+    case 'equity': return equityReveal(r);
+    case 'anchor': return anchorReveal(r);
     default: return [];
   }
 }
@@ -207,12 +252,49 @@ function spotReveal(r) {
   ];
 }
 
+function boardTypeReveal(r) {
+  return [
+    answerLine(r.answer),
+    p(r.why_suit, ' ', r.why_rank),
+    r.matched ? null : p(`You said ${r.chosen}.`),
+    r.slow_note ? p(r.slow_note) : null,
+  ];
+}
+
+function equityReveal(r) {
+  return [
+    h('p', { class: 'reveal-answer' }, 'Exact equity: ', h('strong', {}, r.answer)),
+    p(`${r.error}.`),
+    h('dl', { class: 'stat-list' },
+      row('You said', r.estimate),
+      row(`Within ${plural(r.band, 'point', 'points')} counts as a hit`, r.hit ? 'Hit' : 'Miss')),
+    p(!r.combos
+      ? 'These are exact hands, so there is just one matchup to work out.'
+      : r.tuples
+      ? `Worked out over ${r.combos} opponent combos (${r.tuples} possible once clashing cards are removed).`
+      : r.sampled
+        ? `Estimated over ${r.combos} opponent combos from a ${r.sample_size}-outcome sample.`
+        : `Worked out over ${r.combos} opponent combos.`),
+  ];
+}
+
+function anchorReveal(r) {
+  return [
+    h('p', { class: 'reveal-answer' }, 'Answer: ', h('strong', {}, r.answer)),
+    p(`${r.error}.`),
+    h('dl', { class: 'stat-list' },
+      row('You said', r.estimate),
+      row(`Within ${plural(r.tolerance, 'point', 'points')} counts as correct`, r.hit ? 'Yes' : 'No')),
+  ];
+}
+
 function row(label, value) {
   return [h('dt', {}, label), h('dd', {}, value)];
 }
 
 export function revealView(outcome) {
-  const verdict = outcome.correct ? 'Correct.' : outcome.close ? 'Close.' : 'Not quite.';
+  const verdict = outcome.correct ? 'Correct.' : outcome.close ? 'Close.'
+    : outcome.reveal.too_slow ? 'Too slow.' : 'Not quite.';
   const tone = outcome.correct ? 'good' : outcome.close ? 'close' : 'bad';
   return h('div', { class: `reveal ${tone}` },
     h('p', { class: 'verdict' }, verdict, ' ', h('span', { class: 'you' }, `You answered ${outcome.picked}.`)),

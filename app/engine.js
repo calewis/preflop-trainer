@@ -118,6 +118,10 @@ export function prepareBaseline(seed, index, urgent) {
   return request(`b:${seed}:${index}`, ['prepare_baseline', seed, index], urgent);
 }
 
+export function prepareCheck(skill, form, slot, run, urgent) {
+  return request(`c:${skill}:${form}:${slot}:${run}`, ['prepare_check', skill, form, slot, run], urgent);
+}
+
 /** Drops speculative work that hasn't started, keeping anything being waited on. */
 export function clearSpeculation(keepKeys) {
   for (const job of queue.splice(0)) {

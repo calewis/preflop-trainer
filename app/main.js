@@ -1,7 +1,7 @@
 import { engine, onFatalError, prepareDrill } from './engine.js';
 import * as store from './store.js';
-import { showHome, showDrill, showBaseline, showCard, showProgress, showBackup,
-  drillActive, baselineActive, endEverything, noticeIfStorageLost, showFatalNotice, activeNow } from './screens.js';
+import { showHome, showDrill, showBaseline, showCheckup, showCard, showProgress, showBackup,
+  drillActive, baselineActive, checkupActive, endEverything, noticeIfStorageLost, showFatalNotice, activeNow } from './screens.js';
 
 const fatal = showFatalNotice;
 onFatalError(fatal);
@@ -11,18 +11,20 @@ const routes = {
   home: showHome,
   drill: showDrill,
   baseline: showBaseline,
+  checkup: showCheckup,
   card: showCard,
   progress: showProgress,
   backup: showBackup,
 };
 
 async function route() {
-  const name = location.hash.replace('#', '') || 'home';
-  // Leaving a drill or baseline by the back gesture ends it; answers are kept.
-  if ((drillActive() && name !== 'drill') || (baselineActive() && name !== 'baseline')) endEverything();
+  const [name, arg] = (location.hash.replace('#', '') || 'home').split(':');
+  // Leaving a drill, baseline or checkup by the back gesture ends it; answers are kept.
+  if ((drillActive() && name !== 'drill') || (baselineActive() && name !== 'baseline')
+      || (checkupActive() && name !== 'checkup')) endEverything();
   const show = routes[name] || showHome;
   try {
-    await show();
+    await show(arg);
   } catch (err) {
     fatal(err.message || String(err));
     throw err;

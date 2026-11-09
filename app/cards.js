@@ -26,7 +26,7 @@ export function cardName(card) {
   return `${RANK_WORD[card[0]]} of ${SUIT_WORD[card[1]]}`;
 }
 
-/** A card such as "Ah". Size: 'hero' | 'board' | 'small'. */
+/** A card such as "Ah". Size: 'hero' | 'board' | 'opp' | 'small'. */
 export function card(text, size = 'board') {
   const rank = text[0] === 'T' ? '10' : text[0];
   const suit = text[1];

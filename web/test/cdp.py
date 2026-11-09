@@ -146,13 +146,19 @@ class Page:
         raise TimeoutError(f"timed out waiting for: {expression[:300]}")
 
     def navigate(self, url):
-        self.send("Page.navigate", {"url": url})
+        # A renderer that never answers must fail the section, not hang the run.
+        self.send("Page.navigate", {"url": url}, timeout=90)
 
     def reload(self):
         self.send("Page.reload", {"ignoreCache": False})
 
-    def screenshot(self, path):
-        data = self.send("Page.captureScreenshot", {"format": "png"})["data"]
+    def screenshot(self, path, full=False):
+        params = {"format": "png"}
+        if full:
+            size = self.send("Page.getLayoutMetrics")["cssContentSize"]
+            params.update(captureBeyondViewport=True,
+                          clip={"x": 0, "y": 0, "width": size["width"], "height": size["height"], "scale": 1})
+        data = self.send("Page.captureScreenshot", params)["data"]
         with open(path, "wb") as f:
             f.write(base64.b64decode(data))
 

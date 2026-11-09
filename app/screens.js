@@ -1,6 +1,6 @@
 // The app's screens. Each `show*` function fills the page and sets the key handler.
 import { h } from './dom.js';
-import { engine, prepareDrill, prepareBaseline, clearSpeculation, drillKey } from './engine.js';
+import { engine, prepareDrill, prepareBaseline, prepareCheck, clearSpeculation, drillKey } from './engine.js';
 import { answerControls } from './answers.js';
 import { questionView, revealView } from './reveal.js';
 import * as store from './store.js';
@@ -58,7 +58,7 @@ export async function showHome() {
   const home = await engine.call('home');
   const opened = await engine.call('session_open', randomSeed(), Date.now());
   prepared = opened.first;
-  prepareDrill(prepared, false);
+  if (prepared) prepareDrill(prepared, false);
   let minutes = store.readMinutes();
   if (![5, 10, 15].includes(minutes)) minutes = 10;
 
@@ -82,6 +82,9 @@ export async function showHome() {
       h('div', { class: 'seg-group', role: 'group', 'aria-label': 'Drill length' }, lengthButtons),
       h('button', { class: 'btn primary', onclick: () => startDrill(minutes) }, 'Start drill'),
       h('p', { class: 'hint' }, 'In rotation: ', home.rotation.join(', '), '.')),
+    home.checkups.length ? h('section', { class: 'panel', 'data-checkup-offers': '' },
+      h('h2', { class: 'panel-title' }, 'Checkups'),
+      home.checkups.map(checkupLink)) : null,
     h('section', { class: 'panel' },
       h('h2', { class: 'panel-title' }, `Step ${home.step} of ${home.step_count}`),
       h('ul', { class: 'steps' }, home.steps.map(stepRow))),
@@ -95,12 +98,20 @@ export async function showHome() {
 
 function link(href, text) { return h('a', { class: 'home-link', href }, text); }
 
+function checkupLink(action) {
+  const text = action.resume
+    ? `Resume checkup: ${action.title} (${action.answered} of ${action.total})`
+    : `Take checkup: ${action.title}`;
+  return h('a', { class: 'btn', href: `#checkup:${action.skill}` }, text);
+}
+
 function stepRow(step) {
   const state = step.passed ? 'Passed' : step.current ? 'Current' : step.unlocked ? 'Open' : 'Locked';
   return h('li', { class: step.unlocked ? 'step' : 'step locked' },
     h('div', { class: 'step-head' }, h('span', {}, `Step ${step.step}`), h('span', { class: `pill ${step.passed ? 'good' : ''}` }, state)),
-    h('p', { class: 'step-skills' }, step.skills.map((s, i) =>
-      [i > 0 ? ', ' : '', s.passed ? h('strong', {}, `${s.title} (passed)`) : s.title])));
+    h('p', { class: 'hint' }, `Drills ${step.drill_passed ? 'passed' : 'not yet'}, checkups ${step.checkup_passed ? 'passed' : 'not yet'}.`),
+    h('ul', { class: 'step-skill-list' }, step.skills.map(s =>
+      h('li', { class: s.passed ? 'done' : '' }, h('strong', {}, s.title), ': ', s.status))));
 }
 
 // --- Drill ---------------------------------------------------------------------
@@ -172,6 +183,12 @@ function renderFailure(err, leave) {
       h('button', { class: 'btn', onclick: leave.action }, leave.label)));
 }
 
+// Grading can take a moment on a phone; say so rather than looking frozen.
+function showPending(slot) {
+  const timer = setTimeout(() => { slot.textContent = 'Working it out...'; }, 150);
+  return () => { clearTimeout(timer); slot.textContent = ''; };
+}
+
 async function nextDrillItem() {
   const state = drill;
   if (!state) return;
@@ -181,7 +198,7 @@ async function nextDrillItem() {
     const elapsed = Math.round(activeNow() - state.startedAt);
     const next = await engine.call('session_next', elapsed);
     if (drill !== state) return;
-    if (next.finished) { await finishDrill(); return; }
+    if (next.finished) { await finishDrill(next.out_of_items); return; }
     const planned = next.planned;
     // Only show the waiting message if the item isn't already prepared.
     timer = setTimeout(() => { if (drill === state) renderLoading(leave); }, 150);
@@ -201,9 +218,9 @@ async function speculate(planned) {
     engine.call('session_peek', 1),
     engine.call('session_peek', 0),
   ]);
-  clearSpeculation([drillKey(right.planned), drillKey(wrong.planned)]);
-  prepareDrill(right.planned, false);
-  prepareDrill(wrong.planned, false);
+  const upcoming = [right.planned, wrong.planned].filter(Boolean);
+  clearSpeculation(upcoming.map(drillKey));
+  upcoming.forEach(item => prepareDrill(item, false));
 }
 
 const ORIGIN_TAG = { new: '', due: 'review', retry: 'again' };
@@ -212,6 +229,7 @@ function showItem(planned, bundle) {
   const tag = ORIGIN_TAG[planned.origin];
   const status = h('div', { role: 'status', 'aria-live': 'polite', class: 'live-slot' });
   const errorSlot = h('p', { class: 'hint error', role: 'alert' });
+  const pendingSlot = h('p', { class: 'hint', role: 'status', 'data-pending': '' });
   const shownAt = activeNow();
   // Real time, so a missed visibility event can never make answers ignored.
   const appearedAt = performance.now();
@@ -224,15 +242,24 @@ function showItem(planned, bundle) {
     const response = Math.round(activeNow() - shownAt);
     let outcome = bundle.graded[raw];
     if (!outcome) {
+      const enabled = [...controls.el.querySelectorAll('button:not([disabled])')];
+      enabled.forEach(b => { b.disabled = true; });
+      const keys = onKey;
+      onKey = null;
+      const stopPending = showPending(pendingSlot);
       let graded;
       try {
-        graded = await engine.call('grade', planned.skill, planned.seed, raw);
+        graded = await engine.call('grade', planned.skill, planned.seed, raw, response);
       } catch (err) {
+        stopPending();
         renderFailure(err, { label: 'End', action: endDrill });
         return;
       }
+      stopPending();
       if (graded.invalid) {
         errorSlot.textContent = graded.invalid;
+        enabled.forEach(b => { b.disabled = false; });
+        onKey = keys;
         locked = false;
         return;
       }
@@ -245,7 +272,7 @@ function showItem(planned, bundle) {
   screen(
     drillHeader(bundle.title, tag),
     h('section', { class: 'question' }, questionView(bundle.question)),
-    h('section', { class: 'answers' }, controls.el, errorSlot),
+    h('section', { class: 'answers' }, controls.el, errorSlot, pendingSlot),
     status);
   onKey = controls.onKey;
   const lockControls = () => controls.el.querySelectorAll('button').forEach(b => { b.disabled = true; });
@@ -308,7 +335,7 @@ function endDrill() {
   finishDrill();
 }
 
-async function finishDrill() {
+async function finishDrill(outOfItems) {
   const state = drill;
   if (!state) return;
   if (state.clock) clearInterval(state.clock);
@@ -321,12 +348,15 @@ async function finishDrill() {
     location.hash = '#home';
     return;
   }
-  if (summary.answered === 0) { location.hash = '#home'; return; }
+  if (summary.answered === 0 && !outOfItems) { location.hash = '#home'; return; }
   screen(
     h('header', { class: 'top-bar' },
       h('span', {}, ''), h('h1', { class: 'top-title' }, 'Session done'), h('span', {}, '')),
     h('section', { class: 'panel' },
-      h('p', { class: 'big-score' }, `${summary.ok} of ${summary.answered} right`),
+      summary.answered === 0
+        ? h('p', { class: 'big-score small' }, 'Nothing is due right now.')
+        : h('p', { class: 'big-score' }, `${summary.ok} of ${summary.answered} right`),
+      outOfItems ? h('p', { class: 'hint' }, 'You have gone through everything this session had to deal. Come back later for more.') : null,
       h('dl', { class: 'stat-list' }, summary.by_skill.map(s => [h('dt', {}, s.title), h('dd', {}, `${s.ok} of ${s.answered}`)])),
       h('p', { class: 'hint' }, store.storageAvailable()
         ? 'Saved to your attempt log.'
@@ -355,7 +385,7 @@ export async function showBaseline() {
 }
 
 async function baselineHistory() {
-  const progress = await engine.call('progress');
+  const progress = await engine.call('progress', Date.now());
   if (!progress.runs.length) return null;
   return h('section', { class: 'panel' },
     h('h2', { class: 'panel-title' }, 'Earlier runs'),
@@ -484,6 +514,201 @@ function runLine(run) {
   return h('li', {}, `Run ${run.run}${runDate(run) ? ` (${runDate(run)})` : ''}: ${run.ok} of ${run.answered}, ${steps}${run.complete ? '' : ', unfinished'}`);
 }
 
+// --- Checkups ------------------------------------------------------------------
+let checkup = null;
+
+export function checkupActive() { return checkup !== null; }
+
+export async function showCheckup(skill) {
+  if (checkup && checkup.skill === skill) { renderCheckupItem(); return; }
+  await syncFromStorage();
+  let info;
+  try {
+    info = await engine.call('check_info', skill);
+  } catch (_) {
+    location.hash = '#home';
+    return;
+  }
+  screen(
+    topBar('Checkup'),
+    h('section', { class: 'panel' },
+      h('h2', {}, info.title),
+      h('p', {}, `${info.total} questions: ${info.originals} new ones and ${info.repeats} repeats. No feedback until the end.`),
+      info.in_progress
+        ? h('p', { class: 'hint' }, `You have an unfinished checkup: ${info.in_progress.answered} of ${info.in_progress.total} answered.`)
+        : null,
+      info.in_progress
+        ? h('button', { class: 'btn primary', onclick: () => beginCheckup(info, true) }, 'Resume')
+        : h('button', { class: 'btn primary', onclick: () => beginCheckup(info, false) }, 'Begin'),
+      info.in_progress
+        ? h('button', { class: 'btn', onclick: () => beginCheckup(info, false) }, 'Start over with new questions')
+        : null),
+    info.history.length ? h('section', { class: 'panel' },
+      h('h2', { class: 'panel-title' }, 'Earlier checkups'),
+      h('ul', { class: 'facts' }, info.history.slice().reverse().map(checkupLine))) : null);
+}
+
+let startingCheckup = false;
+
+async function beginCheckup(info, resume) {
+  if (startingCheckup || checkup) return;
+  startingCheckup = true;
+  try {
+    await syncFromStorage();
+    const opened = await engine.call('check_begin', info.skill, resume ? 1 : 0);
+    checkup = { skill: opened.skill, title: opened.title, run: opened.run, form: opened.form, total: opened.total, slot: null };
+    await renderCheckupItem();
+  } finally {
+    startingCheckup = false;
+  }
+}
+
+async function renderCheckupItem() {
+  const state = checkup;
+  if (!state) return;
+  const leave = { label: 'Stop', action: finishCheckup };
+  let next;
+  try {
+    next = await engine.call('check_next', state.skill, state.run);
+  } catch (err) {
+    if (checkup === state) renderFailure(err, leave);
+    return;
+  }
+  if (checkup !== state) return;
+  if (next.done) { finishCheckup(); return; }
+  const slot = next.slot;
+  state.slot = slot;
+  let bundle;
+  let timer;
+  try {
+    timer = setTimeout(() => { if (checkup === state && state.slot === slot) renderLoading(leave); }, 150);
+    bundle = await prepareCheck(state.skill, state.form, slot, state.run, true);
+  } catch (err) {
+    if (checkup === state) renderFailure(err, leave);
+    return;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (checkup !== state || state.slot !== slot) return;
+  if (next.after !== null) prepareCheck(state.skill, state.form, next.after, state.run, false);
+  let locked = false;
+  const shownAt = activeNow();
+  const appearedAt = performance.now();
+  window.__trainer.current = { checkSlot: slot, number: next.number, skill: state.skill, form: state.form, run: state.run, bundle, shownAt, appearedAt };
+  const errorSlot = h('p', { class: 'hint error', role: 'alert' });
+  const pendingSlot = h('p', { class: 'hint', role: 'status', 'data-pending': '' });
+
+  async function submit(raw) {
+    if (locked || performance.now() - appearedAt < MIN_ANSWER_MS) return;
+    locked = true;
+    const response = Math.round(activeNow() - shownAt);
+    const buttons = [...controls.el.querySelectorAll('button')];
+    buttons.forEach(b => { b.disabled = true; });
+    const keys = onKey;
+    onKey = null;
+    try {
+      let outcome = bundle.graded[raw];
+      if (!outcome) {
+        const stopPending = showPending(pendingSlot);
+        const graded = await engine.call('check_grade', state.skill, state.form, slot, state.run, raw, response)
+          .finally(stopPending);
+        if (graded.invalid) {
+          errorSlot.textContent = graded.invalid;
+          locked = false;
+          buttons.forEach(b => { b.disabled = false; });
+          onKey = keys;
+          return;
+        }
+        outcome = graded.outcome;
+      }
+      // Another tab may have answered; the commit only keeps the first answer to a slot.
+      await syncFromStorage();
+      let result = await engine.call('check_commit', outcome.attempt, Date.now(), response);
+      // Another tab took this run number for a different checkup: use a new one
+      // and keep this form and place. The answer stays unlogged until it lands.
+      for (let tries = 0; result.conflict && tries < 3; tries += 1) {
+        const fresh = await engine.call('check_begin', state.skill, 0, state.form);
+        state.run = fresh.run;
+        result = await engine.call('check_commit', outcome.attempt, Date.now(), response, state.run);
+      }
+      if (result.conflict) throw new Error('this checkup could not get a run number');
+      if (result.line) store.appendLogLine(result.line);
+      noticeIfStorageLost();
+    } catch (err) {
+      if (checkup === state) renderFailure(err, leave);
+      return;
+    }
+    if (checkup === state) renderCheckupItem();
+  }
+
+  const controls = answerControls(bundle.format, submit);
+  screen(
+    h('header', { class: 'top-bar' },
+      h('button', { class: 'back', onclick: finishCheckup }, 'Stop'),
+      h('h1', { class: 'top-title' }, bundle.title),
+      h('div', { class: 'top-right' }, h('span', { class: 'count' }, `${next.number} of ${next.total}`))),
+    h('section', { class: 'question' }, questionView(bundle.question)),
+    h('section', { class: 'answers' }, controls.el, errorSlot, pendingSlot));
+  onKey = controls.onKey;
+}
+
+async function finishCheckup() {
+  const state = checkup;
+  if (!state) return;
+  checkup = null;
+  let result;
+  try {
+    result = await engine.call('check_report', state.run);
+  } catch (err) {
+    showFatalNotice(err.message || String(err));
+    location.hash = '#home';
+    return;
+  }
+  const r = result.report;
+  if (!r) {
+    screen(topBar('Checkup'), h('section', { class: 'panel' }, h('p', {}, 'No answers were recorded, so there is nothing to score.')));
+    return;
+  }
+  if (!r.summary.complete) {
+    screen(
+      topBar('Checkup saved'),
+      h('section', { class: 'panel' },
+        h('p', { class: 'big-score small' }, `${r.summary.answered} of ${state.total} answered`),
+        h('p', {}, 'Your answers are saved. You can pick up where you left off from Home or Progress.')),
+      h('div', { class: 'action-bar' }, h('a', { class: 'btn primary', href: '#home' }, 'Home')));
+    return;
+  }
+  screen(
+    topBar('Checkup result'),
+    h('section', { class: 'panel' },
+      h('h2', {}, state.title),
+      h('p', { class: 'big-score' }, r.summary.score),
+      h('p', { class: 'hint' }, `${r.summary.margin[0].toUpperCase()}${r.summary.margin.slice(1)}. Scored on the ${r.originals} new questions.`),
+      h('p', { class: r.summary.passed ? 'mark-line good' : 'mark-line' }, r.summary.status),
+      h('dl', { class: 'stat-list' },
+        row('Mark', r.mark.join(', ')),
+        row('You', r.measures.join(', '))),
+      h('p', {}, r.repeats)),
+    h('section', { class: 'panel' },
+      h('h2', { class: 'panel-title' }, 'Earlier checkups'),
+      r.comparison ? h('p', {}, r.comparison) : null,
+      result.earlier.length
+        ? h('ul', { class: 'facts' }, result.earlier.slice().reverse().map(checkupLine))
+        : h('p', { class: 'hint' }, 'This is your first checkup for this skill, so there is nothing to compare yet.')),
+    h('div', { class: 'action-bar' }, h('a', { class: 'btn primary', href: '#home' }, 'Home')));
+}
+
+function row(label, value) {
+  return [h('dt', {}, label), h('dd', {}, value)];
+}
+
+function checkupLine(run) {
+  const date = runDate(run);
+  const prefix = `${run.title}${date ? ` (${date})` : ''}`;
+  if (!run.complete) return h('li', {}, `${prefix}: ${run.status}`);
+  return h('li', {}, `${prefix}: ${run.score}, ${run.margin}. ${run.status}.`);
+}
+
 // --- Preflop card ------------------------------------------------------------
 let cardState = { seat: 'cutoff', situation: 'folded' };
 
@@ -533,27 +758,93 @@ export async function showCard() {
 // --- Progress --------------------------------------------------------------
 export async function showProgress() {
   await syncFromStorage();
-  const data = await engine.call('progress');
+  const data = await engine.call('progress', Date.now());
   screen(
     topBar('Progress'),
     h('section', { class: 'panel' },
       h('p', { class: 'big-score small' }, `Step ${data.step} of ${data.step_count}`),
       h('p', { class: 'hint' }, data.step_skills.join(', '), '. Pass marks are starting guesses.')),
     h('section', { class: 'panel' },
+      h('h2', { class: 'panel-title' }, 'Steps'),
+      h('ul', { class: 'steps' }, data.steps.map(stepRow))),
+    h('section', { class: 'panel' },
       h('h2', { class: 'panel-title' }, 'Skills'),
       data.skills.map(s => h('article', { class: 'skill-row' },
         h('div', { class: 'step-head' }, h('h3', {}, s.title),
-          s.passed ? h('span', { class: 'pill good' }, 'Passed') : null),
+          h('span', { class: 'pills' },
+            h('span', { class: `pill ${s.drill_passed ? 'good' : ''}` }, s.drill_passed ? 'Drill passed' : 'Drill not yet'),
+            h('span', { class: `pill ${s.checkup_passed === true ? 'good' : ''}` },
+              s.checkup_passed === null ? 'Checkup not taken' : s.checkup_passed ? 'Checkup passed' : 'Checkup missed'))),
         s.enough_data
           ? h('p', {}, s.stats.join(', '), '.')
           : h('p', { class: 'hint' }, `Not enough data (${s.total} of ${s.needed} attempts).`),
         h('p', { class: 'hint' }, 'Pass mark: ', s.mark.join(', '), '.'),
-        s.enough_data && !s.passed ? h('p', { class: 'hint' }, s.status) : null))),
+        h('p', { class: 'hint' }, s.status),
+        s.checkup ? checkupLink(s.checkup) : null))),
+    boardTypePanel(data.board_types),
+    equityPanel(data.equity),
+    anchorPanel(data.anchors),
+    h('section', { class: 'panel' },
+      h('h2', { class: 'panel-title' }, 'Checkup history'),
+      data.checkups.length
+        ? h('ul', { class: 'facts' }, data.checkups.slice().reverse().map(checkupLine))
+        : h('p', { class: 'hint' }, 'No checkups yet.')),
     h('section', { class: 'panel' },
       h('h2', { class: 'panel-title' }, 'Baseline history'),
       data.runs.length
         ? h('ul', { class: 'facts' }, data.runs.map(runLine))
         : h('p', { class: 'hint' }, 'No baseline on record yet.')));
+}
+
+function miniTable(headers, rows) {
+  return h('table', { class: 'mini-table' },
+    h('thead', {}, h('tr', {}, headers.map(text => h('th', {}, text)))),
+    h('tbody', {}, rows.map(cells => h('tr', {}, cells.map(text => h('td', {}, text))))));
+}
+
+function boardTypePanel(info) {
+  return h('section', { class: 'panel' },
+    h('h2', { class: 'panel-title' }, 'Reading the board, by category'),
+    info.enough_data
+      ? miniTable(['Category', 'Right', 'In a row', 'Status'],
+        info.rows.map(r => [r.label, `${r.correct} of ${r.attempts}`, r.streak, r.status]))
+      : h('p', { class: 'hint' }, `Not enough data (${info.attempts} of ${info.needed} attempts).`));
+}
+
+function equityPanel(info) {
+  const bias = info.bias;
+  return h('section', { class: 'panel' },
+    h('h2', { class: 'panel-title' }, 'Estimating equity'),
+    h('p', {}, `Now practising with ${info.rung_label}.`),
+    h('ul', { class: 'facts' }, info.bands.map(line => h('li', {}, line))),
+    h('h3', { class: 'sub-title' }, 'How your estimates lean'),
+    bias.enough_data
+      ? [
+        h('p', {}, bias.overall),
+        bias.by_opponents.length
+          ? [miniTable(['Opponents', 'Error', 'Hands'], bias.by_opponents.map(r => [r.label, r.error, r.count])),
+            biasSentences(bias.by_opponents)] : null,
+        bias.by_truth.length
+          ? [miniTable(['How strong you are', 'Error', 'Hands'], bias.by_truth.map(r => [r.label, r.error, r.count])),
+            biasSentences(bias.by_truth)] : null,
+      ]
+      : h('p', { class: 'hint' }, `Not enough data (${bias.count} of ${bias.needed} estimates).`));
+}
+
+function biasSentences(rows) {
+  const lines = rows.filter(r => r.sentence);
+  return lines.length ? h('ul', { class: 'facts' }, lines.map(r => h('li', {}, r.sentence))) : null;
+}
+
+function anchorPanel(info) {
+  return h('section', { class: 'panel' },
+    h('h2', { class: 'panel-title' }, 'Key numbers'),
+    info.seen === 0
+      ? h('p', { class: 'hint' }, `Not enough data (0 of ${info.deck} cards seen yet).`)
+      : [
+        h('p', {}, `${info.seen} of ${info.deck} cards seen. ${info.due} due now. ${info.new} still new.`),
+        miniTable(['Box', 'Cards'], info.boxes.map(b => [b.label, b.count])),
+      ]);
 }
 
 // --- Backup ----------------------------------------------------------------
@@ -658,4 +949,5 @@ export function endEverything() {
   if (drill && drill.clock) clearInterval(drill.clock);
   drill = null;
   baseline = null;
+  checkup = null;
 }

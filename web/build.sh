@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 # When prefixes overlap the last match wins, so the repo root goes last.
 RUSTFLAGS="--remap-path-prefix=$HOME=/home --remap-path-prefix=$PWD=/src" \
   cargo build --manifest-path web/Cargo.toml --release --lib --target wasm32-unknown-unknown
-cp web/target/wasm32-unknown-unknown/release/trainer_web.wasm app/trainer.wasm
+cp "${CARGO_TARGET_DIR:-web/target}"/wasm32-unknown-unknown/release/trainer_web.wasm app/trainer.wasm
 python3 - <<'PY'
 import hashlib, pathlib, re
 files = sorted(p for p in pathlib.Path("app").iterdir() if p.is_file())
