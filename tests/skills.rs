@@ -16,7 +16,7 @@ use poker_trainer::grade::{
     possible_analysis, spot_analysis, BeatsBucket, EvBand, Outcome, Reveal,
 };
 use poker_trainer::item::{HitStreet, Item, Question, Skill, SpotMode, SpotQuestion, GEN_VERSION};
-use poker_trainer::log::{format_attempt, parse_log, Attempt, ItemRef, Mode};
+use poker_trainer::log::{format_attempt, parse_log, Attempt, CheckRef, ItemRef, Mode};
 use poker_trainer::money;
 use poker_trainer::preflop::{action_label, preflop_answer, Action, Seat, Situation, CARD};
 use poker_trainer::progress::{
@@ -1241,6 +1241,7 @@ fn attempt(skill: Skill, seed: u64, t: u64, correct: bool) -> Attempt {
         ev_loss_pct: None,
         response_ms: 1000,
         answer: "x".to_string(),
+        extra: Default::default(),
     }
 }
 
@@ -1263,7 +1264,7 @@ fn never_three_of_one_skill_in_a_row() {
     let mut session = Session::new(allowed, &[], 0, 5);
     let mut history = Vec::new();
     for i in 0..3000 {
-        let planned = session.next_item();
+        let planned = session.try_next_item().unwrap();
         history.push(planned.skill);
         session.record(planned, i % 3 != 0);
     }
@@ -1279,7 +1280,7 @@ fn a_miss_returns_after_three_to_six_others() {
     let mut asked: Vec<(u64, Origin)> = Vec::new();
     let mut retries = 0;
     for i in 0..4000 {
-        let planned = session.next_item();
+        let planned = session.try_next_item().unwrap();
         if planned.origin == Origin::SessionRetry {
             retries += 1;
             let first = asked
@@ -1302,7 +1303,7 @@ fn an_item_returns_at_most_once_per_session() {
     let mut session = Session::new(allowed, &[], 0, 21);
     let mut seen: std::collections::HashMap<u64, u32> = std::collections::HashMap::new();
     for _ in 0..600 {
-        let planned = session.next_item();
+        let planned = session.try_next_item().unwrap();
         *seen.entry(planned.seed).or_insert(0) += 1;
         session.record(planned, false);
     }
@@ -1315,7 +1316,7 @@ fn retries_never_crowd_out_new_items() {
     let mut session = Session::new(allowed, &[], 0, 8);
     let (mut retries, mut new_items) = (0u32, 0u32);
     for dealt in 1..=120u32 {
-        let planned = session.next_item();
+        let planned = session.try_next_item().unwrap();
         if planned.origin == Origin::SessionRetry {
             retries += 1;
         } else {
@@ -1422,7 +1423,7 @@ fn session_deals_due_items_for_allowed_skills_only() {
     let mut session = Session::new(vec![Skill::Preflop, Skill::Nuts], &log, FIRST_REVIEW_MS, 3);
     let mut saw_due = false;
     for _ in 0..200 {
-        let planned = session.next_item();
+        let planned = session.try_next_item().unwrap();
         assert_ne!(planned.skill, Skill::Spot);
         saw_due |= planned.origin == Origin::Due && planned.seed == 7;
         session.record(planned, true);
@@ -1453,15 +1454,15 @@ fn below_twenty_attempts_is_not_enough_data() {
 fn a_skill_needs_a_full_forty_attempts_to_pass() {
     let short = skill_stats(Skill::Nuts, &filled(Skill::Nuts, 39, true, 1000));
     assert!(short.enough_data, "20 or more attempts display their stats");
-    assert!(!short.passed, "39 attempts can't pass");
-    assert!(skill_stats(Skill::Nuts, &filled(Skill::Nuts, 40, true, 1000)).passed);
+    assert!(!short.drill_passed, "39 attempts can't pass");
+    assert!(skill_stats(Skill::Nuts, &filled(Skill::Nuts, 40, true, 1000)).drill_passed);
 }
 
 #[test]
 fn pass_marks_check_accuracy_and_speed_over_the_last_forty() {
-    assert!(skill_stats(Skill::Nuts, &filled(Skill::Nuts, 40, true, 6000)).passed);
-    assert!(!skill_stats(Skill::Nuts, &filled(Skill::Nuts, 40, true, 6500)).passed);
-    assert!(skill_stats(Skill::Beats, &filled(Skill::Beats, 40, true, 9000)).passed);
+    assert!(skill_stats(Skill::Nuts, &filled(Skill::Nuts, 40, true, 6000)).drill_passed);
+    assert!(!skill_stats(Skill::Nuts, &filled(Skill::Nuts, 40, true, 6500)).drill_passed);
+    assert!(skill_stats(Skill::Beats, &filled(Skill::Beats, 40, true, 9000)).drill_passed);
     assert_eq!(pass_mark(Skill::Spot).max_blunders, Some(2));
 
     // 60 old misses followed by 40 hits: only the last 40 count.
@@ -1469,7 +1470,7 @@ fn pass_marks_check_accuracy_and_speed_over_the_last_forty() {
     log.extend(filled(Skill::Made, 40, true, 1000));
     let s = skill_stats(Skill::Made, &log);
     assert_eq!(s.window, 40);
-    assert!(s.passed);
+    assert!(s.drill_passed);
 }
 
 #[test]
@@ -1478,7 +1479,7 @@ fn outs_pass_mark_counts_within_one() {
     for a in &mut log {
         a.close = true;
     }
-    assert!(skill_stats(Skill::Outs, &log).passed);
+    assert!(skill_stats(Skill::Outs, &log).drill_passed);
 }
 
 #[test]
@@ -1494,14 +1495,14 @@ fn spot_pass_mark_uses_mean_ev_loss_and_blunders() {
             })
             .collect()
     };
-    assert!(skill_stats(Skill::Spot, &build(&[1.0; 40])).passed);
-    assert!(!skill_stats(Skill::Spot, &build(&[3.0; 40])).passed);
+    assert!(skill_stats(Skill::Spot, &build(&[1.0; 40])).drill_passed);
+    assert!(!skill_stats(Skill::Spot, &build(&[3.0; 40])).drill_passed);
     let mut three_blunders = vec![0.0; 37];
     three_blunders.extend([20.0, 20.0, 20.0]);
-    assert!(!skill_stats(Skill::Spot, &build(&three_blunders)).passed);
+    assert!(!skill_stats(Skill::Spot, &build(&three_blunders)).drill_passed);
     let mut two_blunders = vec![0.0; 38];
     two_blunders.extend([20.0, 20.0]);
-    assert!(skill_stats(Skill::Spot, &build(&two_blunders)).passed);
+    assert!(skill_stats(Skill::Spot, &build(&two_blunders)).drill_passed);
 }
 
 #[test]
@@ -1527,16 +1528,70 @@ fn same_session_retries_do_not_count() {
 #[test]
 fn steps_unlock_in_order() {
     assert_eq!(current_step(&all_stats(&[])), 1);
-    assert_eq!(skills_up_to_step(1), vec![Skill::Preflop, Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats]);
+    assert_eq!(
+        skills_up_to_step(1),
+        vec![Skill::Preflop, Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats, Skill::BoardType]
+    );
+    let step_one = [Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats, Skill::BoardType];
     let mut log = Vec::new();
-    for skill in [Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats] {
+    for skill in step_one {
         log.extend(filled(skill, 40, true, 1000));
+    }
+    // Meeting the drill marks is no longer enough: each skill needs a checkup.
+    assert!(!step_passed(1, &all_stats(&log)));
+    assert_eq!(current_step(&all_stats(&log)), 1);
+    for (run, skill) in step_one.into_iter().enumerate() {
+        log.extend(completed_checkup(skill, run as u32 + 1, 0, true));
     }
     let stats = all_stats(&log);
     assert!(step_passed(1, &stats));
     assert!(!step_passed(2, &stats));
     assert_eq!(current_step(&stats), 2);
-    assert_eq!(skills_up_to_step(2).len(), 8);
+    assert_eq!(skills_up_to_step(2).len(), 11);
+}
+
+#[test]
+fn a_failed_latest_checkup_blocks_the_pass_and_a_passing_one_restores_it() {
+    let mut log = filled(Skill::Nuts, 40, true, 1000);
+    assert_eq!(skill_stats(Skill::Nuts, &log).checkup_passed, None);
+    assert!(!skill_stats(Skill::Nuts, &log).passed);
+
+    log.extend(completed_checkup(Skill::Nuts, 1, 0, false));
+    let failed = skill_stats(Skill::Nuts, &log);
+    assert!(failed.drill_passed);
+    assert_eq!(failed.checkup_passed, Some(false));
+    assert!(!failed.passed);
+
+    log.extend(completed_checkup(Skill::Nuts, 2, 1, true));
+    assert!(skill_stats(Skill::Nuts, &log).passed);
+
+    // Only the most recent checkup counts, so a later failure undoes the pass.
+    log.extend(completed_checkup(Skill::Nuts, 3, 2, false));
+    assert!(!skill_stats(Skill::Nuts, &log).passed);
+}
+
+#[test]
+fn an_unfinished_checkup_does_not_count_as_the_latest() {
+    let mut log = filled(Skill::Nuts, 40, true, 1000);
+    log.extend(completed_checkup(Skill::Nuts, 1, 0, true));
+    let mut partial = completed_checkup(Skill::Nuts, 2, 1, false);
+    partial.truncate(5);
+    log.extend(partial);
+    let s = skill_stats(Skill::Nuts, &log);
+    assert_eq!(s.checkup_passed, Some(true));
+    assert!(s.passed);
+}
+
+/// A full 50-slot checkup run, all right or all wrong.
+fn completed_checkup(skill: Skill, run: u32, form: u32, correct: bool) -> Vec<Attempt> {
+    (0..50u32)
+        .map(|slot| {
+            let mut a = attempt(skill, 1 << 63, 1_000_000 + u64::from(run) * 100 + u64::from(slot), correct);
+            a.mode = Mode::Check;
+            a.extra.check = Some(CheckRef { run, form, slot });
+            a
+        })
+        .collect()
 }
 
 // ----- Attempt log -----
@@ -1602,6 +1657,8 @@ fn correct_answer(item: &Item) -> String {
         Skill::Outs => "0",
         Skill::Price | Skill::Hit => "0",
         Skill::Preflop | Skill::Spot | Skill::SpotMw => "f",
+        Skill::Equity | Skill::Anchor => "50",
+        Skill::BoardType => "rp",
     };
     let reveal = match &item.question {
         // Two ranks may name no unseen holding, so ask a generic exact holding.
@@ -1723,6 +1780,8 @@ fn reveal_key(skill: Skill) -> &'static str {
         Skill::Outs => "8",
         Skill::Price | Skill::Hit => "30",
         Skill::Spot | Skill::SpotMw => "f",
+        Skill::Equity | Skill::Anchor => "50",
+        Skill::BoardType => "rp",
     }
 }
 
@@ -1761,6 +1820,7 @@ fn baseline_scores_group_by_run_section_and_step() {
         ev_loss_pct: None,
         response_ms: 1,
         answer: String::new(),
+        extra: Default::default(),
     };
     let log = vec![
         row(1, "b01", Skill::Nuts, true),

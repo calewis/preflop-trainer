@@ -1,11 +1,43 @@
 //! Skills and the fully specified questions they ask.
 
+use crate::board_type::BoardCategory;
 use crate::cards::{Card, Holding};
 use crate::classes::OppClass;
 use crate::preflop::{Seat, Situation};
 
 /// Bump whenever a generator's output for a given seed changes.
 pub const GEN_VERSION: u32 = 1;
+
+/// Seeds with this bit set are held out for checkups: drills and reviews never
+/// serve one. See [`is_held_out`].
+pub const HELD_OUT_BIT: u64 = 1 << 63;
+
+/// True for a seed reserved for checkups.
+pub const fn is_held_out(seed: u64) -> bool {
+    seed & HELD_OUT_BIT != 0
+}
+
+/// Equity items carry their rung in this seed bit, so a seed always regenerates
+/// the same question even after the player has moved up the ladder.
+pub const EQUITY_RUNG_BIT: u64 = 1 << 62;
+
+/// The ladder rung (0 exact hands, 1 classes) an `equity` seed asks for.
+pub const fn equity_rung_of_seed(seed: u64) -> u8 {
+    if seed & EQUITY_RUNG_BIT != 0 {
+        1
+    } else {
+        0
+    }
+}
+
+/// `seed` with its rung bit set to `rung`.
+pub const fn equity_seed_with_rung(seed: u64, rung: u8) -> u64 {
+    if rung == 0 {
+        seed & !EQUITY_RUNG_BIT
+    } else {
+        seed | EQUITY_RUNG_BIT
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Skill {
@@ -19,10 +51,14 @@ pub enum Skill {
     Hit,
     Spot,
     SpotMw,
+    // New variants go last: a skill's position seeds its generator.
+    BoardType,
+    Equity,
+    Anchor,
 }
 
 impl Skill {
-    pub const ALL: [Skill; 10] = [
+    pub const ALL: [Skill; 13] = [
         Skill::Preflop,
         Skill::Nuts,
         Skill::Possible,
@@ -33,6 +69,9 @@ impl Skill {
         Skill::Hit,
         Skill::Spot,
         Skill::SpotMw,
+        Skill::BoardType,
+        Skill::Equity,
+        Skill::Anchor,
     ];
 
     pub fn name(self) -> &'static str {
@@ -47,6 +86,9 @@ impl Skill {
             Skill::Hit => "hit",
             Skill::Spot => "spot",
             Skill::SpotMw => "spot_mw",
+            Skill::BoardType => "board_type",
+            Skill::Equity => "equity",
+            Skill::Anchor => "anchor",
         }
     }
 
@@ -58,8 +100,8 @@ impl Skill {
     pub fn step(self) -> Option<u8> {
         match self {
             Skill::Preflop => None,
-            Skill::Nuts | Skill::Possible | Skill::Made | Skill::Beats => Some(1),
-            Skill::Outs | Skill::Price | Skill::Hit => Some(2),
+            Skill::Nuts | Skill::Possible | Skill::Made | Skill::Beats | Skill::BoardType => Some(1),
+            Skill::Outs | Skill::Price | Skill::Hit | Skill::Equity | Skill::Anchor => Some(2),
             Skill::Spot | Skill::SpotMw => Some(3),
         }
     }
@@ -119,6 +161,43 @@ impl SpotQuestion {
     }
 }
 
+/// Who hero is up against in an `equity` question.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum EquityOpponents {
+    /// Rung 0: each opponent's exact hand is shown.
+    Exact(Vec<Holding>),
+    /// Rung 1: each opponent is assumed to hold a class, averaged over its combos.
+    Classes(Vec<OppClass>),
+}
+
+impl EquityOpponents {
+    pub fn count(&self) -> usize {
+        match self {
+            EquityOpponents::Exact(list) => list.len(),
+            EquityOpponents::Classes(list) => list.len(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct EquityQuestion {
+    pub hero: Holding,
+    pub board: Vec<Card>,
+    pub opponents: EquityOpponents,
+    /// Points either side of the true equity that count as a hit. Fixed when
+    /// the item is served (see [`crate::equity_skill`]), and logged with it.
+    pub band: u8,
+}
+
+impl EquityQuestion {
+    pub fn rung(&self) -> u8 {
+        match self.opponents {
+            EquityOpponents::Exact(_) => 0,
+            EquityOpponents::Classes(_) => 1,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Question {
     Preflop {
@@ -160,6 +239,16 @@ pub enum Question {
         both: bool,
     },
     Spot(SpotQuestion),
+    Equity(EquityQuestion),
+    /// One card of the anchor deck, by its index.
+    Anchor {
+        card: u16,
+    },
+    /// Name a flop's suit and rank pattern from four choices.
+    BoardType {
+        board: Vec<Card>,
+        options: [BoardCategory; 4],
+    },
 }
 
 impl Question {
@@ -191,7 +280,22 @@ impl Question {
                 board: board(b),
                 villain: holding(villain),
             },
-            Question::Price { .. } | Question::Hit { .. } => self.clone(),
+            Question::Price { .. } | Question::Hit { .. } | Question::Anchor { .. } => self.clone(),
+            Question::Equity(q) => Question::Equity(EquityQuestion {
+                hero: holding(&q.hero),
+                board: board(&q.board),
+                opponents: match &q.opponents {
+                    EquityOpponents::Exact(list) => {
+                        EquityOpponents::Exact(list.iter().map(holding).collect())
+                    }
+                    EquityOpponents::Classes(list) => EquityOpponents::Classes(list.clone()),
+                },
+                band: q.band,
+            }),
+            Question::BoardType { board: b, options } => Question::BoardType {
+                board: board(b),
+                options: *options,
+            },
             Question::Spot(q) => Question::Spot(SpotQuestion {
                 hero: holding(&q.hero),
                 board: board(&q.board),

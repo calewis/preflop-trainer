@@ -1,6 +1,7 @@
 //! Pass marks and progress. All marks and EV bands are starting guesses, to be
 //! tuned once there is real data.
 
+use crate::checkup::latest_checkup;
 use crate::item::Skill;
 use crate::log::{Attempt, Mode};
 
@@ -19,6 +20,8 @@ pub struct PassMark {
     pub max_median_ms: Option<u32>,
     pub max_mean_ev_loss_pct: Option<f64>,
     pub max_blunders: Option<u32>,
+    /// Mean absolute error in percentage points (`equity`).
+    pub max_mean_abs_error: Option<f64>,
 }
 
 const fn accuracy(pct: f64, median_ms: Option<u32>) -> PassMark {
@@ -28,6 +31,7 @@ const fn accuracy(pct: f64, median_ms: Option<u32>) -> PassMark {
         max_median_ms: median_ms,
         max_mean_ev_loss_pct: None,
         max_blunders: None,
+        max_mean_abs_error: None,
     }
 }
 
@@ -42,6 +46,7 @@ pub const PASS_OUTS: PassMark = PassMark {
     max_median_ms: None,
     max_mean_ev_loss_pct: None,
     max_blunders: None,
+    max_mean_abs_error: None,
 };
 pub const PASS_PRICE: PassMark = accuracy(95.0, Some(6_000));
 pub const PASS_HIT: PassMark = accuracy(90.0, None);
@@ -51,6 +56,17 @@ pub const PASS_SPOT: PassMark = PassMark {
     max_median_ms: None,
     max_mean_ev_loss_pct: Some(2.0),
     max_blunders: Some(2),
+    max_mean_abs_error: None,
+};
+pub const PASS_BOARD_TYPE: PassMark = accuracy(95.0, Some(crate::board_type::BOARD_TYPE_TARGET_MS));
+pub const PASS_ANCHOR: PassMark = accuracy(90.0, None);
+pub const PASS_EQUITY: PassMark = PassMark {
+    min_correct_pct: None,
+    min_within_one_pct: None,
+    max_median_ms: None,
+    max_mean_ev_loss_pct: None,
+    max_blunders: None,
+    max_mean_abs_error: Some(6.0),
 };
 
 pub fn pass_mark(skill: Skill) -> PassMark {
@@ -64,6 +80,9 @@ pub fn pass_mark(skill: Skill) -> PassMark {
         Skill::Price => PASS_PRICE,
         Skill::Hit => PASS_HIT,
         Skill::Spot | Skill::SpotMw => PASS_SPOT,
+        Skill::BoardType => PASS_BOARD_TYPE,
+        Skill::Equity => PASS_EQUITY,
+        Skill::Anchor => PASS_ANCHOR,
     }
 }
 
@@ -71,8 +90,8 @@ pub fn pass_mark(skill: Skill) -> PassMark {
 const BLUNDER_PCT: f64 = crate::grade::EV_MISTAKE_PCT;
 
 pub const STEPS: [&[Skill]; 3] = [
-    &[Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats],
-    &[Skill::Outs, Skill::Price, Skill::Hit],
+    &[Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats, Skill::BoardType],
+    &[Skill::Outs, Skill::Price, Skill::Hit, Skill::Equity, Skill::Anchor],
     &[Skill::Spot, Skill::SpotMw],
 ];
 
@@ -87,8 +106,58 @@ pub struct SkillStats {
     pub median_ms: u32,
     pub mean_ev_loss_pct: f64,
     pub blunders: u32,
+    /// `equity` only: mean absolute error, in points, over the window.
+    pub mean_abs_error: Option<f64>,
     pub enough_data: bool,
+    /// The drill pass mark alone.
+    pub drill_passed: bool,
+    /// Whether the most recent completed checkup met the same standard;
+    /// `None` until the skill has a completed checkup.
+    pub checkup_passed: Option<bool>,
+    /// The drill pass mark is met and so is the most recent checkup.
     pub passed: bool,
+}
+
+/// What a set of attempts scored on the pass-mark measures.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct WindowMetrics {
+    pub correct_pct: f64,
+    pub within_one_pct: f64,
+    pub median_ms: u32,
+    pub mean_ev_loss_pct: f64,
+    pub blunders: u32,
+    pub mean_abs_error: Option<f64>,
+}
+
+/// The pass-mark measures for a set of attempts.
+pub fn window_metrics(rows: &[&Attempt]) -> WindowMetrics {
+    let denom = rows.len().max(1) as f64;
+    let correct_pct = 100.0 * rows.iter().filter(|a| a.correct).count() as f64 / denom;
+    let within_one_pct = 100.0 * rows.iter().filter(|a| a.ok()).count() as f64 / denom;
+    let mut times: Vec<u32> = rows.iter().map(|a| a.response_ms).collect();
+    times.sort_unstable();
+    let median_ms = match times.len() {
+        0 => 0,
+        len if len % 2 == 1 => times[len / 2],
+        len => (times[len / 2 - 1] + times[len / 2]) / 2,
+    };
+    let losses: Vec<f64> = rows.iter().filter_map(|a| a.ev_loss_pct).collect();
+    let mean_ev_loss_pct = losses.iter().sum::<f64>() / losses.len().max(1) as f64;
+    let blunders = losses.iter().filter(|&&l| l > BLUNDER_PCT).count() as u32;
+    let errors: Vec<f64> = rows.iter().filter_map(|a| a.extra.signed_error.map(f64::abs)).collect();
+    let mean_abs_error = (!errors.is_empty()).then(|| errors.iter().sum::<f64>() / errors.len() as f64);
+    WindowMetrics { correct_pct, within_one_pct, median_ms, mean_ev_loss_pct, blunders, mean_abs_error }
+}
+
+/// True when the measures meet a pass mark. A mark needing a measure the rows
+/// don't have (mean absolute error without any logged errors) is not met.
+pub fn meets_mark(mark: &PassMark, m: &WindowMetrics) -> bool {
+    mark.min_correct_pct.is_none_or(|t| m.correct_pct >= t)
+        && mark.min_within_one_pct.is_none_or(|t| m.within_one_pct >= t)
+        && mark.max_median_ms.is_none_or(|t| m.median_ms <= t)
+        && mark.max_mean_ev_loss_pct.is_none_or(|t| m.mean_ev_loss_pct <= t)
+        && mark.max_blunders.is_none_or(|t| m.blunders <= t)
+        && mark.max_mean_abs_error.is_none_or(|t| m.mean_abs_error.is_some_and(|e| e <= t))
 }
 
 /// Only `drill` attempts count for pass marks. The baseline is measured
@@ -103,40 +172,23 @@ pub fn skill_stats(skill: Skill, attempts: &[Attempt]) -> SkillStats {
         .filter(|a| a.skill == skill && counts_for_stats(a))
         .collect();
     let recent = &all[all.len().saturating_sub(STAT_WINDOW)..];
-    let n = recent.len();
-    let denom = n.max(1) as f64;
-    let correct_pct = 100.0 * recent.iter().filter(|a| a.correct).count() as f64 / denom;
-    let within_one_pct = 100.0 * recent.iter().filter(|a| a.ok()).count() as f64 / denom;
-    let mut times: Vec<u32> = recent.iter().map(|a| a.response_ms).collect();
-    times.sort_unstable();
-    let median_ms = match times.len() {
-        0 => 0,
-        len if len % 2 == 1 => times[len / 2],
-        len => (times[len / 2 - 1] + times[len / 2]) / 2,
-    };
-    let losses: Vec<f64> = recent.iter().filter_map(|a| a.ev_loss_pct).collect();
-    let mean_ev_loss_pct = losses.iter().sum::<f64>() / losses.len().max(1) as f64;
-    let blunders = losses.iter().filter(|&&l| l > BLUNDER_PCT).count() as u32;
-    let enough_data = all.len() >= MIN_ATTEMPTS;
-
-    let mark = pass_mark(skill);
-    let passed = all.len() >= PASS_ATTEMPTS
-        && mark.min_correct_pct.is_none_or(|m| correct_pct >= m)
-        && mark.min_within_one_pct.is_none_or(|m| within_one_pct >= m)
-        && mark.max_median_ms.is_none_or(|m| median_ms <= m)
-        && mark.max_mean_ev_loss_pct.is_none_or(|m| mean_ev_loss_pct <= m)
-        && mark.max_blunders.is_none_or(|m| blunders <= m);
+    let m = window_metrics(recent);
+    let drill_passed = all.len() >= PASS_ATTEMPTS && meets_mark(&pass_mark(skill), &m);
+    let checkup_passed = latest_checkup(skill, attempts).map(|score| score.passed);
     SkillStats {
         skill,
         total_attempts: all.len(),
-        window: n,
-        correct_pct,
-        within_one_pct,
-        median_ms,
-        mean_ev_loss_pct,
-        blunders,
-        enough_data,
-        passed,
+        window: recent.len(),
+        correct_pct: m.correct_pct,
+        within_one_pct: m.within_one_pct,
+        median_ms: m.median_ms,
+        mean_ev_loss_pct: m.mean_ev_loss_pct,
+        blunders: m.blunders,
+        mean_abs_error: m.mean_abs_error,
+        enough_data: all.len() >= MIN_ATTEMPTS,
+        drill_passed,
+        checkup_passed,
+        passed: drill_passed && checkup_passed == Some(true),
     }
 }
 

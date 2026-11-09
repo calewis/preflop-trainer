@@ -9,7 +9,13 @@ use crate::schedule::{Origin, Planned};
 pub const MAX_RESPONSE_MS: u32 = 60_000;
 
 /// First line of a new log file. Parsers skip it.
-pub const LOG_HEADER: &str = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer";
+pub const LOG_HEADER: &str = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer\tcheck_run\tcheck_form\tcheck_slot\tband\tsigned_error\ttruth_pct\topponents";
+/// The header of logs written before the extra columns existed.
+pub const LEGACY_LOG_HEADER: &str = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer";
+
+/// Columns in a line with no extras, and in one with all of them.
+const BASE_COLUMNS: usize = 11;
+const FULL_COLUMNS: usize = 18;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Mode {
@@ -17,6 +23,8 @@ pub enum Mode {
     Drill,
     /// A missed item asked again in the same session; not counted in pass marks.
     DrillRetry,
+    /// A held-out checkup item. Never counted as drill practice.
+    Check,
 }
 
 impl Mode {
@@ -25,6 +33,7 @@ impl Mode {
             Mode::Baseline => "baseline",
             Mode::Drill => "drill",
             Mode::DrillRetry => "drill-retry",
+            Mode::Check => "check",
         }
     }
 
@@ -33,6 +42,7 @@ impl Mode {
             "baseline" => Some(Mode::Baseline),
             "drill" => Some(Mode::Drill),
             "drill-retry" => Some(Mode::DrillRetry),
+            "check" => Some(Mode::Check),
             _ => None,
         }
     }
@@ -42,6 +52,32 @@ impl Mode {
 pub enum ItemRef {
     Seed(u64),
     Baseline(String),
+}
+
+/// Which checkup slot an attempt answered.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CheckRef {
+    pub run: u32,
+    pub form: u32,
+    pub slot: u32,
+}
+
+/// Columns added after the original eleven. An empty value means not applicable.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct AttemptExtra {
+    pub check: Option<CheckRef>,
+    /// The `equity` tolerance band served, in points.
+    pub band: Option<u8>,
+    /// `equity`: estimate minus truth, in percentage points.
+    pub signed_error: Option<f64>,
+    pub truth_pct: Option<f64>,
+    pub opponents: Option<u8>,
+}
+
+impl AttemptExtra {
+    fn is_empty(&self) -> bool {
+        *self == AttemptExtra::default()
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -57,6 +93,7 @@ pub struct Attempt {
     pub ev_loss_pct: Option<f64>,
     pub response_ms: u32,
     pub answer: String,
+    pub extra: AttemptExtra,
 }
 
 impl Attempt {
@@ -78,6 +115,21 @@ impl Attempt {
         Attempt::record(Mode::Baseline, Some(run), entry.item.skill, item, outcome, timestamp_ms, response_ms)
     }
 
+    /// The log record for an answered checkup slot.
+    pub fn from_check(
+        check: CheckRef,
+        skill: Skill,
+        seed: u64,
+        outcome: &Outcome,
+        timestamp_ms: u64,
+        response_ms: u32,
+    ) -> Attempt {
+        let mut attempt =
+            Attempt::record(Mode::Check, None, skill, ItemRef::Seed(seed), outcome, timestamp_ms, response_ms);
+        attempt.extra.check = Some(check);
+        attempt
+    }
+
     fn record(
         mode: Mode,
         baseline_run: Option<u32>,
@@ -87,6 +139,13 @@ impl Attempt {
         timestamp_ms: u64,
         response_ms: u32,
     ) -> Attempt {
+        let extra = outcome.equity_log.map_or_else(AttemptExtra::default, |e| AttemptExtra {
+            check: None,
+            band: Some(e.band),
+            signed_error: Some(e.signed_error),
+            truth_pct: Some(e.truth_pct),
+            opponents: Some(e.opponents),
+        });
         Attempt {
             timestamp_ms,
             mode,
@@ -99,6 +158,7 @@ impl Attempt {
             ev_loss_pct: outcome.ev_loss_pct,
             response_ms: response_ms.min(MAX_RESPONSE_MS),
             answer: outcome.answer.clone(),
+            extra,
         }
     }
 
@@ -116,7 +176,25 @@ fn flag(value: bool) -> &'static str {
     }
 }
 
-/// One log line, without a trailing newline. Tabs and newlines in the answer are replaced.
+fn optional<T: ToString>(value: Option<T>) -> String {
+    value.map_or(String::new(), |v| v.to_string())
+}
+
+fn extra_columns(extra: &AttemptExtra) -> String {
+    format!(
+        "\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        optional(extra.check.map(|c| c.run)),
+        optional(extra.check.map(|c| c.form)),
+        optional(extra.check.map(|c| c.slot)),
+        optional(extra.band),
+        extra.signed_error.map_or(String::new(), |v| format!("{v:.4}")),
+        extra.truth_pct.map_or(String::new(), |v| format!("{v:.4}")),
+        optional(extra.opponents),
+    )
+}
+
+/// One log line, without a trailing newline. Tabs and newlines in the answer are
+/// replaced. Attempts with no extras keep the original eleven columns.
 pub fn format_attempt(a: &Attempt) -> String {
     let item = match &a.item {
         ItemRef::Seed(seed) => seed.to_string(),
@@ -127,8 +205,9 @@ pub fn format_attempt(a: &Attempt) -> String {
         .chars()
         .map(|c| if c == '\t' || c == '\n' || c == '\r' { ' ' } else { c })
         .collect();
+    let extras = if a.extra.is_empty() { String::new() } else { extra_columns(&a.extra) };
     format!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}{extras}",
         a.timestamp_ms,
         a.mode.code(),
         a.baseline_run.map_or(String::new(), |r| r.to_string()),
@@ -153,9 +232,11 @@ fn parse_flag(text: &str) -> Option<bool> {
 
 fn parse_line(line: &str) -> Option<Attempt> {
     let fields: Vec<&str> = line.split('\t').collect();
-    if fields.len() != 11 {
-        return None;
-    }
+    let extra = match fields.len() {
+        BASE_COLUMNS => AttemptExtra::default(),
+        FULL_COLUMNS => parse_extra(&fields[BASE_COLUMNS..])?,
+        _ => return None,
+    };
     let mode = Mode::from_code(fields[1])?;
     let baseline_run = if fields[2].is_empty() { None } else { Some(fields[2].parse().ok()?) };
     let item = if mode == Mode::Baseline {
@@ -183,6 +264,41 @@ fn parse_line(line: &str) -> Option<Attempt> {
         ev_loss_pct,
         response_ms: fields[9].parse::<u32>().ok()?.min(MAX_RESPONSE_MS),
         answer: fields[10].to_string(),
+        extra,
+    })
+}
+
+fn parse_optional<T: std::str::FromStr>(text: &str) -> Option<Option<T>> {
+    if text.is_empty() {
+        Some(None)
+    } else {
+        Some(Some(text.parse().ok()?))
+    }
+}
+
+fn parse_finite(text: &str) -> Option<Option<f64>> {
+    let value: Option<f64> = parse_optional(text)?;
+    if value.is_some_and(|v| !v.is_finite()) {
+        return None;
+    }
+    Some(value)
+}
+
+fn parse_extra(fields: &[&str]) -> Option<AttemptExtra> {
+    let run: Option<u32> = parse_optional(fields[0])?;
+    let form: Option<u32> = parse_optional(fields[1])?;
+    let slot: Option<u32> = parse_optional(fields[2])?;
+    let check = match (run, form, slot) {
+        (Some(run), Some(form), Some(slot)) => Some(CheckRef { run, form, slot }),
+        (None, None, None) => None,
+        _ => return None,
+    };
+    Some(AttemptExtra {
+        check,
+        band: parse_optional(fields[3])?,
+        signed_error: parse_finite(fields[4])?,
+        truth_pct: parse_finite(fields[5])?,
+        opponents: parse_optional(fields[6])?,
     })
 }
 
@@ -192,7 +308,7 @@ pub fn parse_log(text: &str) -> (Vec<Attempt>, Vec<String>) {
     let mut attempts = Vec::new();
     let mut warnings = Vec::new();
     for (index, line) in text.lines().enumerate() {
-        if line.is_empty() || line == LOG_HEADER {
+        if line.is_empty() || line == LOG_HEADER || line == LEGACY_LOG_HEADER {
             continue;
         }
         match parse_line(line) {

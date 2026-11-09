@@ -1,10 +1,15 @@
 //! Deterministic item generators. A seed always regenerates the same item.
 
+use crate::anchors;
+use crate::board_type::{answer_options, category_of_seed, classify_flop};
 use crate::cards::{holding_mask, mask_of, unseen_holdings, Card, Holding, ACE};
 use crate::classes::{is_flush_draw, is_oesd, made_class, matches_opp_class, rank_of, MadeClass, OppClass};
 use crate::equity::{equity_with_cards_to_come, sampled, Equity};
-use crate::grade::{beats_analysis, nuts_analysis, outs_analysis, BeatsBucket};
-use crate::item::{HitStreet, Item, Question, Skill, SpotMode, SpotQuestion};
+use crate::equity_skill::EQUITY_BAND_START;
+use crate::grade::{beats_analysis, equity_analysis, nuts_analysis, outs_analysis, BeatsBucket};
+use crate::item::{
+    equity_rung_of_seed, EquityOpponents, EquityQuestion, HitStreet, Item, Question, Skill, SpotMode, SpotQuestion,
+};
 use crate::money;
 use crate::preflop::{Range, Seat, Situation, CARD};
 use crate::rng::Rng;
@@ -40,6 +45,14 @@ pub const MIN_CLASS_COMBOS: usize = 3;
 const MW_SCREEN_SAMPLES: u64 = 40_000;
 /// Screening margin below 50% so a sampled multiway equity is reliably under it.
 const MW_NEXT_CARD_LIMIT: f64 = 0.48;
+
+/// True equity of an `equity` item stays inside this range, in percent. Starting guesses.
+pub const EQUITY_MIN_PCT: f64 = 5.0;
+pub const EQUITY_MAX_PCT: f64 = 95.0;
+/// Opponent counts for `equity`, out of 100.
+const EQUITY_OPPONENTS: [(usize, u64); 3] = [(1, 50), (2, 35), (3, 15)];
+/// Attempts to deal disjoint exact hands from the chosen classes before redealing.
+const EQUITY_EXACT_TRIES: u32 = 40;
 
 const DRILL_TABLE: [(u8, u64); 4] = [(4, 40), (5, 40), (6, 10), (7, 10)];
 
@@ -81,6 +94,9 @@ pub fn generate(skill: Skill, seed: u64) -> Item {
             let opponents = rng.range(2, 3) as usize;
             Question::Spot(gen_spot(&mut rng, opponents, seed))
         }
+        Skill::BoardType => gen_board_type(&mut rng, seed),
+        Skill::Equity => Question::Equity(gen_equity(&mut rng, seed)),
+        Skill::Anchor => Question::Anchor { card: anchors::card_of_seed(seed) as u16 },
     };
     Item { skill, seed, question }
 }
@@ -484,5 +500,98 @@ fn gen_spot(rng: &mut Rng, opponents: usize, seed: u64) -> SpotQuestion {
             mode: if next_card { SpotMode::NextCard { x } } else { SpotMode::AllIn },
             opponents: classes,
         };
+    }
+}
+
+/// A random flop of the seed's category. The card space is huge, so a given
+/// board comes up again only by chance.
+fn gen_board_type(rng: &mut Rng, seed: u64) -> Question {
+    let category = category_of_seed(seed);
+    loop {
+        let mut dead = 0;
+        let board = deal_board(rng, 3, &mut dead);
+        if classify_flop(&board) == category {
+            return Question::BoardType { board, options: answer_options(category, rng) };
+        }
+    }
+}
+
+fn roll_equity_opponents(rng: &mut Rng) -> usize {
+    let mut roll = rng.below(EQUITY_OPPONENTS.iter().map(|&(_, w)| w).sum());
+    for (count, weight) in EQUITY_OPPONENTS {
+        if roll < weight {
+            return count;
+        }
+        roll -= weight;
+    }
+    unreachable!("the roll is below the total weight")
+}
+
+/// One card-disjoint exact hand from each candidate list, if the deal finds one.
+fn deal_exact_hands(rng: &mut Rng, lists: &[Vec<Holding>], dead: u64) -> Option<Vec<Holding>> {
+    'attempt: for _ in 0..EQUITY_EXACT_TRIES {
+        let mut used = dead;
+        let mut hands = Vec::with_capacity(lists.len());
+        for list in lists {
+            let pick = rng.pick(list);
+            let mask = holding_mask(&pick);
+            if used & mask != 0 {
+                continue 'attempt;
+            }
+            used |= mask;
+            hands.push(pick);
+        }
+        return Some(hands);
+    }
+    None
+}
+
+/// Deals an `equity` question at the seed's rung. Opponents come from the same
+/// classes `spot` assumes, so rung 0 teaches the matchups rung 1 averages over.
+/// Served with [`EQUITY_BAND_START`]; a session replaces it with the current band.
+fn gen_equity(rng: &mut Rng, seed: u64) -> EquityQuestion {
+    let rung = equity_rung_of_seed(seed);
+    let opponents = roll_equity_opponents(rng);
+    let margin = if opponents == 1 { 0.0 } else { MW_SHARE_MARGIN * 100.0 };
+    loop {
+        let mut dead = 0;
+        let board_len = if rng.chance(2, 3) { 3 } else { 4 };
+        let board = deal_board(rng, board_len, &mut dead);
+        let hero = deal_holding(rng, dead);
+        if !CARD.plays(hero) {
+            continue;
+        }
+        let available: Vec<(OppClass, Vec<Holding>)> = class_lists(hero, &board)
+            .into_iter()
+            .filter(|(_, combos)| combos.len() >= MIN_CLASS_COMBOS)
+            .collect();
+        let Some(picked) = pick_classes(rng, &available, opponents) else {
+            continue;
+        };
+        let lists: Vec<Vec<Holding>> = picked.iter().map(|&i| available[i].1.clone()).collect();
+        let (setup, screen_lists) = if rung == 0 {
+            let Some(hands) = deal_exact_hands(rng, &lists, dead | holding_mask(&hero)) else {
+                continue;
+            };
+            let exact = hands.iter().map(|&h| vec![h]).collect();
+            (EquityOpponents::Exact(hands), exact)
+        } else {
+            (EquityOpponents::Classes(picked.iter().map(|&i| available[i].0).collect()), lists)
+        };
+        let Some(screen) = share_for_screening(hero, &board, &screen_lists, 5 - board.len(), seed) else {
+            continue;
+        };
+        let share_pct = screen.share * 100.0;
+        if share_pct < EQUITY_MIN_PCT + margin || share_pct > EQUITY_MAX_PCT - margin {
+            continue;
+        }
+        let question = EquityQuestion { hero, board, opponents: setup, band: EQUITY_BAND_START };
+        // Screening may use a smaller sample, so the range is enforced on the
+        // exact figure the player will be graded against.
+        if equity_analysis(&question, seed)
+            .is_some_and(|a| (EQUITY_MIN_PCT..=EQUITY_MAX_PCT).contains(&a.truth_pct))
+        {
+            return question;
+        }
     }
 }

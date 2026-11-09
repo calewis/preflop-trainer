@@ -1,0 +1,42 @@
+# Anchor deck, written once by the hidden gen-anchors command. Do not edit by hand.
+# id, kind and cards, answer in percent, tolerance, prompt, separated by tabs.
+p01	price 1/4	16.7	2	Someone bets 1/4 of the pot. What equity do you need to call?
+p02	price 1/3	20.0	2	Someone bets 1/3 of the pot. What equity do you need to call?
+p03	price 1/2	25.0	2	Someone bets 1/2 of the pot. What equity do you need to call?
+p04	price 2/3	28.6	2	Someone bets 2/3 of the pot. What equity do you need to call?
+p05	price 3/4	30.0	2	Someone bets 3/4 of the pot. What equity do you need to call?
+p06	price 1/1	33.3	2	Someone bets the size of the pot. What equity do you need to call?
+p07	price 3/2	37.5	2	Someone bets 1.5 times the pot. What equity do you need to call?
+p08	price 2/1	40.0	2	Someone bets 2 times the pot. What equity do you need to call?
+m01	matchup 7h7d AsQs 7s4s2c	74.4	4	Set vs flush draw: your 7h7d against AsQs on a flop of 7s4s2c. Your all-in equity?
+m02	matchup 9h9d KcKs 9c5h2d	91.4	4	Set vs overpair: your 9h9d against KcKs on a flop of 9c5h2d. Your all-in equity?
+m03	matchup 8h8d JcTd 9s8c2h	74.1	4	Set vs open-ended draw: your 8h8d against JcTd on a flop of 9s8c2h. Your all-in equity?
+m04	matchup KhKd 7c7s Kc7d2h	95.7	4	Top set vs middle set: your KhKd against 7c7s on a flop of Kc7d2h. Your all-in equity?
+m05	matchup KhKd Js9s Qs7s2c	62.2	4	Overpair vs flush draw: your KhKd against Js9s on a flop of Qs7s2c. Your all-in equity?
+m06	matchup AhAd KsQc Kc7d2h	81.6	4	Overpair vs top pair: your AhAd against KsQc on a flop of Kc7d2h. Your all-in equity?
+m07	matchup AhKd Kc7c Ks7d2h	15.7	4	Top pair vs two pair: your AhKd against Kc7c on a flop of Ks7d2h. Your all-in equity?
+m08	matchup AhKd KsQc Kc7d2h	87.3	4	Top pair, better kicker vs worse kicker: your AhKd against KsQc on a flop of Kc7d2h. Your all-in equity?
+m09	matchup KhJh AdAs Jd7h2h	49.8	4	Top pair plus flush draw vs overpair: your KhJh against AdAs on a flop of Jd7h2h. Your all-in equity?
+m10	matchup 9d8d KcJs Kd7d2s	39.5	4	Flush draw vs top pair: your 9d8d against KcJs on a flop of Kd7d2s. Your all-in equity?
+m11	matchup Ad9d KcJs Kd7d2s	44.9	4	Flush draw plus overcard vs top pair: your Ad9d against KcJs on a flop of Kd7d2s. Your all-in equity?
+m12	matchup Qc8c AsAd Kc7c2h	36.6	4	Flush draw vs overpair: your Qc8c against AsAd on a flop of Kc7c2h. Your all-in equity?
+m13	matchup 9d8d QhTc Td7d2s	56.8	4	Combo draw vs top pair: your 9d8d against QhTc on a flop of Td7d2s. Your all-in equity?
+m14	matchup JdTh Ac9h 9s8c2h	50.0	4	Open-ended draw vs top pair: your JdTh against Ac9h on a flop of 9s8c2h. Your all-in equity?
+m15	matchup Jh9d KsQh Kc8s7d	20.3	4	Gutshot vs top pair: your Jh9d against KsQh on a flop of Kc8s7d. Your all-in equity?
+m16	matchup AcKd 9h9s 8d5c2h	25.6	4	Two overcards vs a pair: your AcKd against 9h9s on a flop of 8d5c2h. Your all-in equity?
+m17	matchup Qd9h AhJc Ac9s4d	18.4	4	Second pair vs top pair: your Qd9h against AhJc on a flop of Ac9s4d. Your all-in equity?
+m18	matchup 6h6d KcQs Kd7c2h	8.8	4	Low pocket pair vs top pair: your 6h6d against KcQs on a flop of Kd7c2h. Your all-in equity?
+m19	matchup Kh7h AsQs Ks7s2c	64.4	4	Two pair vs flush draw: your Kh7h against AsQs on a flop of Ks7s2c. Your all-in equity?
+m20	matchup JcTd AdKd 9d8d7s	67.3	4	Straight vs flush draw: your JcTd against AdKd on a flop of 9d8d7s. Your all-in equity?
+f01	preflop AhAd 1	85.2	4	Preflop, AA against one random hand: your all-in equity?
+f02	preflop AhAd 3	63.9	4	Preflop, AA against 3 random hands: your all-in equity?
+f03	preflop AhKd 1	65.3	4	Preflop, AKo against one random hand: your all-in equity?
+f04	preflop AhKd 3	38.6	4	Preflop, AKo against 3 random hands: your all-in equity?
+f05	preflop JhTh 2	42.0	4	Preflop, JTs against 2 random hands: your all-in equity?
+f06	preflop JhTh 3	33.9	4	Preflop, JTs against 3 random hands: your all-in equity?
+f07	preflop 7h7d 1	66.2	4	Preflop, 77 against one random hand: your all-in equity?
+f08	preflop 7h7d 2	46.5	4	Preflop, 77 against 2 random hands: your all-in equity?
+f09	preflop Kh9d 1	57.8	4	Preflop, K9o against one random hand: your all-in equity?
+f10	preflop Kh9d 2	39.2	4	Preflop, K9o against 2 random hands: your all-in equity?
+f11	preflop Ah5d 2	38.2	4	Preflop, A5o against 2 random hands: your all-in equity?
+f12	preflop Ah5d 3	28.0	4	Preflop, A5o against 3 random hands: your all-in equity?

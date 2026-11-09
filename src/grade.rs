@@ -1,11 +1,13 @@
 //! Answer parsing, exact truth and grading. Returns structured reveals.
 
+use crate::anchors::{self, AnchorCard};
 use crate::answer::MAX_OUTS;
+use crate::board_type::{classify_flop, BoardCategory, BOARD_TYPE_MISS_MS};
 use crate::cards::{holding_mask, mask_of, rank_from_byte, unseen_cards, unseen_holdings, Card, Holding};
 use crate::classes::{combos_in_class, made_class, rank_of, MadeClass};
 use crate::equity::{equity_all_in, equity_next_card, Equity};
 use crate::eval::{straight_top, Category, HandRank};
-use crate::item::{HitStreet, Item, Question, SpotMode, SpotQuestion};
+use crate::item::{EquityOpponents, EquityQuestion, HitStreet, Item, Question, SpotMode, SpotQuestion};
 use crate::money;
 use crate::preflop::{preflop_answer, Action, PreflopReason, Seat, Situation};
 
@@ -51,6 +53,18 @@ pub struct Outcome {
     /// Canonical form of what was answered.
     pub answer: String,
     pub reveal: Reveal,
+    /// Set for `equity` items: what gets logged beyond the answer itself.
+    pub equity_log: Option<EquityLog>,
+}
+
+/// The facts an `equity` attempt logs.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct EquityLog {
+    pub band: u8,
+    /// Estimate minus truth, in percentage points.
+    pub signed_error: f64,
+    pub truth_pct: f64,
+    pub opponents: u8,
 }
 
 impl Outcome {
@@ -196,6 +210,18 @@ pub struct SpotAnalysis {
     pub next_card: bool,
 }
 
+/// The truth behind an `equity` question.
+#[derive(Clone, PartialEq, Debug)]
+pub struct EquityAnalysis {
+    /// Hero's true all-in equity, in percent.
+    pub truth_pct: f64,
+    /// True when a huge multiway case was estimated from the fixed sample.
+    pub sampled: bool,
+    /// Card-disjoint opponent tuples behind the figure; `None` when sampled.
+    pub tuples: Option<u64>,
+    pub combos_per_opponent: Vec<usize>,
+}
+
 #[derive(Clone, Debug)]
 pub enum Reveal {
     Preflop {
@@ -241,6 +267,24 @@ pub enum Reveal {
         loss_money: f64,
         band: Option<EvBand>,
     },
+    Equity {
+        analysis: EquityAnalysis,
+        estimate_pct: f64,
+        signed_error: f64,
+        band: u8,
+        hit: bool,
+    },
+    Anchor {
+        card: AnchorCard,
+        estimate_pct: f64,
+        signed_error: f64,
+    },
+    BoardType {
+        category: BoardCategory,
+        chosen: BoardCategory,
+        /// The answer was right but took longer than [`BOARD_TYPE_MISS_MS`].
+        too_slow: bool,
+    },
 }
 
 /// Grades a raw answer. `Err` means the input was not understood and nothing is counted.
@@ -257,7 +301,23 @@ pub fn grade(item: &Item, raw: &str) -> Result<Outcome, InvalidAnswer> {
         Question::Price { pot_before, bet, callers } => grade_price(*pot_before, *bet, *callers, raw),
         Question::Hit { outs, street, both } => grade_hit(*outs, *street, *both, raw),
         Question::Spot(q) => grade_spot(q, item.seed, raw),
+        Question::Equity(q) => grade_equity(q, item.seed, raw),
+        Question::Anchor { card } => grade_anchor(usize::from(*card), raw),
+        Question::BoardType { board, options } => grade_board_type(board, options, raw),
     }
+}
+
+/// [`grade`], for front ends that time the player: a `board_type` answer slower
+/// than [`BOARD_TYPE_MISS_MS`] is a miss even if the answer was right.
+pub fn grade_timed(item: &Item, raw: &str, response_ms: u32) -> Result<Outcome, InvalidAnswer> {
+    let mut result = grade(item, raw)?;
+    if response_ms > BOARD_TYPE_MISS_MS {
+        if let Reveal::BoardType { too_slow, .. } = &mut result.reveal {
+            *too_slow = result.correct;
+            result.correct = false;
+        }
+    }
+    Ok(result)
 }
 
 fn normalize(raw: &str) -> String {
@@ -268,7 +328,7 @@ fn normalize(raw: &str) -> String {
 }
 
 fn outcome(correct: bool, answer: String, reveal: Reveal) -> Outcome {
-    Outcome { correct, close: false, ev_loss_pct: None, answer, reveal }
+    Outcome { correct, close: false, ev_loss_pct: None, answer, reveal, equity_log: None }
 }
 
 fn grade_preflop(
@@ -648,10 +708,9 @@ fn grade_hit(outs: u32, street: HitStreet, both: bool, raw: &str) -> Result<Outc
     ))
 }
 
-/// Relabels suits by first appearance across hero then the board. Two spots that
-/// differ only in suit labels get the same canonical cards, so the combo lists,
-/// and any sample drawn from them, come out identical.
-fn canonical_suits(hero: Holding, board: &[Card]) -> (Holding, Vec<Card>) {
+/// The relabelling behind [`canonical_suits`]: suits by first appearance across
+/// hero then the board, with absent suits following in index order.
+fn canonical_perm(hero: Holding, board: &[Card]) -> [u8; 4] {
     let mut perm = [u8::MAX; 4];
     let mut next = 0;
     for card in hero.iter().chain(board) {
@@ -667,10 +726,90 @@ fn canonical_suits(hero: Holding, board: &[Card]) -> (Holding, Vec<Card>) {
             next += 1;
         }
     }
+    perm
+}
+
+/// Relabels suits by first appearance across hero then the board. Two spots that
+/// differ only in suit labels get the same canonical cards, so the combo lists,
+/// and any sample drawn from them, come out identical.
+fn canonical_suits(hero: Holding, board: &[Card]) -> (Holding, Vec<Card>) {
+    let perm = canonical_perm(hero, board);
     (
         [hero[0].with_suit_perm(&perm), hero[1].with_suit_perm(&perm)],
         board.iter().map(|c| c.with_suit_perm(&perm)).collect(),
     )
+}
+
+/// Hero's exact all-in equity for an `equity` question, averaged over every
+/// card-disjoint combo at rung 1 (sampled only for huge multiway cases). Every
+/// suit permutation gives identical numbers. `None` only when no combo exists.
+pub fn equity_analysis(q: &EquityQuestion, seed: u64) -> Option<EquityAnalysis> {
+    let perm = canonical_perm(q.hero, &q.board);
+    let hero = [q.hero[0].with_suit_perm(&perm), q.hero[1].with_suit_perm(&perm)];
+    let board: Vec<Card> = q.board.iter().map(|c| c.with_suit_perm(&perm)).collect();
+    let lists: Vec<Vec<Holding>> = match &q.opponents {
+        EquityOpponents::Exact(hands) => hands
+            .iter()
+            .map(|h| vec![[h[0].with_suit_perm(&perm), h[1].with_suit_perm(&perm)]])
+            .collect(),
+        EquityOpponents::Classes(classes) => classes
+            .iter()
+            .map(|&class| combos_in_class(class, hero, &board))
+            .collect(),
+    };
+    let eq = equity_all_in(hero, &board, &lists, seed)?;
+    Some(EquityAnalysis {
+        truth_pct: eq.share * 100.0,
+        sampled: eq.sampled,
+        tuples: eq.tuples,
+        combos_per_opponent: lists.iter().map(Vec::len).collect(),
+    })
+}
+
+fn grade_equity(q: &EquityQuestion, seed: u64, raw: &str) -> Result<Outcome, InvalidAnswer> {
+    let estimate_pct = percent_guess(raw)?;
+    let analysis = equity_analysis(q, seed)
+        .ok_or_else(|| InvalidAnswer("This spot has no possible opponent hands.".to_string()))?;
+    let signed_error = estimate_pct - analysis.truth_pct;
+    let hit = signed_error.abs() <= f64::from(q.band);
+    let truth_pct = analysis.truth_pct;
+    let mut result = outcome(
+        hit,
+        format!("{estimate_pct}"),
+        Reveal::Equity { analysis, estimate_pct, signed_error, band: q.band, hit },
+    );
+    result.equity_log = Some(EquityLog {
+        band: q.band,
+        signed_error,
+        truth_pct,
+        opponents: q.opponents.count() as u8,
+    });
+    Ok(result)
+}
+
+fn grade_anchor(card_index: usize, raw: &str) -> Result<Outcome, InvalidAnswer> {
+    let estimate_pct = percent_guess(raw)?;
+    let card = anchors::deck()
+        .get(card_index)
+        .ok_or_else(|| InvalidAnswer("That anchor card is not in the deck.".to_string()))?
+        .clone();
+    let signed_error = estimate_pct - card.answer_pct;
+    let correct = signed_error.abs() <= f64::from(card.tolerance);
+    Ok(outcome(correct, format!("{estimate_pct}"), Reveal::Anchor { card, estimate_pct, signed_error }))
+}
+
+fn grade_board_type(board: &[Card], options: &[BoardCategory; 4], raw: &str) -> Result<Outcome, InvalidAnswer> {
+    let code = normalize(raw);
+    let chosen = options.iter().copied().find(|c| c.code() == code).ok_or_else(|| {
+        let codes: Vec<&str> = options.iter().map(|c| c.code()).collect();
+        InvalidAnswer(format!("Answer one of {}.", codes.join(", ")))
+    })?;
+    let category = classify_flop(board);
+    Ok(outcome(
+        chosen == category,
+        chosen.code().to_string(),
+        Reveal::BoardType { category, chosen, too_slow: false },
+    ))
 }
 
 /// Exact (or, for huge multiway cases, sampled) share and money for a spot.

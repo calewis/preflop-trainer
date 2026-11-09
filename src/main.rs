@@ -8,11 +8,13 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use poker_trainer::anchors;
 use poker_trainer::baseline;
-use poker_trainer::generate::generate;
-use poker_trainer::grade::{grade, Outcome};
+use poker_trainer::checkup::{checkup_plan, checkup_runs, next_checkup_form, next_checkup_run};
+use poker_trainer::equity_skill::equity_bias;
+use poker_trainer::grade::{grade_timed, Outcome};
 use poker_trainer::item::{Item, Skill};
-use poker_trainer::log::{format_attempt, parse_log, Attempt, LOG_HEADER};
+use poker_trainer::log::{format_attempt, parse_log, Attempt, CheckRef, LOG_HEADER};
 use poker_trainer::progress::{
     all_stats, baseline_runs, current_step, drill_skills, has_baseline, next_baseline_run,
 };
@@ -27,9 +29,12 @@ Usage:
   poker-trainer card        print the preflop card
   poker-trainer drill [--skill NAME]... [--minutes N] [--items N] [--seed N]
                             run a drill (10 minutes by default)
+  poker-trainer check --skill NAME
+                            take a held-out checkup for one skill
   poker-trainer progress    show results against the pass marks
 
-Skills: preflop, nuts, possible, made, beats, outs, price, hit, spot, spot_mw
+Skills: preflop, nuts, possible, made, beats, board_type, outs, price, hit, equity,
+anchor, spot, spot_mw
 Type q at any question to quit and save.";
 
 fn main() -> ExitCode {
@@ -41,9 +46,14 @@ fn main() -> ExitCode {
             Ok(())
         }
         Some("drill") => parse_drill_args(&args[1..]).and_then(run_drill),
+        Some("check") => parse_check_args(&args[1..]).and_then(run_check),
         Some("progress") if args.len() == 1 => run_progress(),
         Some("gen-baseline") if args.len() == 1 => {
             print!("{}", baseline::to_text(&baseline::generate_baseline()));
+            Ok(())
+        }
+        Some("gen-anchors") if args.len() == 1 => {
+            print!("{}", anchors::to_text(&anchors::generate_deck()));
             Ok(())
         }
         Some("help" | "--help" | "-h") => {
@@ -68,6 +78,20 @@ struct DrillArgs {
     seed: Option<u64>,
 }
 
+fn parse_skill(name: &str) -> Result<Skill, String> {
+    Skill::from_name(name).ok_or_else(|| {
+        let names: Vec<&str> = Skill::ALL.iter().map(|s| s.name()).collect();
+        format!("unknown skill {name}. Skills: {}", names.join(", "))
+    })
+}
+
+fn parse_check_args(args: &[String]) -> Result<Skill, String> {
+    match args {
+        [flag, name] if flag == "--skill" => parse_skill(name),
+        _ => Err(format!("check needs --skill NAME\n\n{USAGE}")),
+    }
+}
+
 fn parse_drill_args(args: &[String]) -> Result<DrillArgs, String> {
     let mut parsed = DrillArgs { skills: Vec::new(), minutes: None, items: None, seed: None };
     let mut iter = args.iter();
@@ -76,12 +100,7 @@ fn parse_drill_args(args: &[String]) -> Result<DrillArgs, String> {
         let number = |text: &String| text.parse::<u64>().map_err(|_| format!("{flag} needs a whole number, got {text}"));
         match flag.as_str() {
             "--skill" => {
-                let name = value()?;
-                let skill = Skill::from_name(name).ok_or_else(|| {
-                    let names: Vec<&str> = Skill::ALL.iter().map(|s| s.name()).collect();
-                    format!("unknown skill {name}. Skills: {}", names.join(", "))
-                })?;
-                parsed.skills.push(skill);
+                parsed.skills.push(parse_skill(value()?)?);
             }
             "--minutes" => parsed.minutes = Some(positive(flag, number(value()?)?)?),
             "--items" => parsed.items = Some(positive(flag, number(value()?)?)?),
@@ -208,9 +227,9 @@ fn ask(item: &Item, input: &mut impl BufRead, stdout: &mut impl Write) -> Asked 
         if answer.eq_ignore_ascii_case("q") {
             return Asked::Quit;
         }
-        match grade(item, answer) {
+        let response_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
+        match grade_timed(item, answer, response_ms) {
             Ok(outcome) => {
-                let response_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
                 return Asked::Answered { outcome: Box::new(outcome), response_ms };
             }
             Err(invalid) => {
@@ -241,8 +260,11 @@ fn run_drill(args: DrillArgs) -> Result<(), String> {
         if limits.finished(asked_count, started.elapsed().as_millis() as u64) {
             break;
         }
-        let planned = session.next_item();
-        let item = generate(planned.skill, planned.seed);
+        let Some(planned) = session.try_next_item() else {
+            println!("\nNo anchor cards are due and no new ones can be introduced this session.");
+            break;
+        };
+        let item = session.item_for(planned);
         let tag = match planned.origin {
             Origin::New => "",
             Origin::Due => " (review)",
@@ -256,7 +278,7 @@ fn run_drill(args: DrillArgs) -> Result<(), String> {
         };
         store.append(&Attempt::from_drill(planned, &outcome, now_ms(), response_ms));
         let ok = outcome.ok();
-        session.record(planned, ok);
+        session.record_timed(planned, ok, response_ms);
         asked_count += 1;
         ok_count += u64::from(ok);
         println!("{}", render::reveal(&outcome, style));
@@ -297,11 +319,44 @@ fn run_baseline() -> Result<(), String> {
     Ok(())
 }
 
+fn run_check(skill: Skill) -> Result<(), String> {
+    let store = Store::open()?;
+    let attempts = store.load();
+    let (form, run) = (next_checkup_form(skill, &attempts), next_checkup_run(&attempts));
+    let plan = checkup_plan(skill, form);
+    let total = plan.slots.len();
+    println!("Checkup for {}: {total} questions, form {form}, no feedback until the end. Type q to stop early.", skill.name());
+    let style = style();
+    let stdin = io::stdin();
+    let mut input = stdin.lock();
+    let mut stdout = io::stdout();
+
+    for index in 0..total {
+        let item = plan.item(index);
+        println!("\n--- Question {} of {total} ---", index + 1);
+        println!("{}", render::question(&item, style));
+        let (outcome, response_ms) = match ask(&item, &mut input, &mut stdout) {
+            Asked::Quit => break,
+            Asked::Answered { outcome, response_ms } => (outcome, response_ms),
+        };
+        let check = CheckRef { run, form, slot: index as u32 };
+        store.append(&Attempt::from_check(check, skill, plan.slots[index].seed, &outcome, now_ms(), response_ms));
+    }
+
+    match checkup_runs(&store.load()).into_iter().find(|s| s.run == run) {
+        Some(score) => print!("{}", render::checkup_report(&score)),
+        None => println!("\nNo answers were recorded, so there is nothing to score."),
+    }
+    Ok(())
+}
+
 fn run_progress() -> Result<(), String> {
     let store = Store::open()?;
     let attempts = store.load();
     let stats = all_stats(&attempts);
     let runs = baseline_runs(&attempts, baseline::BASELINE_SIZE);
-    print!("{}", render::progress_text(&stats, current_step(&stats), &runs));
+    let checkups = checkup_runs(&attempts);
+    let bias = equity_bias(&attempts);
+    print!("{}", render::progress_text(&stats, current_step(&stats), &runs, &checkups, &bias));
     Ok(())
 }

@@ -1,9 +1,12 @@
 //! All terminal text: prompts, reveals and reports.
 
+use poker_trainer::anchors;
 use poker_trainer::answer::{answer_format, AnswerFormat, AnswerOption};
 use poker_trainer::cards::{rank_char, Card, Holding};
-use poker_trainer::grade::{EvBand, Outcome, Reveal};
-use poker_trainer::item::{HitStreet, Item, OpponentLabel, Question, SpotMode, SpotQuestion};
+use poker_trainer::checkup::{CheckupMetric, CheckupScore};
+use poker_trainer::equity_skill::{EquityBias, BIAS_MIN_ATTEMPTS};
+use poker_trainer::grade::{EquityAnalysis, EvBand, Outcome, Reveal};
+use poker_trainer::item::{EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question, SpotMode, SpotQuestion};
 use poker_trainer::preflop::{action_label, Action, PreflopReason, Seat, Range, Situation, CARD};
 use poker_trainer::progress::{pass_mark, BaselineRun, SkillStats, PASS_ATTEMPTS, STEPS};
 
@@ -165,7 +168,39 @@ pub fn question(item: &Item, style: Style) -> String {
             format!("You have {outs} outs on the {name}. {cards}\nWhat is your chance of hitting?")
         }
         Question::Spot(q) => spot_question(q, style),
+        Question::Equity(q) => equity_question(q, style),
+        Question::Anchor { card } => anchors::deck()[usize::from(*card)].prompt.clone(),
+        Question::BoardType { board, .. } => {
+            format!("Flop: {}\nName its suit pattern and rank pattern.", style.cards(board))
+        }
     }
+}
+
+fn equity_question(q: &EquityQuestion, style: Style) -> String {
+    let mut lines = vec![
+        format!("Your hand: {}", style.holding(q.hero)),
+        format!("Board: {} ({})", style.cards(&q.board), street_name(q.board.len())),
+    ];
+    match &q.opponents {
+        EquityOpponents::Exact(hands) if hands.len() == 1 => {
+            lines.push(format!("Opponent shows: {}", style.holding(hands[0])));
+        }
+        EquityOpponents::Exact(hands) => {
+            for (i, &hand) in hands.iter().enumerate() {
+                lines.push(format!("Opponent {} shows: {}", i + 1, style.holding(hand)));
+            }
+        }
+        EquityOpponents::Classes(classes) if classes.len() == 1 => {
+            lines.push(format!("Assume they have {}.", classes[0].description()));
+        }
+        EquityOpponents::Classes(classes) => {
+            for (i, class) in classes.iter().enumerate() {
+                lines.push(format!("Assume opponent {} has {}.", i + 1, class.description()));
+            }
+        }
+    }
+    lines.push(format!("All-in, all remaining cards run out. What is your equity? Within {} points counts.", q.band));
+    lines.join("\n")
 }
 
 fn spot_question(q: &SpotQuestion, style: Style) -> String {
@@ -400,8 +435,41 @@ pub fn reveal(outcome: &Outcome, style: Style) -> String {
             }
             lines.push("This decision was averaged over all possible remaining cards and combos, so the actual next card doesn't matter.".to_string());
         }
+        Reveal::Equity { analysis, estimate_pct, signed_error, band, hit } => {
+            equity_reveal(&mut lines, analysis, *estimate_pct, *signed_error, *band, *hit);
+        }
+        Reveal::Anchor { card, estimate_pct, signed_error } => {
+            lines.push(format!(
+                "Answer: {:.1}%. You said {estimate_pct}% ({signed_error:+.1} points). Within {} points counts.",
+                card.answer_pct, card.tolerance
+            ));
+        }
+        Reveal::BoardType { category, chosen, too_slow } => {
+            lines.push(format!("Answer: {}. You chose {}.", category.label(), chosen.label()));
+            if *too_slow {
+                lines.push("Too slow: answers over 12 seconds count as misses even when right.".to_string());
+            }
+        }
     }
     lines.join("\n")
+}
+
+fn equity_reveal(
+    lines: &mut Vec<String>,
+    a: &EquityAnalysis,
+    estimate_pct: f64,
+    signed_error: f64,
+    band: u8,
+    hit: bool,
+) {
+    lines.push(format!(
+        "Exact equity: {:.1}%{}. You said {estimate_pct}% ({signed_error:+.1} points).",
+        a.truth_pct,
+        if a.sampled { " (estimated from a 300,000-outcome sample)" } else { "" }
+    ));
+    lines.push(format!("Band of {band} points: {}.", if hit { "hit" } else { "miss" }));
+    let combos: Vec<String> = a.combos_per_opponent.iter().map(|n| n.to_string()).collect();
+    lines.push(format!("Averaged over {} combos.", combos.join(" x ")));
 }
 
 fn preflop_reveal(lines: &mut Vec<String>, seat: Seat, situation: Situation, action: Action, reason: PreflopReason) {
@@ -537,6 +605,9 @@ fn mark_text(stats: &SkillStats) -> String {
     if let Some(m) = mark.max_blunders {
         parts.push(format!("at most {m} blunders"));
     }
+    if let Some(m) = mark.max_mean_abs_error {
+        parts.push(format!("mean absolute error at most {m:.0} points"));
+    }
     parts.join(", ")
 }
 
@@ -545,8 +616,12 @@ fn pass_status(stats: &SkillStats) -> String {
         "Passed.".to_string()
     } else if stats.total_attempts < PASS_ATTEMPTS {
         format!("Not passed yet: needs {PASS_ATTEMPTS} attempts, has {}.", stats.total_attempts)
-    } else {
+    } else if !stats.drill_passed {
         "Not passed yet.".to_string()
+    } else if stats.checkup_passed.is_none() {
+        format!("Drill mark met. Take a checkup to pass: poker-trainer check --skill {}", stats.skill.name())
+    } else {
+        "Drill mark met, but the latest checkup missed it.".to_string()
     }
 }
 
@@ -568,11 +643,78 @@ fn stats_text(stats: &SkillStats) -> String {
     if mark.max_blunders.is_some() {
         parts.push(format!("{} blunders", stats.blunders));
     }
+    if let (true, Some(e)) = (mark.max_mean_abs_error.is_some(), stats.mean_abs_error) {
+        parts.push(format!("mean absolute error {e:.1} points"));
+    }
     parts.join(", ")
 }
 
-/// The `progress` report: per-skill stats, the current step and baseline history.
-pub fn progress_text(stats: &[SkillStats], step: usize, runs: &[BaselineRun]) -> String {
+fn metric_text(score: &CheckupScore) -> String {
+    match score.metric {
+        CheckupMetric::PercentCorrect => format!("{:.0}% correct", score.score),
+        CheckupMetric::PercentWithinOne => format!("{:.0}% within 1", score.score),
+        CheckupMetric::MeanEvLoss => format!("mean EV loss {:.1}% of pot", score.score),
+        CheckupMetric::MeanAbsError => format!("mean absolute error {:.1} points", score.score),
+    }
+}
+
+/// One line per checkup, for history lists.
+pub fn checkup_line(s: &CheckupScore) -> String {
+    let status = if !s.complete {
+        "unfinished".to_string()
+    } else if s.passed {
+        "passed".to_string()
+    } else {
+        "not passed".to_string()
+    };
+    let diff = s.agreement.mean_abs_diff.map_or(String::new(), |d| format!(", mean gap {d:.1}"));
+    format!(
+        "  {} form {} (run {}): {}, standard error {:.1}; repeats agreed {} of {}{diff}; {status}",
+        s.skill.name(),
+        s.form,
+        s.run,
+        metric_text(s),
+        s.standard_error,
+        s.agreement.agree,
+        s.agreement.pairs,
+    )
+}
+
+/// The end-of-checkup report.
+pub fn checkup_report(score: &CheckupScore) -> String {
+    format!(
+        "\nCHECKUP RESULT\n\n{}\n\nScored on the {} original questions only; the repeats are a noise check.\n",
+        checkup_line(score),
+        poker_trainer::checkup::CHECKUP_ORIGINALS
+    )
+}
+
+fn bias_section(bias: &EquityBias) -> String {
+    let mut out = format!(
+        "\nEquity calibration ({} estimates; mean signed error {:+.1} points)\n",
+        bias.count, bias.mean_signed_error
+    );
+    for bucket in bias.by_opponents.iter().chain(&bias.by_truth_band).filter(|b| b.count > 0) {
+        out.push_str(&format!("  {:<12} {:+5.1} points ({})\n", bucket.label, bucket.mean_signed_error, bucket.count));
+    }
+    if let Some(fit) = bias.fit {
+        out.push_str(&format!(
+            "  Log-odds fit of your estimate on the truth: intercept {:.2}, slope {:.2} (1.00 means no compression).\n",
+            fit.intercept, fit.slope
+        ));
+    }
+    out
+}
+
+/// The `progress` report: per-skill stats, the current step, and baseline and
+/// checkup history.
+pub fn progress_text(
+    stats: &[SkillStats],
+    step: usize,
+    runs: &[BaselineRun],
+    checkups: &[CheckupScore],
+    bias: &EquityBias,
+) -> String {
     let mut out = String::from("PROGRESS\n\n");
     for s in stats {
         out.push_str(&format!("{}\n", s.skill.name()));
@@ -600,6 +742,17 @@ pub fn progress_text(stats: &[SkillStats], step: usize, runs: &[BaselineRun]) ->
     for run in runs {
         out.push_str(&run_summary_line(run));
         out.push('\n');
+    }
+    out.push_str("\nCheckup history\n");
+    if checkups.is_empty() {
+        out.push_str("  No checkups yet. Take one with: poker-trainer check --skill NAME\n");
+    }
+    for score in checkups {
+        out.push_str(&checkup_line(score));
+        out.push('\n');
+    }
+    if bias.count >= BIAS_MIN_ATTEMPTS {
+        out.push_str(&bias_section(bias));
     }
     out
 }

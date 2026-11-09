@@ -4,11 +4,15 @@
 //! Every function takes plain inputs and returns structured data, so another
 //! front end can render the same items and grades its own way.
 
+pub mod anchors;
 pub mod answer;
 pub mod baseline;
+pub mod board_type;
 pub mod cards;
+pub mod checkup;
 pub mod classes;
 pub mod equity;
+pub mod equity_skill;
 pub mod eval;
 pub mod generate;
 pub mod grade;

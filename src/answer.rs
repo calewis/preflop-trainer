@@ -75,7 +75,13 @@ pub fn answer_format(question: &Question) -> AnswerFormat {
             option("d", "over 30%"),
         ]),
         Question::Outs { .. } => AnswerFormat::Integer { min: 0, max: MAX_OUTS },
-        Question::Price { .. } | Question::Hit { .. } => AnswerFormat::Percent,
+        Question::Price { .. }
+        | Question::Hit { .. }
+        | Question::Equity(_)
+        | Question::Anchor { .. } => AnswerFormat::Percent,
         Question::Spot(_) => AnswerFormat::Choice(vec![option("c", "call"), option("f", "fold")]),
+        Question::BoardType { options, .. } => {
+            AnswerFormat::Choice(options.iter().map(|c| option(c.code(), c.label())).collect())
+        }
     }
 }

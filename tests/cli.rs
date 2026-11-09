@@ -35,7 +35,7 @@ fn log_rows(home: &Path) -> Vec<Vec<String>> {
 
 /// Answers every kind of drill question; a wrong kind is re-prompted and not counted.
 fn answers(repeats: usize) -> String {
-    "not-an-answer\nr\n25\nnone\nhc\na\n5\nc\nAK\n".repeat(repeats)
+    "not-an-answer\nr\n25\nnone\nhc\na\n5\nc\nAK\nrp\nrc\nrd\ntp\ntc\ntd\nmc\nmd\n".repeat(repeats)
 }
 
 #[test]
@@ -140,6 +140,55 @@ fn baseline_runs_and_compares_with_earlier_runs() {
     assert!(stdout.contains("Current step: 1 of 3"), "{stdout}");
     assert!(stdout.contains("Run 2:"), "{stdout}");
     assert!(!stdout.to_lowercase().contains("win rate"));
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_checkup_gives_no_feedback_until_the_end_and_logs_its_form() {
+    let home = temp_home("check");
+    let script = "25\n".repeat(50);
+    let out = run(&home, &["check", "--skill", "price"], &script);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert!(stdout.contains("form 0"), "{stdout}");
+    assert!(stdout.contains("CHECKUP RESULT"), "{stdout}");
+    assert!(!stdout.contains("Correct.") && !stdout.contains("Not quite."), "no feedback during the test");
+    let rows = log_rows(&home);
+    assert_eq!(rows.len(), 50);
+    assert!(rows.iter().all(|r| r[1] == "check" && r.len() == 18));
+    let again = run(&home, &["check", "--skill", "price"], "q\n");
+    assert!(String::from_utf8_lossy(&again.stdout).contains("form 1"));
+    let progress = run(&home, &["progress"], "");
+    assert!(String::from_utf8_lossy(&progress.stdout).contains("Checkup history"));
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn anchor_only_drills_stop_when_nothing_is_due() {
+    let home = temp_home("anchor");
+    let out = run(&home, &["drill", "--items", "30", "--seed", "2", "--skill", "anchor"], &"50\n".repeat(80));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert!(stdout.contains("No anchor cards are due"), "{stdout}");
+    assert!(log_rows(&home).len() <= 10, "at most five new cards plus their retries");
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn board_type_and_equity_drills_run_and_log() {
+    let home = temp_home("newskills");
+    let script = "rp\nrc\nrd\ntp\ntc\ntd\nmc\nmd\n50\n".repeat(60);
+    let out = run(&home, &["drill", "--items", "8", "--seed", "11", "--skill", "board_type"], &script);
+    assert!(out.status.success());
+    let out = run(&home, &["drill", "--items", "3", "--seed", "11", "--skill", "equity"], &"50\n".repeat(10));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert!(stdout.contains("Exact equity:"), "{stdout}");
+    let rows = log_rows(&home);
+    assert_eq!(rows.iter().filter(|r| r[3] == "board_type").count(), 8);
+    let equity: Vec<_> = rows.iter().filter(|r| r[3] == "equity").collect();
+    assert_eq!(equity.len(), 3);
+    assert!(equity.iter().all(|r| r.len() == 18 && !r[15].is_empty()));
     let _ = fs::remove_dir_all(&home);
 }
 
