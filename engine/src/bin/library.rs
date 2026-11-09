@@ -86,13 +86,24 @@ fn teachable(g: &Grade, limit_pct: f64) -> bool {
         .any(|o| action_class(o.act) != best_class && 100.0 * (best_ev - o.mean_ev) / g.pot <= limit_pct)
 }
 
+/// Worker limit, read from `THREAD_CAP_FILE` if that file exists, so the load
+/// can change during a long run without restarting it.
+fn thread_cap(threads: usize) -> usize {
+    std::env::var("THREAD_CAP_FILE").ok().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| t.trim().parse().ok()).unwrap_or(threads).clamp(1, threads)
+}
+
 fn grade_all<T: Send>(spots: &[(Spot, u64)], threads: usize, label: &str, f: impl Fn(&Spot, u64) -> T + Sync) -> Vec<T> {
     let next = AtomicU64::new(0);
     let results: Mutex<Vec<(usize, T)>> = Mutex::new(Vec::with_capacity(spots.len()));
     let start = Instant::now();
     std::thread::scope(|sc| {
-        for _ in 0..threads {
-            sc.spawn(|| loop {
+        for worker in 0..threads {
+            let (next, results, f) = (&next, &results, &f);
+            sc.spawn(move || loop {
+                if worker >= thread_cap(threads) && (next.load(Ordering::SeqCst) as usize) < spots.len() {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    continue;
+                }
                 let i = next.fetch_add(1, Ordering::SeqCst) as usize;
                 if i >= spots.len() {
                     break;
@@ -136,7 +147,7 @@ fn main() {
     let counter = AtomicU64::new(0);
     let collected: Mutex<Vec<(u64, Spot, usize)>> = Mutex::new(Vec::new());
     std::thread::scope(|sc| {
-        for _ in 0..threads {
+        for _ in 0..thread_cap(threads) {
             sc.spawn(|| loop {
                 let idx = counter.fetch_add(1, Ordering::SeqCst);
                 if idx >= hands {
@@ -314,6 +325,11 @@ fn main() {
         ("pot_types", format!("limped={},single_raised={},reraised={}", pot_n[0], pot_n[1], pot_n[2])),
         ("players_left", format!("two={},three={},four_plus={}", players_n[0], players_n[1], players_n[2])),
     ];
+    let mut meta = meta;
+    if let Some(cal) = poker_engine::preflop_cal::active() {
+        meta.push(("library_version", "3".to_string()));
+        meta.push(("population", format!("mixture: each table 50/50 from the base population and recalibrated population {}", cal.name)));
+    }
     let mut out = format_header(&meta);
     out.push_str(&lines);
     std::fs::create_dir_all(std::path::Path::new(output).parent().unwrap()).unwrap();

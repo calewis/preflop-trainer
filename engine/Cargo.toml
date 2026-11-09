@@ -40,6 +40,10 @@ path = "src/bin/regrade.rs"
 name = "library"
 path = "src/bin/library.rs"
 
+[[bin]]
+name = "preflop"
+path = "src/bin/preflop.rs"
+
 [profile.release]
 opt-level = 3
 lto = "fat"

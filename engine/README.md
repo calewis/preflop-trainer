@@ -1,10 +1,16 @@
 # poker-engine: grading hold'em decisions against plausible opponents
 
 Experimental, and the core idea is unproven. The verdicts here are conditional
-on a set of invented opponent models. They tell you what is right if real
-opponents look like the models, and how much the answer depends on which kind
-of opponent you face. They do not tell you what is correct poker, or what your
-actual opponents do.
+on invented opponent models. They tell you what is right if real opponents look
+like the models, and how much the answer depends on which kind of opponent you
+face. They do not tell you what is correct poker, or what your actual opponents do.
+
+**The current library, `spots_v3.txt`, treats the opponent pool itself as
+uncertain.** Each simulated and graded table comes 50/50 from one of two invented
+populations (see "The opponent mixture"). A robust verdict now means *the answer
+holds across most tables drawn from the posterior over those two populations*. It does not mean the answer is
+right against real players: both populations are invented, and hero still wins
+too much against each of them.
 
 ## Method
 
@@ -12,6 +18,8 @@ For one real decision (hero's cards, the board, the full action history):
 
 1. Each opponent still in the hand gets a pool of 128 sampled `PlayerModel`s:
    an archetype drawn from the population mix, plus log-odds noise (about 0.5).
+   For `spots_v3` that pool is drawn per population, so 128 per seat from each
+   of the two (see "The opponent mixture").
 2. Each model's likelihood of the observed actions is computed over all 1326
    combos, with hero's and the board's cards removed. Bet sizes are a soft signal
    (see below): each observed size fixes that street's size class in the model,
@@ -20,6 +28,10 @@ For one real decision (hero's cards, the board, the full action history):
    line or an unusual size shifts belief about the player without proving it. Seats are independent given the public
    history. Library grading uses 256 equal-weight tables in all: two independent
    halves, each two batches of 64 with their own table draws and runout samples.
+   With the mixture, a table's population is decided first (equal prior, updated
+   by every villain's observed actions, including those who have folded), then
+   each seat still in the hand is resampled within it. Folded seats inform only
+   the population, not the beliefs.
 3. Opponents are fixed stochastic strategies, so hero's problem is a
    best-response expectimax against known stochastic environments: hero maximizes
    at his own nodes, villains branch on their model probabilities with beliefs
@@ -59,6 +71,9 @@ EVs are chip EV from the decision point in big blinds, no rake, so fold = 0.
 
 ### What verdicts do and do not mean
 
+- In `spots_v3`, a robust verdict means the answer holds across most tables drawn
+  from the posterior over the two populations, weighted by how well each explains
+  the actions seen. It does not mean the answer is right against real players.
 - A verdict is a statement about this family of models only. A "robust" spot
   can be wrong against real opponents who are outside the family.
 - "Robust" does not mean "large edge"; it means the option is usually best in
@@ -73,7 +88,7 @@ EVs are chip EV from the decision point in big blinds, no rake, so fold = 0.
 
 ## Assumptions
 
-**Every number in `src/models.rs` is an assumption.** None is fitted to data.
+**Every number in `src/models.rs` and `src/preflop_cal.rs` is an assumption.** None is fitted to data.
 The VPIP/PFR anchors, population mix, table-size mix and stacks come from the
 brief; everything else is invented to express the brief's descriptions.
 
@@ -92,13 +107,40 @@ brief; everything else is invented to express the brief's descriptions.
   whose reach from the root falls below 1e-6, with the survivors renormalized.
 - Hero before the graded decision: the library's preflop card, then a simple
   solid heuristic (`sim.rs`). This shapes which spots exist, not their grades.
+- The second population (`CAL_V2` in `preflop_cal.rs`) and the 50/50 weighting
+  are assumptions too, chosen by reasoning about a loose no-rake game.
 - Game: cash, no rake, no ante, 4 to 7 players, equal stacks 60/100/150/200bb
   (no side pots), at most 2 raises per postflop street, 4 preflop.
 - Deep-tree hero options: bet 2/3 pot, or raise to 3x.
 
+## The opponent mixture
+
+`spots_v3` is simulated and graded against a 50/50 per-table mixture of:
+
+- **Base population**: the archetypes in `models.rs`, as used for `spots_v2`.
+- **Recalibrated population** (`CAL_V2` in `preflop_cal.rs`): the same archetypes
+  with more preflop calling (big-blind defence around 70% for loose players,
+  limpers calling raises most of the time), lower postflop continue rates with
+  weak holdings, and more betting and raising with strong hands. Its numbers are
+  invented by reasoning about a loose no-rake home game and were not fitted to
+  anything.
+
+The mixture is on when `POKER_POPULATION=mixture` is set; without it the engine
+produces the base population exactly (`spots_v2`, unchanged byte for byte on a
+small library). `PREFLOP.md` documents how the recalibrated numbers were set.
+
+**Both populations are invented and hero still wins too much against each.**
+With the engine's solid postflop heuristic and the hand-built preflop card,
+simulated hero (100bb stacks) wins about +64 bb/100 against the base population
+and about +50 against the recalibrated one, above the ceiling of about 40 we
+set for a very soft game. Both pools are softer than that, and mixing them does
+not fix it. The mixture only tests how verdicts move between two guesses.
+
 ## Validation (real numbers from the final code)
 
-All numbers below are from the final code (`src/bin/validate.rs`), run on a 16-core desktop.
+Numbers in this section are for the base population unless a line says otherwise,
+from the final code (`src/bin/validate.rs`), run on a 16-core desktop. The gates on
+the mixture are in "Validation of the mixture".
 
 ### Tests
 
@@ -249,9 +291,75 @@ with SMT, 53; 16 on the other CCD with SMT, 59; 8 on V-cache cores, 42.
 30 unpinned measured fastest. These are single runs with long jobs, so differences
 under about 10% are not meaningful.
 
+## Validation of the mixture
+
+All from the final code, with `POKER_POPULATION=mixture`, at 16 threads.
+
+`cargo test --release` passes with the variable set and unset. `check_library` passes
+on all 3,000 lines of `spots_v3`.
+
+Blocker gate (2,000 river spots each, percent of pot, limits p50 under 1, p95 under 2):
+
+| Spots | Method | Mean | p50 | p90 | p95 | p99 | Max | Gate |
+|---|---|---|---|---|---|---|---|---|
+| 3-way | at root | 0.459 | 0.428 | 0.957 | 1.136 | 1.579 | 4.417 | pass |
+| 3-way | along line | 0.540 | 0.445 | 1.173 | 1.418 | 2.072 | 4.700 | pass |
+| 4-way | at root | 0.669 | 0.549 | 1.473 | 1.736 | 2.386 | 3.824 | pass |
+| 4-way | along line | 0.819 | 0.593 | 1.948 | 2.282 | 3.005 | 5.414 | **fail** |
+
+As with the base population, 4-way along-line fails, so spots with four or more
+players are still excluded.
+
+Hindsight gate (100 spots): per-table best response against the joint solve inflates
+continuing lines by 5.92% of pot on average (p95 16.27), changing the best option on
+9.0% and the verdict on 21.0%, so per-table is still not used. The joint solve used
+for grading matches the naive joint solve within 2.01e-4% of pot with no best-option
+or verdict changes.
+
+Determinism: the determinism and equivalence tests pass under the mixture.
+
 ## The library
 
-Generated with `library 20261108 8000000 16000 5000 3000 30 target/library/spots_v2.txt 2 2`
+`spots_v3.txt`: generated with `POKER_POPULATION=mixture library 20261109 8000000 16000 5000 3000 30 target/library/spots_v3.txt 2 2`
+(seed 20261109, at most 2 villains still in, 2 batches per half, worker limit from
+a cap file: 16 threads while a browser suite ran, up to 30 when it had been idle for 10 minutes).
+Line format and `#SPOTS v2` first line unchanged; a header comment and `#meta library_version=3`
+and `#meta population=...` name the mixture. 1,246,237 bytes. 8,000,000 simulated hands;
+15,990 screened; 4,992 graded in full (4,947 s); 3,000 selected. Wall clock 83.3 minutes.
+
+An earlier v3 was generated before the population posterior used folded seats. It leaned toward the
+recalibrated pool (mean posterior 0.530 against a true share of about 0.50); the file above replaces it.
+
+| Measure | Counts |
+|---|---|
+| Street | flop 1,200 (40%), turn 1,050 (35%), river 750 (25%) |
+| Pot type | limped 1,000, single-raised 1,000, reraised 1,000 |
+| Players left | two 1,500, three 1,500 |
+| Verdict | robust 461 (15.4%), close 282 (9.4%), depends 2,257 (75.2%) |
+
+Retention among teachable full-graded spots, the share whose two halves agree:
+
+| By street | Kept | By verdict (pooled) | Kept |
+|---|---|---|---|
+| Flop | 1,506 of 1,892 (79.6%) | Robust | 494 of 583 (84.7%) |
+| Turn | 1,340 of 1,649 (81.3%) | Close | 289 of 655 (44.1%) |
+| River | 1,013 of 1,163 (87.1%) | Depends | 3,076 of 3,466 (88.7%) |
+
+Regrading 600 spots of `spots_v3` with the same 256-table grader and fresh seeds: best option
+changed 0.8% (flop 0.4, turn 1.9, river 0.0), verdict changed 5.2% (flop 5.0, turn 5.7,
+river 4.7). Targets are at most 3% and 8%. Of the teachable spots whose halves agreed, 4 have a
+pooled result that differs from the halves (`pool_match=0`), and exactly 4 of the file's 3,000 lines carry it.
+
+**Shift from `spots_v2`.** Verdict counts: robust 562 to 461, close 284 to 282, depends
+2,154 to 2,257. On 600 spots of `spots_v2` regraded under the mixture, the best option changed
+on 7.0% (flop 5.8, turn 8.6, river 6.7) and the verdict on 17.3% (flop 16.7, turn 18.1,
+river 17.3): of 115 robust, 29 became depends; of 56 close, 24 became depends and 1 robust; of 429
+depends, 39 became close and 11 robust. That is the size of the change from adding one more
+invented population, not a measure of accuracy against real players.
+
+### Earlier library: `spots_v2`
+
+`spots_v2` used the base population only. Generated with `library 20261108 8000000 16000 5000 3000 30 target/library/spots_v2.txt 2 2`
 (seed 20261108, 30 threads, unpinned, at most 2 villains still in, 2 batches per
 half). Format version 2, line-based, specified by its header. 1,235,648 bytes.
 Each spot line's metadata gives `tables=256`, `agree=best+verdict` and `pool_match`,
@@ -332,7 +440,17 @@ to the 9.0% / 21.0% seed noise of that grader.
 
 ## Weaknesses
 
-- The models are not fitted to data. Nothing here shows they match real players.
+- The models are not fitted to data, and neither population is fitted to data.
+  Nothing here shows they match real players. `spots_v3` verdicts only show
+  stability across two guesses.
+- Hero wins implausibly often against both populations (about +64 and +50 bb/100
+  with the hand-built card), so both opponent pools are too soft.
+- The mixture's 50/50 weighting is itself an assumption.
+- At pool size 128 the population posterior's deciles are pulled about 0.01 to 0.024 toward
+  0.5, which points to Monte Carlo noise in the estimated marginals.
+- Low severity, to fix at the next regeneration: `fold_rng` in `mixture_detail` (`spot.rs`) is
+  a clone of the main stream, so its seeds reuse later main-stream values. The fix is seeding
+  from `rng.clone().next_u64() ^ CONSTANT`; changing it now would change the draws.
 - Hand strength is a made-hand percentile, so strong draws and vulnerable made hands are coarse.
 - Villains have no memory of their own earlier lines beyond the belief update,
   and do not adapt to hero.
@@ -340,7 +458,7 @@ to the 9.0% / 21.0% seed noise of that grader.
   and villains use a single bet size per street.
 - Sampling error on multiway flops is the largest numeric error.
 - Verdicts are noisy without the agreement filter (about 21% change with a new seed at 64
-  tables); with it, about 4% of kept verdicts still change at 256 tables, and the filter
+  tables); with it, about 5% of kept verdicts still change at 256 tables, and the filter
   biases the file toward stable answers (above).
 - The joint solve still has some hindsight inside the finite table set.
 - The card-removal correction is mean-field and is not applied at the turn-to-river

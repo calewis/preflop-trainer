@@ -22,6 +22,13 @@ fn main() {
     let step = (lines.len() / limit.max(1)).max(1);
     let sample: Vec<&str> = lines.iter().step_by(step).copied().take(limit).collect();
     let cfg = GradeCfg::standard();
+    println!(
+        "regrade args: file={} limit={limit} threads={threads} batches_per_half={batches}; tables per batch={}, tables total={}; population={}",
+        args[1],
+        cfg.tables,
+        cfg.tables * batches * 2,
+        cfg.mixture.map_or("base".to_string(), |c| format!("mixture with {}", c.name)),
+    );
     let next = AtomicUsize::new(0);
     let out = Mutex::new(Vec::new());
     std::thread::scope(|s| {
@@ -37,7 +44,7 @@ fn main() {
                 let g = sg.pooled;
                 let old_best = f[13].strip_prefix("best=").expect("best=");
                 let new_best = &g.options[g.best].label;
-                out.lock().unwrap().push((spot.board.len(), kind(old_best) != kind(new_best), f[12] != g.verdict.code(), spot.replay().active_count()));
+                out.lock().unwrap().push((spot.board.len(), kind(old_best) != kind(new_best), f[12] != g.verdict.code(), spot.replay().active_count(), f[12].to_string(), g.verdict.code()));
             });
         }
     });
@@ -55,6 +62,12 @@ fn main() {
         let sel: Vec<_> = r.iter().filter(|x| (x.3 <= 2) == keep).collect();
         let n = sel.len().max(1) as f64;
         println!("regrade {label}: spots={} best-option changed {:.1}%, verdict changed {:.1}%", sel.len(), 100.0 * sel.iter().filter(|x| x.1).count() as f64 / n, 100.0 * sel.iter().filter(|x| x.2).count() as f64 / n);
+    }
+    let names = ["robust", "close", "depends"];
+    for from in names {
+        let sel: Vec<_> = r.iter().filter(|x| x.4 == from).collect();
+        let parts: Vec<String> = names.iter().map(|to| format!("{to} {}", sel.iter().filter(|x| x.5 == *to).count())).collect();
+        println!("regrade verdict {from} ({}) -> {}", sel.len(), parts.join(", "));
     }
     println!("peak RSS {:.2} GB", poker_engine::memguard::peak_rss_gb());
 }

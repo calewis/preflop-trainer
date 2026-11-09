@@ -291,6 +291,8 @@ pub struct PlayerModel {
     pub multiway: f64,
     pub raised_pen: f64,
     pub bet_frac: [f64; 3],
+    /// Recalibrated preflop response rules, or `None` for the base population.
+    pub cal: Option<&'static crate::preflop_cal::Calibration>,
 }
 
 pub fn sample_archetype(rng: &mut Rng) -> usize {
@@ -333,6 +335,7 @@ impl PlayerModel {
             multiway: a.multiway,
             raised_pen: a.raised_pen,
             bet_frac: [SIZE_FRACS[usize::from(modal(&a.size_probs[0]))], SIZE_FRACS[usize::from(modal(&a.size_probs[1]))], SIZE_FRACS[usize::from(modal(&a.size_probs[2]))]],
+            cal: None,
         }
     }
 
@@ -340,6 +343,14 @@ impl PlayerModel {
     pub fn sample(rng: &mut Rng) -> PlayerModel {
         let archetype = sample_archetype(rng);
         Self::sample_of(rng, archetype)
+    }
+
+    /// Samples from the population recalibrated by `cal` (`preflop_cal.rs`).
+    pub fn sample_cal(rng: &mut Rng, cal: &'static crate::preflop_cal::Calibration) -> PlayerModel {
+        let mut m = Self::sample(rng);
+        cal.apply_postflop(&mut m);
+        m.cal = Some(cal);
+        m
     }
 
     pub fn sample_of(rng: &mut Rng, archetype: usize) -> PlayerModel {
@@ -485,7 +496,27 @@ impl PlayerModel {
         out
     }
 
+    /// `preflop_row` for a single class, for callers that decide one hand at a time.
+    pub fn preflop_probs(&self, ctx: &PreflopCtx, class: usize) -> [f32; 3] {
+        let (raise_th, cont_th) = self.preflop_thresholds(ctx);
+        let p = hand_percentiles()[class];
+        let raise = soft(raise_th - p);
+        let cont = soft(cont_th - p).max(raise);
+        apply_floor_preflop(1.0 - cont, cont - raise, raise, ctx.free_check)
+    }
+
+    /// One class's `[fold, call, raise]` from explicit thresholds (percent of hands).
+    pub fn preflop_probs_at(&self, ctx: &PreflopCtx, class: usize, raise_th: f64, cont_th: f64) -> [f32; 3] {
+        let p = hand_percentiles()[class];
+        let raise = soft(raise_th - p);
+        let cont = soft(cont_th - p).max(raise);
+        apply_floor_preflop(1.0 - cont, cont - raise, raise, ctx.free_check)
+    }
+
     fn preflop_thresholds(&self, ctx: &PreflopCtx) -> (f64, f64) {
+        if let Some(t) = self.cal.and_then(|c| c.thresholds(self, ctx, ctx.limped)) {
+            return t;
+        }
         let pos = position_factor(ctx.position);
         match ctx.raises {
             0 => {
@@ -606,6 +637,8 @@ pub struct PreflopCtx {
     pub raised_earlier: bool,
     /// Big blind with no raise: fold not legal.
     pub free_check: bool,
+    /// The seat already called voluntarily preflop without raising.
+    pub limped: bool,
 }
 
 /// Action probability tables for the expectimax, by situation and class.

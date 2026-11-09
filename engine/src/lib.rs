@@ -8,6 +8,8 @@ pub mod joint;
 pub mod memguard;
 pub mod models;
 pub mod output;
+pub mod preflop_cal;
+pub mod preflop_charts;
 pub mod preflop_order;
 pub mod prof;
 pub mod reference;

@@ -66,6 +66,7 @@ fn cfg(archetype: usize) -> GradeCfg {
         force_archetype: Some(archetype),
         exact_models: true,
         joint: true,
+        mixture: None,
     }
 }
 

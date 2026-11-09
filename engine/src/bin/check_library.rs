@@ -162,6 +162,12 @@ fn main() {
         let labels: Vec<&str> = opts.iter().map(|o| o[0]).collect();
         // Raise labels carry the amount, printed to 2 decimals; the replayed amount
         // can differ slightly because history amounts are printed to 4 decimals.
+        // A call that puts hero all-in can show a sliver of stack left after replaying
+        // rounded amounts, which would wrongly make a raise legal. Remove the sliver.
+        let excess = r.stacks[hero_seat] + r.put[hero_seat] - r.current;
+        if excess > 0.0 && excess <= slack {
+            r.stacks[hero_seat] = r.current - r.put[hero_seat];
+        }
         let want_labels: Vec<String> = r.root_options(hero_seat).into_iter().map(|x| x.1).collect();
         assert_eq!(labels.len(), want_labels.len(), "line {ln}: option count differs from the legal root options");
         for (got, want) in labels.iter().zip(&want_labels) {

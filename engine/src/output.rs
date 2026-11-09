@@ -56,6 +56,9 @@ pub fn format_header(meta: &[(&str, String)]) -> String {
     s.push_str("# arch: ';' separated name:weight:best_option.\n");
     s.push_str("# meta: tables=tables pooled, turns/rivers=runouts sampled, ess=per-seat effective sample size range,\n");
     s.push_str("#   agree=best+verdict (two independent halves agree on both), pool_match=1 if the pooled result equals the halves.\n");
+    if meta.iter().any(|(k, _)| *k == "library_version") {
+        s.push_str("# Library version 3: same line format as v2; opponents are a 50/50 per-table mixture of two invented populations (see #meta population).\n");
+    }
     for (k, v) in meta {
         s.push_str(&format!("#meta {k}={v}\n"));
     }

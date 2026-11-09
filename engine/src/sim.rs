@@ -23,6 +23,8 @@ pub struct SimResult {
     pub spot: Spot,
     /// Street of the capture: 1 flop, 2 turn, 3 river.
     pub street: u8,
+    /// The table was drawn from the recalibrated population (mixture only).
+    pub recalibrated: bool,
 }
 
 fn pick_weighted(rng: &mut Rng, items: &[(usize, u64)]) -> usize {
@@ -62,7 +64,7 @@ pub fn hero_preflop_raise(r: &Round) -> f64 {
     }
 }
 
-fn hero_preflop(r: &Round, track: &PreflopTrack, n: usize, seat: usize, hand: Holding) -> Act {
+pub fn hero_preflop(r: &Round, track: &PreflopTrack, n: usize, seat: usize, hand: Holding) -> Act {
     let situation = if r.raises >= 1 {
         Situation::Raised
     } else if track.limpers > 0 {
@@ -97,7 +99,7 @@ fn hero_preflop(r: &Round, track: &PreflopTrack, n: usize, seat: usize, hand: Ho
 }
 
 /// A simple solid postflop rule for hero on streets before the graded one.
-fn hero_heuristic(r: &Round, seat: usize, bucket: usize, draw: bool, street: usize, rng: &mut Rng) -> Act {
+pub fn hero_heuristic(r: &Round, seat: usize, bucket: usize, draw: bool, street: usize, rng: &mut Rng) -> Act {
     if !r.is_facing(seat) {
         let bet = bucket <= 2 || (draw && street < 2 && rng.below(2) == 0);
         if bet {
@@ -126,7 +128,7 @@ fn hero_heuristic(r: &Round, seat: usize, bucket: usize, draw: bool, street: usi
     }
 }
 
-fn villain_postflop(
+pub fn villain_postflop(
     r: &Round,
     seat: usize,
     class: usize,
@@ -162,7 +164,7 @@ fn villain_postflop(
     }
 }
 
-fn villain_preflop(r: &Round, track: &PreflopTrack, n: usize, seat: usize, hand: Holding, model: &PlayerModel, rng: &mut Rng) -> Act {
+pub fn villain_preflop(r: &Round, track: &PreflopTrack, n: usize, seat: usize, hand: Holding, model: &PlayerModel, rng: &mut Rng) -> Act {
     let ctx = track.ctx(r, seat, n);
     let row = model.preflop_row(&ctx);
     let class = crate::combos::class_of(hand[0], hand[1]) as usize;
@@ -222,9 +224,15 @@ pub fn preflop_population(seed: u64) -> Vec<(usize, bool, bool)> {
     (0..n).map(|s| (models[s].archetype, vpip[s], pfr[s])).collect()
 }
 
-/// Simulates one hand from a seed. Returns a spot if hero reaches a captured
-/// postflop decision.
+/// Simulates one hand from a seed, from the population this process uses.
 pub fn simulate(seed: u64) -> Option<SimResult> {
+    simulate_with(seed, crate::preflop_cal::active())
+}
+
+/// Simulates one hand. With `mixture`, the whole table is drawn 50/50 from the
+/// base population and that recalibrated one; otherwise from the base population.
+/// Returns a spot if hero reaches a captured postflop decision.
+pub fn simulate_with(seed: u64, mixture: Option<&'static crate::preflop_cal::Calibration>) -> Option<SimResult> {
     let mut rng = Rng::new(seed);
     let n = pick_weighted(&mut rng, &TABLE_SIZES);
     let stack = STACKS[rng.below(STACKS.len() as u64) as usize];
@@ -235,7 +243,13 @@ pub fn simulate(seed: u64) -> Option<SimResult> {
     let holdings: Vec<Holding> = (0..n).map(|i| [deck[2 * i], deck[2 * i + 1]]).collect();
     let board_all: Vec<Card> = deck[2 * n..2 * n + 5].to_vec();
 
-    let models: Vec<PlayerModel> = (0..n).map(|_| PlayerModel::sample(&mut rng)).collect();
+    let table_cal = mixture.filter(|_| rng.below(2) == 1);
+    let models: Vec<PlayerModel> = (0..n)
+        .map(|_| match table_cal {
+            Some(cal) => PlayerModel::sample_cal(&mut rng, cal),
+            None => PlayerModel::sample(&mut rng),
+        })
+        .collect();
 
     let mut r = Round::preflop(n, stack);
     let mut track = PreflopTrack::default();
@@ -287,6 +301,7 @@ pub fn simulate(seed: u64) -> Option<SimResult> {
                             history,
                         },
                         street: street_idx as u8,
+                        recalibrated: table_cal.is_some(),
                     });
                 }
                 hero_heuristic(&r, seat, bucket, draw, street_idx - 1, &mut rng)

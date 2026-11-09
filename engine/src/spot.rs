@@ -58,6 +58,11 @@ pub fn position_of(n: usize, seat: usize) -> Seat {
     Seat::from_behind(behind_of(n, seat))
 }
 
+/// Whether a seat has already called voluntarily preflop without raising.
+pub fn limped_seat(r: &Round, seat: usize) -> bool {
+    r.raises >= 1 && if seat == 1 { false } else if seat == 0 { r.put[0] > 0.5 + EPS && r.put[0] < r.current } else { r.put[seat] > 0.0 && r.put[seat] < r.current }
+}
+
 /// Preflop tracker shared by replay and simulation.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PreflopTrack {
@@ -74,6 +79,7 @@ impl PreflopTrack {
             last_raise_to: r.current,
             raised_earlier: self.raised_mask >> seat & 1 == 1,
             free_check: seat == 1 && r.raises == 0 && r.current <= r.put[1] + EPS,
+            limped: limped_seat(r, seat),
         }
     }
 
@@ -151,6 +157,9 @@ pub struct Replayed {
     pub round: Round,
     /// Active villains by seat, with observed actions and observed sizes.
     active: Vec<(usize, Vec<Obs>, Vec<(u8, u8)>)>,
+    /// Villains who have folded, with their observed actions and sizes. Used
+    /// only for the population posterior of the opponent mixture.
+    folded: Vec<(usize, Vec<Obs>, Vec<(u8, u8)>)>,
     /// Classes on the flop, turn and river as dealt so far.
     classes: [Vec<u8>; 3],
     pub pot_type: u8,
@@ -225,9 +234,15 @@ impl Spot {
         assert_eq!(r.next as usize, self.hero_seat, "hero must be next to act at the spot");
 
         let mut active = Vec::new();
+        let mut folded = Vec::new();
         for (seat, (o, z)) in obs.into_iter().zip(sizes).enumerate() {
-            if seat != self.hero_seat && r.in_hand >> seat & 1 == 1 {
+            if seat == self.hero_seat {
+                continue;
+            }
+            if r.in_hand >> seat & 1 == 1 {
                 active.push((seat, o, z));
+            } else if !o.is_empty() {
+                folded.push((seat, o, z));
             }
         }
         let classes = [
@@ -238,6 +253,7 @@ impl Spot {
         Replayed {
             round: r,
             active,
+            folded,
             classes,
             pot_type: raises_pre.min(2),
             last_aggressor: last_aggressor.filter(|&s| r.in_hand >> s & 1 == 1),
@@ -371,6 +387,9 @@ pub struct GradeCfg {
     /// Hero commits to one action per information state across tables
     /// (`joint.rs`). Off means hero best-responds per table, with hindsight.
     pub joint: bool,
+    /// Treat the opponent pool as uncertain: each table is drawn 50/50 from the
+    /// base population and this recalibrated one. `None` is the base population.
+    pub mixture: Option<&'static crate::preflop_cal::Calibration>,
 }
 
 impl GradeCfg {
@@ -385,6 +404,7 @@ impl GradeCfg {
             force_archetype: None,
             exact_models: false,
             joint: true,
+            mixture: crate::preflop_cal::active(),
         }
     }
 }
@@ -557,6 +577,9 @@ pub fn villains_for<'a>(pools: &'a [SeatPool], t: usize, base: &'a [Vec<f32>], c
 
 /// Samples each active seat's model pool and resamples by likelihood.
 pub fn seat_posteriors(spot: &Spot, rp: &Replayed, cfg: &GradeCfg, rng: &mut Rng) -> Vec<SeatPool> {
+    if let (Some(cal), None) = (cfg.mixture, cfg.force_archetype) {
+        return mixture_posteriors(spot, rp, cfg, cal, rng);
+    }
     let mut pools = Vec::new();
     for (seat, obs, sizes) in &rp.active {
         let mut seat_rng = Rng::new(rng.next_u64());
@@ -595,6 +618,120 @@ pub fn seat_posteriors(spot: &Spot, rp: &Replayed, cfg: &GradeCfg, rng: &mut Rng
         pools.push(SeatPool { seat: *seat, models, beliefs, tables, chosen, ess });
     }
     pools
+}
+
+/// Log of the mean of `exp(l)` over a slice, computed without underflow.
+fn log_mean(ls: &[f64]) -> f64 {
+    let max = ls.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    if !max.is_finite() {
+        return max;
+    }
+    max + (ls.iter().map(|l| (l - max).exp()).sum::<f64>() / ls.len() as f64).ln()
+}
+
+/// As `seat_posteriors`, for an uncertain opponent pool. A whole table comes
+/// from one population: the two start equally likely, and the observed actions
+/// of all seats at the table, including those who folded, update which one this
+/// table is, so table counts per population follow that posterior. Within a
+/// population, each active seat is resampled by likelihood as before, with
+/// `cfg.pool` models from each population. Returns the pools and the posterior
+/// probability of the recalibrated population.
+fn mixture_posteriors(spot: &Spot, rp: &Replayed, cfg: &GradeCfg, cal: &'static crate::preflop_cal::Calibration, rng: &mut Rng) -> Vec<SeatPool> {
+    mixture_detail(spot, rp, cfg, cal, rng).0
+}
+
+/// The posterior probability that a table comes from the recalibrated
+/// population, given all the actions seen at that table.
+pub fn population_posterior(spot: &Spot, rp: &Replayed, cfg: &GradeCfg, cal: &'static crate::preflop_cal::Calibration, rng: &mut Rng) -> f64 {
+    mixture_detail(spot, rp, cfg, cal, rng).1
+}
+
+fn mixture_detail(spot: &Spot, rp: &Replayed, cfg: &GradeCfg, cal: &'static crate::preflop_cal::Calibration, rng: &mut Rng) -> (Vec<SeatPool>, f64) {
+    struct SeatDraw {
+        seat: usize,
+        models: Vec<PlayerModel>,
+        beliefs: Vec<Vec<f32>>,
+        logw: Vec<f64>,
+    }
+    let mut draws = Vec::new();
+    let mut log_marg = [0.0f64; 2];
+    for (seat, obs, sizes) in &rp.active {
+        let mut seat_rng = Rng::new(rng.next_u64());
+        let (mut models, mut beliefs, mut logw) = (Vec::new(), Vec::new(), Vec::new());
+        for (pop, marg) in log_marg.iter_mut().enumerate() {
+            let start = logw.len();
+            for _ in 0..cfg.pool {
+                let mut model = if pop == 0 { PlayerModel::sample(&mut seat_rng) } else { PlayerModel::sample_cal(&mut seat_rng, cal) };
+                let log_size = model.constrain_sizes(sizes, &mut seat_rng);
+                let mut b = vec![0f32; NCOMBOS];
+                let ll = rp.belief_into(spot, obs, &model, &mut b) + log_size;
+                models.push(model);
+                beliefs.push(b);
+                logw.push(ll);
+            }
+            *marg += log_mean(&logw[start..]);
+        }
+        draws.push(SeatDraw { seat: *seat, models, beliefs, logw });
+    }
+    // Folded seats inform only the population. They use a copy of the stream so
+    // the active seats' draws below don't depend on how many seats folded.
+    let mut fold_rng = rng.clone();
+    let mut scratch = vec![0f32; NCOMBOS];
+    for (_, obs, sizes) in &rp.folded {
+        let mut seat_rng = Rng::new(fold_rng.next_u64());
+        for (pop, marg) in log_marg.iter_mut().enumerate() {
+            let mut lls = Vec::with_capacity(cfg.pool);
+            for _ in 0..cfg.pool {
+                let mut model = if pop == 0 { PlayerModel::sample(&mut seat_rng) } else { PlayerModel::sample_cal(&mut seat_rng, cal) };
+                let log_size = model.constrain_sizes(sizes, &mut seat_rng);
+                lls.push(rp.belief_into(spot, obs, &model, &mut scratch) + log_size);
+            }
+            *marg += log_mean(&lls);
+        }
+    }
+    // Population of each table: equal prior, posterior from all seats' evidence.
+    let p1 = 1.0 / (1.0 + (log_marg[0] - log_marg[1]).exp());
+    let u = (rng.next_u64() >> 11) as f64 / (1u64 << 53) as f64;
+    let n1 = ((p1 * cfg.tables as f64 + u).floor() as usize).min(cfg.tables);
+    let mut table_pop: Vec<usize> = (0..cfg.tables).map(|t| usize::from(t < n1)).collect();
+    rng.shuffle(&mut table_pop);
+    let mut pools = Vec::new();
+    for d in draws {
+        let mut seat_rng = Rng::new(rng.next_u64());
+        let pool = cfg.pool;
+        let mut picks: [Vec<usize>; 2] = [Vec::new(), Vec::new()];
+        let mut ess_weights = Vec::with_capacity(2 * pool);
+        for (pop, pick) in picks.iter_mut().enumerate() {
+            let (a, b) = (pop * pool, (pop + 1) * pool);
+            let max_ll = d.logw[a..b].iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let weights: Vec<f64> = d.logw[a..b].iter().map(|l| (l - max_ll).exp()).collect();
+            let count = table_pop.iter().filter(|&&x| x == pop).count();
+            let sum: f64 = weights.iter().sum();
+            let share = count as f64 / cfg.tables as f64;
+            ess_weights.extend(weights.iter().map(|w| w / sum.max(1e-300) * share));
+            let mut chosen = systematic_resample(&weights, &mut seat_rng, count);
+            seat_rng.shuffle(&mut chosen);
+            pick.extend(chosen.into_iter().map(|i| i + a));
+        }
+        let sum2: f64 = ess_weights.iter().map(|w| w * w).sum();
+        let ess = if sum2 > 0.0 { 1.0 / sum2 } else { 0.0 };
+        let mut next = [0usize; 2];
+        let chosen: Vec<usize> = table_pop
+            .iter()
+            .map(|&pop| {
+                let v = picks[pop][next[pop]];
+                next[pop] += 1;
+                v
+            })
+            .collect();
+        let mut needed = vec![false; d.models.len()];
+        for &i in &chosen {
+            needed[i] = true;
+        }
+        let tables: Vec<Option<VillainTables>> = d.models.iter().enumerate().map(|(i, m)| needed[i].then(|| m.tables())).collect();
+        pools.push(SeatPool { seat: d.seat, models: d.models, beliefs: d.beliefs, tables, chosen, ess });
+    }
+    (pools, p1)
 }
 
 /// Grades a spot. Deterministic in `seed`; all tables share runouts.
