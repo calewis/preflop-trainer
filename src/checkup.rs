@@ -245,14 +245,18 @@ pub struct CheckupScore {
     /// Started under an older generator: its items can't be regenerated, so it
     /// ends where it stopped rather than resuming on different questions.
     pub stale: bool,
+    /// False for a `table` run on an earlier spot library. It still counts as a
+    /// result, but its form names different spots now, so it can't be resumed.
+    pub in_current_library: bool,
 }
 
-/// The next form index for `skill`, one past every form ever started, so no
-/// item is ever seen in two forms.
+/// The next form index for `skill`, one past every form started on the current
+/// spot library, so no item is ever seen in two forms. A `table` form from an
+/// earlier library drew different spots, so it doesn't use up any new ones.
 pub fn next_checkup_form(skill: Skill, attempts: &[Attempt]) -> u32 {
     attempts
         .iter()
-        .filter(|a| a.skill == skill)
+        .filter(|a| a.skill == skill && a.in_current_library())
         .filter_map(|a| a.extra.check.map(|c| c.form))
         .max()
         .map_or(0, |form| form.saturating_add(1))
@@ -354,7 +358,8 @@ fn score_run(skill: Skill, check: CheckRef, rows: &[&Attempt]) -> CheckupScore {
         metrics,
         agreement: agreement(&plan, &by_slot),
         passed: complete && meets_mark(&mark, &metrics),
-        stale: rows.iter().any(|a| a.gen_version != GEN_VERSION),
+        stale: rows.iter().any(|a| if a.skill == Skill::Table { !a.in_current_library() } else { a.gen_version != GEN_VERSION }),
+        in_current_library: rows.iter().all(|a| a.in_current_library()),
     }
 }
 

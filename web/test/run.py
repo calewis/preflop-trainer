@@ -49,9 +49,9 @@ class Browser:
         time.sleep(0.2)
         profile = OUT / f"profile-{name}"
         shutil.rmtree(profile, ignore_errors=True)
-        self.proc = subprocess.Popen(["google-chrome", "--headless=new", "--no-sandbox",
+        self.proc = subprocess.Popen(["google-chrome", "--headless=new", "--no-sandbox", "--password-store=basic",
             f"--remote-debugging-port={port}", f"--user-data-dir={profile}", "--no-first-run",
-            "--remote-allow-origins=*", "--password-store=basic", "--disable-background-timer-throttling",
+            "--remote-allow-origins=*", "--disable-background-timer-throttling",
             "--disable-renderer-backgrounding", "about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(50):
             try:
@@ -1075,11 +1075,11 @@ def check_table_reveal(page, verdict, want_correct, outcome, where):
     check("simulated loose-table opponents" in reveal and "assumptions" in reveal, f"{where}: no simulation caveat in {reveal}")
     check(outcome["reveal"]["explanation"].split(":")[0] in reveal, f"{where}: no verdict explanation in {reveal}")
     check("Best:" in reveal, f"{where}: no best option in {reveal}")
-    check(len(re.findall(r"best at [\d.]+% of simulated tables", reveal)) == len(outcome["reveal"]["options"]) and "bb, " in reveal and "% of the pot" in reveal,
+    check(len(re.findall(r"% of the pot, best at [\d.]+% of simulated tables", reveal)) == len(outcome["reveal"]["options"]) and "bb, " in reveal and "% of the pot" in reveal,
           f"{where}: each option needs EV in bb and percent and 'best at': {reveal}")
     if verdict == "depends":
         check("Against a" in reveal and "of the simulated opponents here" in reveal and "By opponent type" in reveal, f"{where}: depends needs the archetype breakdown: {reveal}")
-        check("fair choice" in reveal if want_correct else "rarely a read worth making" in reveal, f"{where}: no read note: {reveal}")
+        check(("fair choice" in reveal or "the right read" in reveal) if want_correct else "rarely a read worth making" in reveal, f"{where}: no read note: {reveal}")
     else:
         check("Against a" not in reveal, f"{where}: only depends spots show the breakdown: {reveal}")
     if not want_correct and verdict != "depends":
@@ -1124,8 +1124,8 @@ def run_research(viewport=(390, 844), mobile=True, theme="light", port_offset=0)
         boot_app(page, port, (*viewport, mobile), theme)
         inspector = Inspector(page, viewport, theme, True)
         # --- 1. Start over warns about the next form, not the unfinished one.
-        check_line = lambda form, slot, t: f"{t}\tcheck\t\ttable\t7\t2\t1\t0\t\t1000\tfold\t1\t{form}\t{slot}\t\t\t\t"
-        for form, expect_note in [(4, False), (5, True)]:
+        check_line = lambda form, slot, t: f"{t}\tcheck\t\ttable\t7\t3\t1\t0\t\t1000\tfold\t1\t{form}\t{slot}\t\t\t\t"
+        for form, expect_note in [(3, False), (4, True)]:
             seed_log(page, port, RESEARCH_LOG_COLUMNS + "\n" + check_line(form, 0, 1000) + "\n")
             page.eval("location.hash = '#checkup:table'")
             page.wait("!!document.querySelector('.btn.primary')", 20)
@@ -1134,7 +1134,7 @@ def run_research(viewport=(390, 844), mobile=True, theme="light", port_offset=0)
             if expect_note:
                 text = page.eval("document.querySelector('[data-start-over-note]').textContent")
                 check("reuses" in text, f"note text: {text}")
-                check(page.eval("!document.querySelector('[data-reuse-start]')"), "form 5 itself must not carry the reuse note")
+                check(page.eval("!document.querySelector('[data-reuse-start]')"), "form 4 itself must not carry the reuse note")
                 inspector.snapshot("research-start-over-note")
             page.eval("location.hash = '#home'")
             wait_home(page)
@@ -1565,15 +1565,23 @@ def run_table_spots():
         check(not page.eval("!!document.querySelector('[data-reused]')"), "an early form claimed reuse")
         inspector.snapshot("table-checkup-result", full=True)
         # A start screen for a late form says it reuses spots too.
-        unfinished = "\n".join([LOG_COLUMNS] + [f"{i}\tcheck\t\ttable\t{i}\t2\t1\t0\t0.5000\t1500\tcheck\t1\t6\t{i}\t\t\t\t\t205\trobust" for i in range(3)]) + "\n"
+        unfinished = "\n".join([LOG_COLUMNS] + [f"{i}\tcheck\t\ttable\t{i}\t3\t1\t0\t0.5000\t1500\tcheck\t1\t6\t{i}\t\t\t\t\t205\trobust" for i in range(3)]) + "\n"
         seed_log(page, port, unfinished)
         page.eval("location.hash = '#checkup:table'")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Resume')", 20)
         check(page.eval("!!document.querySelector('[data-reuse-start]')") and "reuses some spots" in page.eval("document.body.innerText"), "no reuse note on the start screen of a late form")
         page.eval("location.hash = '#home'")
         wait_home(page)
+        # An unfinished checkup from the old library can't be resumed: its form names different spots now.
+        seed_log(page, port, unfinished.replace("\t3\t1\t0\t0.5000", "\t2\t1\t0\t0.5000"))
+        page.eval("location.hash = '#checkup:table'")
+        page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Begin')", 20)
+        text = page.eval("document.body.innerText")
+        check("Resume" not in text and "reuses some spots" not in text, f"an old-library checkup was offered for resume: {text[:300]}")
+        page.eval("location.hash = '#home'")
+        wait_home(page)
         # A late form reuses reserved spots and says so on the result screen.
-        late = "\n".join([LOG_COLUMNS] + [f"{i}\tcheck\t\ttable\t{i}\t2\t1\t0\t0.5000\t1500\tcheck\t1\t5\t{i}\t\t\t\t\t205\trobust" for i in range(3)]) + "\n"
+        late = "\n".join([LOG_COLUMNS] + [f"{i}\tcheck\t\ttable\t{i}\t3\t1\t0\t0.5000\t1500\tcheck\t1\t5\t{i}\t\t\t\t\t205\trobust" for i in range(3)]) + "\n"
         seed_log(page, port, late)
         page.eval("location.hash = '#checkup:table'")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Resume')", 20)

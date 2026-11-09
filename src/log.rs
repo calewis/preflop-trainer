@@ -5,7 +5,7 @@ use crate::grade::{Outcome, Reveal};
 use crate::item::{ChainStage, Skill, GEN_VERSION};
 use crate::reflection::ReflectState;
 use crate::schedule::{Origin, Planned};
-use crate::table::Verdict;
+use crate::table::{self, Verdict};
 
 /// Longest response time recorded.
 pub const MAX_RESPONSE_MS: u32 = 60_000;
@@ -127,7 +127,8 @@ pub struct AttemptExtra {
     pub truth_pct: Option<f64>,
     pub opponents: Option<u8>,
     /// `table`: which spot was answered and its verdict, so pass marks and the
-    /// no-repeat window don't need the spot library.
+    /// no-repeat window don't need the spot library. The id only means anything
+    /// in the library that row's `gen_version` names.
     pub table_spot: Option<u16>,
     pub table_verdict: Option<Verdict>,
     /// The item's family, so scheduling and comparisons needn't regenerate it.
@@ -229,7 +230,7 @@ impl Attempt {
             baseline_run,
             skill,
             item,
-            gen_version: GEN_VERSION,
+            gen_version: if skill == Skill::Table { table::LIBRARY_GEN_VERSION } else { GEN_VERSION },
             correct: outcome.correct,
             close: outcome.close,
             ev_loss_pct: outcome.ev_loss_pct,
@@ -237,6 +238,12 @@ impl Attempt {
             answer: outcome.answer.clone(),
             extra,
         }
+    }
+
+    /// False for a `table` row from an earlier spot library: it still counts as
+    /// practice, but its spot id names a different spot now.
+    pub fn in_current_library(&self) -> bool {
+        self.skill != Skill::Table || self.gen_version == table::LIBRARY_GEN_VERSION
     }
 
     /// Correct, or close enough to count: outs within 1, spots within the close band.

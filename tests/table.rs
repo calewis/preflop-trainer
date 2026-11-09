@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use poker_trainer::answer::{answer_format, AnswerFormat};
 use poker_trainer::checkup::{
-    checkup_plan, latest_checkup, CheckupMetric, CHECKUP_LEN, CHECKUP_ORIGINALS, CHECKUP_REPEATS, MIN_REPEAT_GAP,
+    checkup_plan, latest_checkup, next_checkup_form, CheckupMetric, CHECKUP_LEN, CHECKUP_ORIGINALS, CHECKUP_REPEATS, MIN_REPEAT_GAP,
 };
 use poker_trainer::generate::generate;
 use poker_trainer::grade::{ev_band, grade, EvBand, Outcome, Reveal};
@@ -16,7 +16,7 @@ use poker_trainer::progress::{baseline_runs, pass_mark, skill_stats, step_passed
 use poker_trainer::rng::Rng;
 use poker_trainer::schedule::{due_families, Origin, Planned, Session, DAY_MS};
 use poker_trainer::table::{
-    self, bb_text, checkup_form_reuses_spots, drill_pool, is_reserved_for_checkups, parse_library, seed_with_index,
+    self, bb_text, LIBRARY_GEN_VERSION, checkup_form_reuses_spots, drill_pool, is_reserved_for_checkups, parse_library, seed_with_index,
     spot_by_id, spot_of_seed, spots, suit_perm_for_seed, TableActionKind, TableGrade, TableQuestion, TableSeat,
     TableStreetName, Verdict, ASSUMPTION_NOTE, CHECKUP_CLOSE, CHECKUP_ROBUST, COUNT_CLOSE, COUNT_DEPENDS, COUNT_ROBUST,
     NO_REPEAT_WINDOW, SPOTS_TEXT, SPOT_COUNT,
@@ -74,7 +74,7 @@ fn every_line_parses_and_the_file_matches_its_expected_counts() {
     // The file's own header agrees with those counts and the line count.
     let meta = |key: &str| SPOTS_TEXT.lines().find_map(|l| l.strip_prefix(&format!("#meta {key}=")));
     assert_eq!(meta("spots"), Some("3000"));
-    assert_eq!(meta("verdicts"), Some("robust=562,close=284,depends=2154"));
+    assert_eq!(meta("verdicts"), Some("robust=461,close=282,depends=2257"));
     assert_eq!(meta("streets"), Some("flop=1200,turn=1050,river=750"));
     let spot_lines = SPOTS_TEXT.lines().filter(|l| l.starts_with("SPOT|")).count();
     assert_eq!(spot_lines, SPOT_COUNT);
@@ -89,13 +89,13 @@ fn parsing_is_strict_about_malformed_lines() {
     assert!(parse_library(&format!("{first_spot}\n")).is_err(), "no header");
     for broken in [
         first_spot.replace("|depends|", "|maybe|"),
-        first_spot.replace("pot=4.00", "pot=4.50"),
-        first_spot.replace("call:4.208", "call:4.2"),
-        first_spot.replace("7sTc", "7s7s"),
-        first_spot.replace("n=4|BB|", "n=4|XX|"),
+        first_spot.replace("pot=2.50", "pot=3.50"),
+        first_spot.replace("bet33:1.349", "bet33:1.3"),
+        first_spot.replace("8s7s", "8s8s"),
+        first_spot.replace("n=5|BB|", "n=5|XX|"),
         format!("{first_spot}|extra"),
-        first_spot.replace("SB:c", "SB:c:z"),
-        first_spot.replace("best=call", "best=shove"),
+        first_spot.replace("MP:c", "MP:c:z"),
+        first_spot.replace("best=bet33", "best=shove"),
         first_spot.replace("meta=", "metaz="),
     ] {
         assert_ne!(&broken, first_spot, "the test edit must change the line");
@@ -105,28 +105,28 @@ fn parsing_is_strict_about_malformed_lines() {
 
 #[test]
 fn the_action_history_replays_to_the_printed_pot() {
-    let spot = spot_by_id(0);
-    assert_eq!((spot.players, spot.seat, spot.stack_bb), (4, TableSeat::BigBlind, 100));
-    assert_eq!((spot.pot_cents, spot.call_cents), (400, 200));
+    let spot = spot_by_id(20);
+    assert_eq!((spot.players, spot.seat, spot.stack_bb), (5, TableSeat::BigBlind, 200));
+    assert_eq!((spot.pot_cents, spot.call_cents), (333, 133));
     assert_eq!(spot.streets.len(), 2);
     let preflop = &spot.streets[0];
     assert_eq!(preflop.street, TableStreetName::Preflop);
-    assert_eq!(preflop.actions.len(), 4);
-    assert_eq!(preflop.actions[2].kind, TableActionKind::Call, "the small blind completes");
-    assert_eq!(preflop.actions[2].amount_cents, 50);
+    assert_eq!(preflop.actions.len(), 5);
+    assert_eq!(preflop.actions[3].kind, TableActionKind::Call, "the small blind completes");
+    assert_eq!(preflop.actions[3].amount_cents, 50);
     assert_eq!(preflop.pot_start_cents, 150, "blinds");
     let flop = &spot.streets[1];
     assert_eq!(flop.street, TableStreetName::Flop);
     assert_eq!(flop.pot_start_cents, 200, "after preflop");
     assert_eq!(flop.actions[0].kind, TableActionKind::Bet);
-    assert_eq!(flop.actions[0].amount_cents, 200);
+    assert_eq!(flop.actions[0].amount_cents, 133);
 }
 
 #[test]
 fn big_blind_can_be_hero_and_seats_read_plainly() {
     let spot = spot_by_id(0);
     assert_eq!(spot.seat.sentence(), "in the big blind");
-    assert_eq!(question(0).behind_cents, 9900, "1bb posted, 99bb still behind");
+    assert_eq!(question(0).behind_cents, 19900, "1bb posted, 199bb still behind");
     let deep = spots().iter().find(|s| s.stack_bb == 60 && s.board.len() == 5).unwrap();
     assert!(deep.behind_cents < 6000, "behind reflects chips already put in, spot {}", deep.id);
     assert_eq!(TableSeat::Button.title(), "Button");
@@ -135,20 +135,20 @@ fn big_blind_can_be_hero_and_seats_read_plainly() {
 
 #[test]
 fn option_labels_use_the_real_amounts() {
-    let zero = question(0);
+    let one = question(1);
     let label = |q: &TableQuestion, code: &str| q.options.iter().find(|o| o.code == code).unwrap().label;
-    assert_eq!(label(&zero, "fold"), "Fold");
-    assert_eq!(label(&zero, "call"), "Call 2bb");
-    assert_eq!(label(&zero, "raise6"), "Raise to 6bb");
-    let two = question(2);
+    assert_eq!(label(&one, "fold"), "Fold");
+    assert_eq!(label(&one, "call"), "Call 1bb");
+    assert_eq!(label(&one, "raise3"), "Raise to 3bb");
+    let two = question(0);
     assert_eq!(label(&two, "check"), "Check");
     // A third of a 2.5bb pot is below the engine's 1bb minimum bet.
     assert_eq!(label(&two, "bet33"), "Bet 1bb (minimum)");
     assert_eq!(label(&two, "bet67"), "Bet 2/3 pot (1.7bb)");
     assert_eq!(label(&two, "bet100"), "Bet pot (2.5bb)");
-    assert_eq!(table::spot_by_id(2).options[1].plain, "bet 1bb (minimum)", "archetype rows match");
+    assert_eq!(table::spot_by_id(0).options[1].plain, "bet 1bb (minimum)", "archetype rows match");
     // The label uses the exact replayed pot, not the file's two-decimal print.
-    assert_eq!(label(&question(1204), "bet67"), "Bet 2/3 pot (5.4bb)");
+    assert_eq!(label(&question(1243), "bet67"), "Bet 2/3 pot (5.4bb)");
     for spot in spots() {
         for option in spot.options.iter().filter(|o| o.code.starts_with("bet") && o.label.contains("all-in") && !o.label.contains("pot")) {
             assert!(option.label.ends_with("bb (all-in)"), "spot {}: {}", spot.id, option.label);
@@ -167,67 +167,67 @@ fn option_labels_use_the_real_amounts() {
 // ----- Grading by verdict, hand worked from the file -----
 
 #[test]
-fn robust_spot_205_is_correct_only_for_the_best_option() {
-    // fold 0.0, call -24.2, raise6 -49.2 percent of the pot, best fold.
-    let fold = answer(205, "fold");
+fn robust_spot_302_is_correct_only_for_the_best_option() {
+    // fold 0.0, call -18.2, raise6 -30.8 percent of the pot, best fold.
+    let fold = answer(302, "fold");
     assert!(fold.correct);
     assert_eq!(fold.ev_loss_pct, Some(0.0));
     assert!(graded(&fold).band.is_none());
-    let call = answer(205, "call");
+    let call = answer(302, "call");
     assert!(!call.correct);
-    assert_eq!(call.ev_loss_pct, Some(24.2));
+    assert_eq!(call.ev_loss_pct, Some(18.2));
     assert_eq!(graded(&call).band, Some(EvBand::Blunder));
     assert!(!graded(&call).correct);
-    let raise = answer(205, "raise6");
+    let raise = answer(302, "raise6");
     assert!(!raise.correct);
-    assert_eq!(raise.ev_loss_pct, Some(49.2));
+    assert_eq!(raise.ev_loss_pct, Some(30.8));
 }
 
 #[test]
-fn robust_spot_93_loses_exactly_five_percent_with_bet67() {
-    // check 37.8, bet33 47.3 best, bet67 42.3, bet100 37.7.
-    let outcome = answer(93, "bet67");
+fn robust_spot_1289_loses_exactly_five_percent_with_check() {
+    // check 35.9, bet33 40.9 best, bet67 35.1, bet100 29.5.
+    let outcome = answer(1289, "check");
     assert!(!outcome.correct);
     assert_eq!(outcome.ev_loss_pct, Some(5.0));
     assert_eq!(graded(&outcome).band, Some(EvBand::Mistake), "5.0 is on the Mistake side of the band");
-    assert!(answer(93, "bet33").correct);
+    assert!(answer(1289, "bet33").correct);
 }
 
 #[test]
-fn close_spot_5_is_correct_when_the_loss_is_under_one_percent() {
-    // check 65.8, bet33 70.0 best, bet67 69.8, bet100 68.6.
-    let near = answer(5, "bet67");
+fn close_spot_25_is_correct_when_the_loss_is_under_one_percent() {
+    // check 78.1, bet33 79.4, bet67 81.0, bet100 81.3 best.
+    let near = answer(25, "bet67");
     assert!(near.correct);
-    assert_eq!(near.ev_loss_pct, Some(0.24), "under 1% the loss comes from the EVs in bb, 0.006 over 2.5");
-    assert_eq!(graded(&near).loss_text(), "0.24% of the pot (0.01bb)", "two decimals under 1");
+    assert_eq!(near.ev_loss_pct, Some(0.32), "under 1% the loss comes from the EVs in bb, 0.008 over 2.5");
+    assert_eq!(graded(&near).loss_text(), "0.32% of the pot (0.01bb)", "two decimals under 1");
     assert_eq!(graded(&near).band, Some(EvBand::Close));
-    let bet100 = answer(5, "bet100");
-    assert!(!bet100.correct, "1.4 over one percent");
-    assert_eq!(bet100.ev_loss_pct, Some(1.4));
-    assert_eq!(graded(&bet100).band, Some(EvBand::Small));
-    let check = answer(5, "check");
-    assert_eq!(check.ev_loss_pct, Some(4.2));
+    let bet33 = answer(25, "bet33");
+    assert!(!bet33.correct, "1.9 over one percent");
+    assert_eq!(bet33.ev_loss_pct, Some(1.9));
+    assert_eq!(graded(&bet33).band, Some(EvBand::Small));
+    let check = answer(25, "check");
+    assert_eq!(check.ev_loss_pct, Some(3.2));
     assert!(!check.correct);
 }
 
 #[test]
 fn a_depends_read_is_correct_with_enough_share_even_when_it_loses_a_lot() {
-    // Spot 0: fold 0.0 share .164, call 105.2 best share .602, raise6 86.5 share .234.
-    let fold = answer(0, "fold");
-    assert!(fold.correct, "a real option at 16.4% of tables");
-    assert_eq!(fold.ev_loss_pct, Some(105.2));
+    // Spot 167: fold 0.0 share .242, call 25.4 best share .531, raise4 17.2 share .227.
+    let fold = answer(167, "fold");
+    assert!(fold.correct, "a real option at 24.2% of tables");
+    assert_eq!(fold.ev_loss_pct, Some(25.4));
     assert!(graded(&fold).band.is_none(), "a fair read is not called a blunder");
-    assert!(answer(0, "raise6").correct);
-    assert!(answer(0, "call").correct);
-    // Spot 2: check 25.7, bet33 22.0 share .270, bet67 12.7 share .023, bet100 3.3 share .008.
-    let bet67 = answer(2, "bet67");
+    assert!(answer(167, "raise4").correct);
+    assert!(answer(167, "call").correct);
+    // Spot 57: check 25.5 best, bet33 23.4 share .375, bet67 14.1 share .043, bet100 4.1 share .016.
+    let bet67 = answer(57, "bet67");
     assert!(!bet67.correct);
-    assert_eq!(bet67.ev_loss_pct, Some(13.0));
+    assert_eq!(bet67.ev_loss_pct, Some(11.4));
     assert_eq!(graded(&bet67).band, Some(EvBand::Mistake));
-    let bet100 = answer(2, "bet100");
+    let bet100 = answer(57, "bet100");
     assert!(!bet100.correct);
     assert_eq!(graded(&bet100).band, Some(EvBand::Blunder));
-    assert!(answer(2, "bet33").correct, "bet33 has 27% of tables");
+    assert!(answer(57, "bet33").correct, "bet33 has 37.5% of tables");
 }
 
 #[test]
@@ -247,8 +247,8 @@ fn the_correct_rule_reads_its_thresholds_exactly() {
 }
 
 /// Spots where the printed percentages differ by exactly 1.0 but the EVs in bb say otherwise.
-const CLOSE_ROUNDED_UP: [(u16, &str); 5] = [(576, "bet100"), (795, "bet33"), (1947, "check"), (2068, "bet67"), (2186, "check")];
-const CLOSE_EXACTLY_ONE: [(u16, &str); 3] = [(105, "bet100"), (1220, "bet100"), (2573, "bet100")];
+const CLOSE_ROUNDED_UP: [(u16, &str); 4] = [(43, "check"), (208, "bet33"), (499, "bet67"), (2143, "check")];
+const CLOSE_EXACTLY_ONE: [(u16, &str); 1] = [(1538, "bet33")];
 
 #[test]
 fn the_one_percent_rule_uses_the_evs_in_bb_not_the_rounded_percentages() {
@@ -260,11 +260,11 @@ fn the_one_percent_rule_uses_the_evs_in_bb_not_the_rounded_percentages() {
         assert!(g.loss_pct < 1.0, "spot {id}: {}", g.loss_pct);
         assert!(!g.loss_text().contains("1.0%"), "a correct answer must not read 1.0%: {}", g.loss_text());
     }
-    // 2186 check: the printed 70.0 and 69.0 differ by exactly 1.0, while the EVs say 0.987%.
-    assert!((graded(&answer(2186, "check")).loss_pct - 0.9867).abs() < 0.001);
+    // 2143 check: the printed 88.2 and 87.2 differ by exactly 1.0, while the EVs say 0.946%.
+    assert!((graded(&answer(2143, "check")).loss_pct - 0.9459).abs() < 0.001);
     for (id, code) in CLOSE_EXACTLY_ONE {
         let outcome = answer(id, code);
-        assert!(!outcome.correct, "spot {id} {code}: exactly 1.000% is not under 1%");
+        assert!(!outcome.correct, "spot {id} {code}: 1% or more is not under 1%");
         assert_eq!(outcome.ev_loss_pct, Some(1.0));
         assert_eq!(graded(&outcome).loss_text().split('%').next(), Some("1.0"));
     }
@@ -280,9 +280,9 @@ fn the_ev_bands_keep_their_boundaries() {
 
 #[test]
 fn an_unknown_option_is_rejected_as_invalid() {
-    let error = grade(&item(0), "shove").unwrap_err();
-    assert!(error.0.contains("fold") && error.0.contains("raise6"), "{}", error.0);
-    assert!(grade(&item(0), " RAISE6 ").unwrap().correct, "answers are case-insensitive and trimmed");
+    let error = grade(&item(167), "shove").unwrap_err();
+    assert!(error.0.contains("fold") && error.0.contains("raise4"), "{}", error.0);
+    assert!(grade(&item(167), " RAISE4 ").unwrap().correct, "answers are case-insensitive and trimmed");
 }
 
 #[test]
@@ -310,13 +310,15 @@ fn every_option_grades_consistently_with_the_file() {
 
 #[test]
 fn the_reveal_carries_every_fact_the_front_ends_show() {
-    let depends = answer(0, "fold");
+    let depends = answer(167, "fold");
     let g = graded(&depends);
     assert_eq!(g.spot.verdict, Verdict::Depends);
     assert_eq!(g.spot.verdict.explanation(), "No option was best at nearly all simulated tables, so the right play can change with the opponent.");
-    assert_eq!(g.read_note().as_deref(), Some("With no read on the opponent, this was a fair choice."));
-    let wrong_read = table::grade_option(spot_by_id(2), 3);
-    assert_eq!(wrong_read.read_note().as_deref(), Some("It was best at only 0.8% of simulated tables, so it is rarely a read worth making."));
+    assert_eq!(g.read_note().as_deref(), Some("It was best at 24.2% of simulated tables, so it can be the right read against some opponents."));
+    let best = answer(167, "call");
+    assert_eq!(graded(&best).read_note().as_deref(), Some("With no read on the opponent, this was a fair choice."));
+    let wrong_read = table::grade_option(spot_by_id(57), 3);
+    assert_eq!(wrong_read.read_note().as_deref(), Some("It was best at only 1.6% of simulated tables, so it is rarely a read worth making."));
     assert_eq!(table::ev_bb_text(-3), "+0.00", "never -0.00");
     assert_eq!(table::ev_bb_text(-5), "-0.01");
     assert_eq!(table::ev_bb_text(4208), "+4.21");
@@ -324,10 +326,10 @@ fn the_reveal_carries_every_fact_the_front_ends_show() {
     assert_eq!(g.chosen_option().code, "fold");
     assert_eq!(g.spot.options.len(), 3);
     let share = g.spot.options[0].best_share_milli;
-    assert_eq!(share, 164);
+    assert_eq!(share, 242);
     assert_eq!(g.spot.archetypes.len(), 5);
     let line = g.spot.archetypes[0].sentence(g.spot);
-    assert_eq!(line, "Against a maniac: call (about 60% of the simulated opponents here).", "main opponent breakdown, in plain words");
+    assert_eq!(line, "Against a loose-passive player: call (about 40% of the simulated opponents here).", "main opponent breakdown, in plain words");
     assert!(g.spot.archetypes[4].sentence(g.spot).starts_with("Against a nit:"));
     assert!(ASSUMPTION_NOTE.contains("simulated") && ASSUMPTION_NOTE.contains("not real players"));
     assert!(Verdict::Close.explanation().contains("1%"));
@@ -469,7 +471,7 @@ fn board_cards_split_by_street() {
 #[test]
 fn reserved_spots_are_robust_or_close_with_id_divisible_by_three() {
     let reserved = table::checkup_pool();
-    assert_eq!(reserved.len(), 172 + 96);
+    assert_eq!(reserved.len(), 151 + 94);
     for spot in reserved {
         assert!(spot.id % 3 == 0 && spot.verdict != Verdict::Depends, "{}", spot.id);
     }
@@ -562,20 +564,20 @@ fn a_checkup_is_forty_originals_and_ten_suit_permuted_repeats() {
 #[test]
 fn checkup_forms_are_disjoint_until_the_reserved_spots_run_out_then_say_so() {
     let mut used: HashMap<u16, u32> = HashMap::new();
-    for form in 0..6u32 {
+    for form in 0..5u32 {
         assert!(!checkup_form_reuses_spots(form), "form {form}");
         for slot in checkup_plan(Skill::Table, form).slots.iter().filter(|s| s.repeat_of.is_none()) {
             let id = spot_of_seed(slot.seed).id;
             assert_eq!(used.insert(id, form), None, "spot {id} reused in form {form}");
         }
     }
-    assert!(checkup_form_reuses_spots(6));
-    let shared = checkup_plan(Skill::Table, 6)
+    assert!(checkup_form_reuses_spots(5));
+    let shared = checkup_plan(Skill::Table, 5)
         .slots
         .iter()
         .filter(|s| s.repeat_of.is_none() && used.contains_key(&spot_of_seed(s.seed).id))
         .count();
-    assert!(shared > 0, "form 6 reuses spots");
+    assert!(shared > 0, "form 5 reuses spots");
 }
 
 // ----- Drill selection -----
@@ -615,7 +617,7 @@ fn table_attempt(id: u16, t: u64, loss: f64, verdict: Verdict) -> Attempt {
         baseline_run: None,
         skill: Skill::Table,
         item: ItemRef::Seed(seed_for(id)),
-        gen_version: 1,
+        gen_version: LIBRARY_GEN_VERSION,
         correct: loss < 1.0,
         close: false,
         ev_loss_pct: Some(loss),
@@ -877,9 +879,68 @@ fn format_attempt_writes_table_columns_only_for_table_rows() {
     assert_eq!(format_attempt(&check).split('\t').count(), 18, "non-table extras keep their old shape");
 }
 
+// ----- Rows from an earlier library -----
+
+/// A row from before library 3, when `table` rows wrote the shared generator version.
+fn v2_row(id: u16, t: u64, loss: f64, verdict: Verdict) -> Attempt {
+    Attempt { gen_version: 2, ..table_attempt(id, t, loss, verdict) }
+}
+
+#[test]
+fn new_table_rows_record_the_library_they_were_dealt_from() {
+    let row = Attempt::from_drill(Planned { skill: Skill::Table, seed: seed_for(0), origin: Origin::New }, &answer(0, "check"), 1, 1000);
+    assert_eq!(row.gen_version, LIBRARY_GEN_VERSION);
+    assert_ne!(LIBRARY_GEN_VERSION, GEN_VERSION, "a table row must be distinguishable from one written before library 3");
+    assert!(row.in_current_library());
+}
+
+#[test]
+fn an_old_library_row_does_not_block_the_new_spot_with_the_same_id() {
+    let close_ids: Vec<u16> = drill_pool().iter().filter(|s| s.verdict == Verdict::Close).map(|s| s.id).collect();
+    assert!(close_ids.len() < NO_REPEAT_WINDOW, "the test needs the close pool smaller than the window");
+    let old: Vec<Attempt> = close_ids.iter().enumerate().map(|(i, &id)| v2_row(id, i as u64, 0.0, Verdict::Close)).collect();
+    // While the old rows would still fill the window, a close roll must still reach the close pool.
+    let mut dealt_close = false;
+    for seed in 0..80 {
+        let mut session = Session::new(vec![Skill::Table], &old, DAY, seed);
+        for _ in 0..NO_REPEAT_WINDOW - close_ids.len() {
+            dealt_close |= spot_of_seed(session.try_next_item().unwrap().seed).verdict == Verdict::Close;
+        }
+    }
+    assert!(dealt_close, "v2 attempts must not exhaust the v3 close pool");
+}
+
+#[test]
+fn old_library_rows_still_load_export_and_count_for_progress() {
+    let log: Vec<Attempt> = (0..40).map(|i| v2_row(i, u64::from(i), 0.5, Verdict::Robust)).collect();
+    let text: String = log.iter().map(|a| format_attempt(a) + "\n").collect();
+    let (parsed, warnings) = parse_log(&text);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(parsed, log, "an old row survives a round trip unchanged");
+    assert!(parsed.iter().all(|a| !a.in_current_library()));
+    assert!(skill_stats(Skill::Table, &parsed).drill_passed, "old practice still counts toward the pass mark");
+}
+
+#[test]
+fn a_checkup_on_the_old_library_still_counts_but_new_forms_start_over() {
+    let old_checkup = |run: u32, form: u32, count: usize| -> Vec<Attempt> {
+        table_checkup(run, form, 0.5, count).into_iter().map(|a| Attempt { gen_version: 2, ..a }).collect()
+    };
+    let mut log = forty(0.5);
+    log.extend(old_checkup(1, 3, CHECKUP_LEN));
+    let score = latest_checkup(Skill::Table, &log).unwrap();
+    assert!(score.passed && score.complete && !score.in_current_library, "an old result still counts");
+    assert!(skill_stats(Skill::Table, &log).passed);
+    assert_eq!(next_checkup_form(Skill::Table, &log), 0, "the new library's forms start at 0");
+    // Forms already used on the new library still count, and old ones don't lift them.
+    log.extend(table_checkup(2, 1, 0.5, CHECKUP_LEN));
+    assert_eq!(next_checkup_form(Skill::Table, &log), 2);
+    assert!(latest_checkup(Skill::Table, &log).unwrap().in_current_library);
+}
+
 #[test]
 fn the_format_is_a_choice_of_the_option_codes() {
-    match answer_format(&item(2).question) {
+    match answer_format(&item(0).question) {
         AnswerFormat::Choice(options) => {
             let codes: Vec<&str> = options.iter().map(|o| o.code).collect();
             assert_eq!(codes, ["check", "bet33", "bet67", "bet100"]);

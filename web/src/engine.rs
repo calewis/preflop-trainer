@@ -634,10 +634,10 @@ impl Engine {
     fn check_info(&self, fields: &[&str]) -> Reply {
         let skill = skill_from(arg(fields, 1)?)?;
         let runs = checkup_runs(&self.attempts);
-        let latest = runs.iter().rfind(|r| r.skill == skill);
-        let open = latest.filter(|r| !r.complete && !r.stale);
-        let upcoming_form = open.map_or_else(|| next_checkup_form(skill, &self.attempts), |r| r.form);
-        let in_progress = open.map(|r| {
+        // A run from an older generator or an earlier spot library can't be picked up.
+        let unfinished = runs.iter().rfind(|r| r.skill == skill).filter(|r| !r.complete && !r.stale && r.in_current_library);
+        let upcoming_form = unfinished.map_or_else(|| next_checkup_form(skill, &self.attempts), |r| r.form);
+        let in_progress = unfinished.map(|r| {
             obj! { "answered": r.answered, "total": CHECKUP_LEN }
         });
         let history: Vec<V> = runs.iter().filter(|r| r.skill == skill).map(checkup_json).collect();
@@ -652,7 +652,7 @@ impl Engine {
             "in_progress": in_progress,
             "history": history,
             "reuse_note": (skill == Skill::Table && table::checkup_form_reuses_spots(upcoming_form)).then_some(table::REUSE_NOTE),
-            "start_over_note": (skill == Skill::Table && open.is_some() && table::checkup_form_reuses_spots(start_over_form)).then_some(table::REUSE_NOTE),
+            "start_over_note": (skill == Skill::Table && unfinished.is_some() && table::checkup_form_reuses_spots(start_over_form)).then_some(table::REUSE_NOTE),
         })
     }
 
@@ -663,7 +663,7 @@ impl Engine {
         let unfinished = checkup_runs(&self.attempts)
             .into_iter()
             .rfind(|r| r.skill == skill)
-            .filter(|r| !r.complete && !r.stale);
+            .filter(|r| !r.complete && !r.stale && r.in_current_library);
         let (run, form) = match unfinished.filter(|_| resume) {
             Some(score) => (score.run, score.form),
             None => {
@@ -920,7 +920,8 @@ fn skill_status(s: &SkillStats) -> String {
 
 /// `None` when no checkup is offered for this skill.
 fn checkup_action(s: &SkillStats, checkups: &[CheckupScore]) -> V {
-    let unfinished = checkups.iter().rfind(|r| r.skill == s.skill).filter(|r| !r.complete && !r.stale);
+    // A run from an older generator or an earlier spot library can't be picked up.
+    let unfinished = checkups.iter().rfind(|r| r.skill == s.skill).filter(|r| !r.complete && !r.stale && r.in_current_library);
     if let Some(run) = unfinished {
         return obj! {
             "skill": s.skill.name(),
@@ -1023,7 +1024,7 @@ fn checkup_report_json(s: &CheckupScore, earlier: &[&CheckupScore]) -> V {
     ];
     let compared = earlier.last().map(|prior| present::comparison(prior, s));
     json.push(("comparison".to_string(), compared.into()));
-    let reused = (s.skill == Skill::Table && table::checkup_form_reuses_spots(s.form))
+    let reused = (s.skill == Skill::Table && s.in_current_library && table::checkup_form_reuses_spots(s.form))
         .then_some(table::REUSE_NOTE);
     json.push(("reused_note".to_string(), reused.into()));
     json.push(("originals".to_string(), CHECKUP_ORIGINALS.into()));
@@ -1458,21 +1459,48 @@ mod tests {
 
     #[test]
     fn starting_over_a_late_table_checkup_warns_about_the_next_form() {
-        let line = |form: u32, slot: u32| format!("{}\tcheck\t\ttable\t7\t2\t1\t0\t\t1000\tfold\t1\t{form}\t{slot}\t\t\t\t\n", 100 + slot);
+        let line = |form: u32, slot: u32| format!("{}\tcheck\t\ttable\t7\t3\t1\t0\t\t1000\tfold\t1\t{form}\t{slot}\t\t\t\t\n", 100 + slot);
         let note = "\"start_over_note\":";
-        // Form 4 unfinished: starting over deals form 5, which still has fresh spots.
-        load(&line(4, 0));
+        // Form 3 unfinished: starting over deals form 4, which still has fresh spots.
+        load(&line(3, 0));
         let info = dispatch("check_info\x1ftable");
         assert!(info.contains(&format!("{note}null")), "{info}");
-        // Form 5 unfinished: starting over deals form 6, which reuses spots, even
+        // Form 4 unfinished: starting over deals form 5, which reuses spots, even
         // though the unfinished form itself does not.
-        load(&line(5, 0));
+        load(&line(4, 0));
         let info = dispatch("check_info\x1ftable");
         assert!(!info.contains(&format!("{note}null")), "{info}");
         assert!(info.contains("\"reuse_note\":null"), "{info}");
         // Other skills never warn.
         load("1\tcheck\t\thit\t7\t2\t1\t0\t\t1000\t20\t1\t5\t0\t\t\t\t\n");
         assert!(dispatch("check_info\x1fhit").contains(&format!("{note}null")));
+    }
+
+    #[test]
+    fn an_unfinished_table_checkup_from_the_old_library_is_not_resumed() {
+        // Two old forms were unfinished, the later one with spots this library assigns elsewhere.
+        let line = |form: u32, slot: u32| format!("{}\tcheck\t\ttable\t7\t2\t1\t0\t\t1000\tfold\t1\t{form}\t{slot}\t\t\t\t\n", 100 + slot);
+        load(&(line(5, 0) + &line(5, 1)));
+        let info = dispatch("check_info\x1ftable");
+        assert!(info.contains("\"in_progress\":null"), "{info}");
+        assert!(info.contains("\"start_over_note\":null"), "{info}");
+        assert!(info.contains("\"reuse_note\":null"), "{info}");
+        // Home doesn't offer it either.
+        let home = dispatch("home");
+        assert!(!home.contains("\"resume\":true"), "{home}");
+        // Beginning starts form 0 of the new library, with a new run number.
+        let begun = dispatch("check_begin\x1ftable\x1f1");
+        assert!(begun.contains("\"form\":0"), "{begun}");
+        assert!(!begun.contains("\"run\":1"), "{begun}");
+    }
+
+    #[test]
+    fn a_report_on_an_old_library_run_does_not_claim_reuse_from_the_current_pool() {
+        // Form 5 of the old library reused nothing, and this library's pool can't say otherwise.
+        let rows: String = (0..50).map(|slot| format!("{}\tcheck\t\ttable\t7\t2\t1\t0\t0.5000\t1000\tfold\t1\t5\t{slot}\t\t\t\t\t205\trobust\n", 100 + slot)).collect();
+        load(&rows);
+        let report = dispatch("check_report\x1f1");
+        assert!(report.contains("\"reused_note\":null"), "{report}");
     }
 
     #[test]

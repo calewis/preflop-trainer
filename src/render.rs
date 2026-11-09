@@ -884,7 +884,7 @@ pub fn checkup_line(s: &CheckupScore) -> String {
 
 /// The end-of-checkup report.
 pub fn checkup_report(score: &CheckupScore) -> String {
-    let reused = if score.skill == Skill::Table && checkup_form_reuses_spots(score.form) {
+    let reused = if score.skill == Skill::Table && score.in_current_library && checkup_form_reuses_spots(score.form) {
         format!("{REUSE_NOTE}\n")
     } else {
         String::new()

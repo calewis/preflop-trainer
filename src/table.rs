@@ -16,12 +16,16 @@ use crate::item::{is_held_out, HELD_OUT_BIT};
 use crate::rng::Rng;
 
 /// The graded library, produced by the engine. `README.md` says how.
-pub const SPOTS_TEXT: &str = include_str!("../data/spots_v2.txt");
+pub const SPOTS_TEXT: &str = include_str!("../data/spots_v3.txt");
 
 pub const SPOT_COUNT: usize = 3000;
-pub const COUNT_ROBUST: usize = 562;
-pub const COUNT_CLOSE: usize = 284;
-pub const COUNT_DEPENDS: usize = 2154;
+pub const COUNT_ROBUST: usize = 461;
+pub const COUNT_CLOSE: usize = 282;
+pub const COUNT_DEPENDS: usize = 2257;
+/// Written as `gen_version` on `table` rows. Spot ids mean different spots in different
+/// libraries, so a row with any other value answered an earlier library's spot.
+pub const LIBRARY_GEN_VERSION: u32 = 3;
+/// Library version 3 keeps the version 2 line format, so it keeps this header too.
 const FORMAT_HEADER: &str = "#SPOTS v2";
 const SPOT_FIELDS: usize = 17;
 const STACK_EPS: f64 = 0.02;
@@ -44,7 +48,7 @@ pub const CHECKUP_ROBUST: usize = 26;
 pub const CHECKUP_CLOSE: usize = 14;
 
 /// What every table spot's verdict is built on. Shown on every reveal.
-pub const ASSUMPTION_NOTE: &str = "These results use simulated loose-table opponents built on assumptions, not real players.";
+pub const ASSUMPTION_NOTE: &str = "These results use simulated loose-table opponents built on assumptions (a 50/50 mix of two invented populations), not real players.";
 /// Said wherever a checkup form reuses reserved spots.
 pub const REUSE_NOTE: &str = "The reserved spots have run out, so this form reuses some spots from earlier checkups.";
 
@@ -780,18 +784,22 @@ impl TableGrade {
         format!("{pct}% of the pot ({:.2}bb)", self.loss_bb)
     }
 
-    /// The line about the read on a depends spot: a fair choice, or how rarely it was best.
+    /// The line about the read on a depends spot: a fair choice on average, a choice
+    /// only a read can justify, or how rarely it was best.
     pub fn read_note(&self) -> Option<String> {
         if self.spot.verdict != Verdict::Depends {
             return None;
         }
-        Some(if self.correct {
+        let share = f64::from(self.chosen_option().best_share_milli) / 10.0;
+        let on_average = self.chosen == self.spot.best
+            || inside_one_percent((self.best().ev_milli_bb - self.chosen_option().ev_milli_bb).max(0), self.spot.pot_cents);
+        Some(if !self.correct {
+            format!("It was best at only {share:.1}% of simulated tables, so it is rarely a read worth making.")
+        } else if on_average {
             "With no read on the opponent, this was a fair choice.".to_string()
         } else {
-            format!(
-                "It was best at only {:.1}% of simulated tables, so it is rarely a read worth making.",
-                f64::from(self.chosen_option().best_share_milli) / 10.0
-            )
+            // Correct only on its share of tables: a read can justify it, but no read can't.
+            format!("It was best at {share:.1}% of simulated tables, so it can be the right read against some opponents.")
         })
     }
 }

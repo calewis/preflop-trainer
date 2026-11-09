@@ -307,12 +307,13 @@ pub struct Session {
     table_recent: VecDeque<u16>,
 }
 
-/// The spots of the last [`table::NO_REPEAT_WINDOW`] `table` attempts, oldest first.
+/// The spots of the last [`table::NO_REPEAT_WINDOW`] `table` attempts on the current
+/// library, oldest first.
 fn table_recent_from(attempts: &[Attempt]) -> VecDeque<u16> {
     let mut recent: VecDeque<u16> = attempts
         .iter()
         .rev()
-        .filter(|a| a.skill == Skill::Table)
+        .filter(|a| a.skill == Skill::Table && a.in_current_library())
         .filter_map(|a| a.extra.table_spot)
         .take(table::NO_REPEAT_WINDOW)
         .collect();
