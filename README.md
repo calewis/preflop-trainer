@@ -143,7 +143,7 @@ that, copy the new file over, and update the expected counts in `tests/table.rs`
 `index.html` and `app/` are a phone-first web app over the same library, compiled to
 `app/trainer.wasm`; JavaScript holds no poker rules or grading. Rebuild it with
 `web/build.sh` (which also stamps the `sw.js` cache version), and test with
-`web/test/run.py` and `web/test/mutation_check.py`. All of that runs on the desktop `hal`
-through `tools/hal-run`.
+`web/test/run.py` and `web/test/mutation_check.py`. The browser tests need headless Chrome,
+and they fail if the machine's cores are saturated.
 
 Pass marks, EV bands, deal mixes and tolerances in this README are starting guesses.
