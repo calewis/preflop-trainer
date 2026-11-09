@@ -8,9 +8,9 @@ use std::time::Instant;
 
 use trainer_web::dispatch;
 
-const SKILLS: [&str; 13] = [
+const SKILLS: [&str; 14] = [
     "preflop", "nuts", "possible", "made", "beats", "outs", "price", "hit", "spot", "spot_mw",
-    "board_type", "equity", "anchor",
+    "board_type", "equity", "anchor", "table",
 ];
 /// Answers tried for items that aren't simple choices.
 const FREE_ANSWERS: [&str; 16] = [
@@ -30,6 +30,8 @@ fn main() {
     session(&mut out, 40);
     checkup(&mut out);
     anchor_only_session(&mut out);
+    table_session(&mut out);
+    table_checkup(&mut out);
     for (command, reply) in out.commands {
         println!("{}\t{reply}", command.replace('\x1f', "\\x1f").replace('\t', "\\t"));
     }
@@ -70,7 +72,14 @@ fn drills(out: &mut Out, count: u64) {
         let items = if skill == "equity" { count / 3 } else { count };
         for i in 0..items {
             let seed = (i * 2_654_435_761 + 17).to_string();
-            out.call(&["prepare", skill, &seed]);
+            let prepared = out.call(&["prepare", skill, &seed]);
+            if skill == "table" {
+                for code in option_codes(&prepared) {
+                    out.call(&["grade", skill, &seed, &code, "0"]);
+                }
+                out.call(&["grade", skill, &seed, "zzz", "0"]);
+                continue;
+            }
             if is_free_form(skill) {
                 for (answer, response) in answers_for(skill) {
                     out.call(&["grade", skill, &seed, answer, response]);
@@ -189,6 +198,59 @@ fn anchor_only_session(out: &mut Out) {
         out.call(&["commit", &template, &(2_000_000 + step).to_string(), "1500"]);
     }
     out.call(&["session_summary"]);
+}
+
+/// The option codes in a prepared bundle's answer format.
+fn option_codes(prepared: &str) -> Vec<String> {
+    let format = &prepared[prepared.find("\"format\":").unwrap_or(0)..];
+    format.match_indices("\"code\":\"").map(|(i, needle)| {
+        let tail = &format[i + needle.len()..];
+        tail[..tail.find('"').unwrap_or(0)].to_string()
+    }).collect()
+}
+
+/// A `table`-only session through the bridge: dealing order, recency and logging.
+fn table_session(out: &mut Out) {
+    out.call(&["load", ""]);
+    out.call(&["session_open", "2024", "1000000", "table"]);
+    out.call(&["session_start", "15"]);
+    for step in 0..30u64 {
+        let next = out.call(&["session_next", &(step * 1000).to_string()]);
+        let (Some(skill), Some(seed)) = (field(&next, "skill"), field(&next, "seed")) else { break };
+        let (skill, seed) = (skill.to_string(), seed.to_string());
+        out.call(&["session_peek", "1"]);
+        let prepared = out.call(&["prepare", &skill, &seed]);
+        let codes = option_codes(&prepared);
+        let code = codes.get((step as usize) % codes.len().max(1)).cloned().unwrap_or_default();
+        let reply = out.call(&["grade", &skill, &seed, &code, "1500"]);
+        let Some(template) = first_template(&reply) else { break };
+        out.call(&["commit", &template, &(2_000_000 + step).to_string(), "1500"]);
+    }
+    out.call(&["session_summary"]);
+    out.call(&["progress", "2100000"]);
+    out.call(&["export"]);
+}
+
+/// A whole `table` checkup through the bridge, grading each slot's first option.
+fn table_checkup(out: &mut Out) {
+    out.call(&["load", ""]);
+    let begin = out.call(&["check_begin", "table", "0"]);
+    let run = number_field(&begin, "run").expect("a run").to_string();
+    let form = number_field(&begin, "form").expect("a form").to_string();
+    for count in 0..50 {
+        let next = out.call(&["check_next", "table", &run]);
+        let Some(slot) = number_field(&next, "slot").map(str::to_string) else { break };
+        let prepared = out.call(&["prepare_check", "table", &form, &slot, &run]);
+        let code = option_codes(&prepared).into_iter().next().unwrap_or_default();
+        let reply = out.call(&["check_grade", "table", &form, &slot, &run, &code, "1500"]);
+        let Some(template) = first_template(&reply) else { break };
+        out.call(&["check_commit", &template, &(3_000_000 + count).to_string(), "1500"]);
+    }
+    out.call(&["check_next", "table", &run]);
+    out.call(&["check_report", &run]);
+    out.call(&["home"]);
+    out.call(&["progress", "4000000"]);
+    out.call(&["export"]);
 }
 
 /// A number field in a JSON reply, as text.

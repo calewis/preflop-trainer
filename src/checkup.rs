@@ -9,6 +9,7 @@ use crate::item::{equity_seed_with_rung, Item, Question, Skill, HELD_OUT_BIT};
 use crate::log::{Attempt, CheckRef, Mode};
 use crate::progress::{meets_mark, pass_mark, window_metrics, PassMark, WindowMetrics};
 use crate::rng::Rng;
+use crate::table;
 
 /// Fresh items scored in a checkup.
 pub const CHECKUP_ORIGINALS: usize = 40;
@@ -44,7 +45,7 @@ pub struct CheckupPlan {
 
 const IDENTITY: [u8; 4] = [0, 1, 2, 3];
 
-fn original_seeds(skill: Skill, rng: &mut Rng) -> Vec<u64> {
+fn original_seeds(skill: Skill, form: u32, rng: &mut Rng) -> Vec<u64> {
     let deck_len = anchors::deck().len().max(1);
     (0..CHECKUP_ORIGINALS)
         .map(|i| {
@@ -54,6 +55,8 @@ fn original_seeds(skill: Skill, rng: &mut Rng) -> Vec<u64> {
                 Skill::Equity => equity_seed_with_rung(seed, (i % 2) as u8),
                 Skill::BoardType => seed_with_category(seed, BoardCategory::ALL[i % BoardCategory::ALL.len()]),
                 Skill::Anchor => anchors::seed_with_card(seed, i % deck_len),
+                // A fixed robust and close mix, walking the reserved spots form by form.
+                Skill::Table => table::seed_with_index(seed, table::checkup_pool_index(form, i)),
                 _ => seed,
             }
         })
@@ -74,7 +77,7 @@ fn non_identity_perm(rng: &mut Rng) -> [u8; 4] {
 pub fn checkup_plan(skill: Skill, form: u32) -> CheckupPlan {
     let mix = (skill as u64 + 1).wrapping_mul(SKILL_MIX) ^ (u64::from(form) + 1).wrapping_mul(FORM_MIX);
     let mut rng = Rng::new(mix ^ FORM_SALT);
-    let mut seeds = original_seeds(skill, &mut rng);
+    let mut seeds = original_seeds(skill, form, &mut rng);
     rng.shuffle(&mut seeds);
 
     let mut repeat_positions: Vec<usize> = (MIN_REPEAT_GAP..CHECKUP_LEN).collect();

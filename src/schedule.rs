@@ -11,6 +11,7 @@ use crate::item::{
 };
 use crate::log::{Attempt, ItemRef, Mode};
 use crate::rng::Rng;
+use crate::table;
 
 pub const MISS_WINDOW: usize = 20;
 pub const RETRY_MIN_GAP: u64 = 3;
@@ -124,7 +125,8 @@ pub fn anchors_new(attempts: &[Attempt]) -> Vec<usize> {
 
 /// Items due for review at `now_ms`. Baseline and checkup items, held-out seeds
 /// and items from a different [`GEN_VERSION`] are skipped, as are `anchor` (it
-/// has its own boxes) and `board_type` (boards are not reused on purpose).
+/// has its own boxes), `board_type` (boards are not reused on purpose) and `table`
+/// (a reviewed spot would repeat inside its no-repeat window).
 /// Attempts must be in time order.
 pub fn due_items(attempts: &[Attempt], now_ms: u64) -> Vec<DueItem> {
     let mut states: HashMap<DueItem, ReviewState> = HashMap::new();
@@ -134,7 +136,7 @@ pub fn due_items(attempts: &[Attempt], now_ms: u64) -> Vec<DueItem> {
         if attempt.gen_version != GEN_VERSION
             || matches!(attempt.mode, Mode::Baseline | Mode::Check)
             || is_held_out(seed)
-            || matches!(attempt.skill, Skill::Anchor | Skill::BoardType)
+            || matches!(attempt.skill, Skill::Anchor | Skill::BoardType | Skill::Table)
         {
             continue;
         }
@@ -212,6 +214,21 @@ pub struct Session {
     anchors_new: VecDeque<usize>,
     anchors_new_left: u32,
     board_dealer: CategoryDealer,
+    /// `table`: spots dealt or logged in the last [`table::NO_REPEAT_WINDOW`] attempts.
+    table_recent: VecDeque<u16>,
+}
+
+/// The spots of the last [`table::NO_REPEAT_WINDOW`] `table` attempts, oldest first.
+fn table_recent_from(attempts: &[Attempt]) -> VecDeque<u16> {
+    let mut recent: VecDeque<u16> = attempts
+        .iter()
+        .rev()
+        .filter(|a| a.skill == Skill::Table)
+        .filter_map(|a| a.extra.table_spot)
+        .take(table::NO_REPEAT_WINDOW)
+        .collect();
+    recent.make_contiguous().reverse();
+    recent
 }
 
 impl Session {
@@ -236,6 +253,7 @@ impl Session {
             anchors_new: anchors_new(attempts).into(),
             anchors_new_left: MAX_NEW_ANCHORS_PER_SESSION,
             board_dealer: CategoryDealer::new(attempts),
+            table_recent: table_recent_from(attempts),
         }
     }
 
@@ -312,6 +330,14 @@ impl Session {
             self.anchors_new_left -= 1;
             return self.deal(skill, anchors::seed_with_card(0, card), Origin::New);
         }
+        if skill == Skill::Table {
+            let (seed, id) = table::deal_spot(&mut self.rng, &self.table_recent);
+            self.table_recent.push_back(id);
+            if self.table_recent.len() > table::NO_REPEAT_WINDOW {
+                self.table_recent.pop_front();
+            }
+            return self.deal(skill, seed, Origin::New);
+        }
         let mut seed = self.rng.next_u64() & !HELD_OUT_BIT;
         match skill {
             Skill::Equity => seed = equity_seed_with_rung(seed, self.equity_rung),
@@ -384,8 +410,9 @@ impl Session {
         if window.len() > MISS_WINDOW {
             window.pop_front();
         }
-        // Boards are not reused on purpose, so a missed one does not come back.
-        if !ok && planned.skill != Skill::BoardType {
+        // Boards are not reused on purpose, so a missed one does not come back;
+        // a table spot would repeat inside its no-repeat window.
+        if !ok && !matches!(planned.skill, Skill::BoardType | Skill::Table) {
             let remaining = self.rng.range(RETRY_MIN_GAP, RETRY_MAX_GAP);
             self.requeue.push(Requeued { skill: planned.skill, seed: planned.seed, remaining });
         }

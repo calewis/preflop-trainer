@@ -20,6 +20,7 @@ use poker_trainer::progress::{
 };
 use poker_trainer::rng::Rng;
 use poker_trainer::schedule::{Origin, Session, SessionLimits};
+use poker_trainer::table;
 use render::Style;
 
 const USAGE: &str = "poker-trainer: fundamentals drills for no-limit hold'em
@@ -34,7 +35,7 @@ Usage:
   poker-trainer progress    show results against the pass marks
 
 Skills: preflop, nuts, possible, made, beats, board_type, outs, price, hit, equity,
-anchor, spot, spot_mw
+anchor, spot, spot_mw, table
 Type q at any question to quit and save.";
 
 fn main() -> ExitCode {
@@ -326,6 +327,9 @@ fn run_check(skill: Skill) -> Result<(), String> {
     let plan = checkup_plan(skill, form);
     let total = plan.slots.len();
     println!("Checkup for {}: {total} questions, form {form}, no feedback until the end. Type q to stop early.", skill.name());
+    if skill == Skill::Table && table::checkup_form_reuses_spots(form) {
+        println!("{}", table::REUSE_NOTE);
+    }
     let style = style();
     let stdin = io::stdin();
     let mut input = stdin.lock();

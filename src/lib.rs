@@ -23,3 +23,4 @@ pub mod preflop;
 pub mod progress;
 pub mod rng;
 pub mod schedule;
+pub mod table;

@@ -83,5 +83,6 @@ pub fn answer_format(question: &Question) -> AnswerFormat {
         Question::BoardType { options, .. } => {
             AnswerFormat::Choice(options.iter().map(|c| option(c.code(), c.label())).collect())
         }
+        Question::Table(q) => AnswerFormat::Choice(q.options.clone()),
     }
 }

@@ -13,6 +13,7 @@ use crate::item::{
 use crate::money;
 use crate::preflop::{Range, Seat, Situation, CARD};
 use crate::rng::Rng;
+use crate::table;
 
 /// Pots before the bet, all divisible by 12 so every bet size is a whole dollar.
 pub const POTS: [u32; 12] = [60, 72, 84, 96, 120, 144, 180, 240, 300, 360, 480, 600];
@@ -97,6 +98,7 @@ pub fn generate(skill: Skill, seed: u64) -> Item {
         Skill::BoardType => gen_board_type(&mut rng, seed),
         Skill::Equity => Question::Equity(gen_equity(&mut rng, seed)),
         Skill::Anchor => Question::Anchor { card: anchors::card_of_seed(seed) as u16 },
+        Skill::Table => Question::Table(table::question_for_seed(seed)),
     };
     Item { skill, seed, question }
 }

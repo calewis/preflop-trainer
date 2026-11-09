@@ -10,6 +10,7 @@ use crate::eval::{straight_top, Category, HandRank};
 use crate::item::{EquityOpponents, EquityQuestion, HitStreet, Item, Question, SpotMode, SpotQuestion};
 use crate::money;
 use crate::preflop::{preflop_answer, Action, PreflopReason, Seat, Situation};
+use crate::table::{self, TableGrade, TableQuestion};
 
 /// EV-loss bands for `spot` and `spot_mw`, as a percentage of P. Starting guesses.
 pub const EV_CLOSE_PCT: f64 = 1.0;
@@ -285,6 +286,7 @@ pub enum Reveal {
         /// The answer was right but took longer than [`BOARD_TYPE_MISS_MS`].
         too_slow: bool,
     },
+    Table(TableGrade),
 }
 
 /// Grades a raw answer. `Err` means the input was not understood and nothing is counted.
@@ -304,6 +306,7 @@ pub fn grade(item: &Item, raw: &str) -> Result<Outcome, InvalidAnswer> {
         Question::Equity(q) => grade_equity(q, item.seed, raw),
         Question::Anchor { card } => grade_anchor(usize::from(*card), raw),
         Question::BoardType { board, options } => grade_board_type(board, options, raw),
+        Question::Table(q) => grade_table(q, raw),
     }
 }
 
@@ -796,6 +799,20 @@ fn grade_anchor(card_index: usize, raw: &str) -> Result<Outcome, InvalidAnswer> 
     let signed_error = estimate_pct - card.answer_pct;
     let correct = signed_error.abs() <= f64::from(card.tolerance);
     Ok(outcome(correct, format!("{estimate_pct}"), Reveal::Anchor { card, estimate_pct, signed_error }))
+}
+
+fn grade_table(q: &TableQuestion, raw: &str) -> Result<Outcome, InvalidAnswer> {
+    let spot = table::spot_by_id(q.spot_id);
+    let code = normalize(raw);
+    let chosen = spot.options.iter().position(|o| o.code == code).ok_or_else(|| {
+        let codes: Vec<&str> = spot.options.iter().map(|o| o.code.as_str()).collect();
+        InvalidAnswer(format!("Answer one of {}.", codes.join(", ")))
+    })?;
+    let graded = table::grade_option(spot, chosen);
+    let (correct, loss_pct) = (graded.correct, graded.loss_pct);
+    let mut result = outcome(correct, code, Reveal::Table(graded));
+    result.ev_loss_pct = Some(loss_pct);
+    Ok(result)
 }
 
 fn grade_board_type(board: &[Card], options: &[BoardCategory; 4], raw: &str) -> Result<Outcome, InvalidAnswer> {

@@ -4,6 +4,7 @@
 use crate::checkup::latest_checkup;
 use crate::item::Skill;
 use crate::log::{Attempt, Mode};
+use crate::table::Verdict;
 
 /// Attempts considered for a pass mark.
 pub const STAT_WINDOW: usize = 40;
@@ -58,6 +59,17 @@ pub const PASS_SPOT: PassMark = PassMark {
     max_blunders: Some(2),
     max_mean_abs_error: None,
 };
+/// `table`: over the last 40 graded robust and close spots. Starting guesses.
+pub const TABLE_MAX_MEAN_EV_LOSS_PCT: f64 = 3.0;
+pub const TABLE_MAX_BLUNDERS: u32 = 2;
+pub const PASS_TABLE: PassMark = PassMark {
+    min_correct_pct: None,
+    min_within_one_pct: None,
+    max_median_ms: None,
+    max_mean_ev_loss_pct: Some(TABLE_MAX_MEAN_EV_LOSS_PCT),
+    max_blunders: Some(TABLE_MAX_BLUNDERS),
+    max_mean_abs_error: None,
+};
 pub const PASS_BOARD_TYPE: PassMark = accuracy(95.0, Some(crate::board_type::BOARD_TYPE_TARGET_MS));
 pub const PASS_ANCHOR: PassMark = accuracy(90.0, None);
 pub const PASS_EQUITY: PassMark = PassMark {
@@ -83,17 +95,22 @@ pub fn pass_mark(skill: Skill) -> PassMark {
         Skill::BoardType => PASS_BOARD_TYPE,
         Skill::Equity => PASS_EQUITY,
         Skill::Anchor => PASS_ANCHOR,
+        Skill::Table => PASS_TABLE,
     }
 }
 
 /// EV loss above this percentage of P counts as a blunder.
 const BLUNDER_PCT: f64 = crate::grade::EV_MISTAKE_PCT;
 
-pub const STEPS: [&[Skill]; 3] = [
+pub const STEPS: [&[Skill]; 4] = [
     &[Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats, Skill::BoardType],
     &[Skill::Outs, Skill::Price, Skill::Hit, Skill::Equity, Skill::Anchor],
     &[Skill::Spot, Skill::SpotMw],
+    &[Skill::Table],
 ];
+
+/// Steps the frozen baseline covers: it has no questions for later steps.
+pub const BASELINE_STEPS: usize = 3;
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct SkillStats {
@@ -163,7 +180,7 @@ pub fn meets_mark(mark: &PassMark, m: &WindowMetrics) -> bool {
 /// Only `drill` attempts count for pass marks. The baseline is measured
 /// separately and same-session retries follow a reveal.
 fn counts_for_stats(attempt: &Attempt) -> bool {
-    attempt.mode == Mode::Drill
+    attempt.mode == Mode::Drill && attempt.extra.table_verdict != Some(Verdict::Depends)
 }
 
 pub fn skill_stats(skill: Skill, attempts: &[Attempt]) -> SkillStats {
@@ -202,7 +219,7 @@ pub fn step_passed(step: usize, stats: &[SkillStats]) -> bool {
         .all(|skill| stats.iter().any(|s| s.skill == *skill && s.passed))
 }
 
-/// The first step not yet passed (1 to 3); 3 once every step is passed.
+/// The first step not yet passed; the last step once every step is passed.
 pub fn current_step(stats: &[SkillStats]) -> usize {
     (1..=STEPS.len())
         .find(|&step| !step_passed(step, stats))
@@ -295,7 +312,7 @@ pub fn baseline_runs(attempts: &[Attempt], baseline_size: usize) -> Vec<Baseline
                 .map(score)
                 .filter(|s| s.answered > 0)
                 .collect();
-            let steps = (1..=STEPS.len())
+            let steps = (1..=BASELINE_STEPS)
                 .map(|step| {
                     let in_step: Vec<&SectionScore> =
                         sections.iter().filter(|s| s.skill.step() == Some(step as u8)).collect();

@@ -1,21 +1,25 @@
 //! The attempt log as TSV text. Reading and writing the file is the caller's job.
 
 use crate::baseline::BaselineItem;
-use crate::grade::Outcome;
+use crate::grade::{Outcome, Reveal};
 use crate::item::{Skill, GEN_VERSION};
 use crate::schedule::{Origin, Planned};
+use crate::table::Verdict;
 
 /// Longest response time recorded.
 pub const MAX_RESPONSE_MS: u32 = 60_000;
 
 /// First line of a new log file. Parsers skip it.
-pub const LOG_HEADER: &str = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer\tcheck_run\tcheck_form\tcheck_slot\tband\tsigned_error\ttruth_pct\topponents";
+pub const LOG_HEADER: &str = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer\tcheck_run\tcheck_form\tcheck_slot\tband\tsigned_error\ttruth_pct\topponents\ttable_spot\ttable_verdict";
+/// The header of logs written before the table columns existed.
+pub const CHECKUP_LOG_HEADER: &str = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer\tcheck_run\tcheck_form\tcheck_slot\tband\tsigned_error\ttruth_pct\topponents";
 /// The header of logs written before the extra columns existed.
 pub const LEGACY_LOG_HEADER: &str = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer";
 
-/// Columns in a line with no extras, and in one with all of them.
+/// Columns in a line with no extras, in one with the original extras, and in a table row.
 const BASE_COLUMNS: usize = 11;
 const FULL_COLUMNS: usize = 18;
+const TABLE_COLUMNS: usize = 20;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Mode {
@@ -72,6 +76,10 @@ pub struct AttemptExtra {
     pub signed_error: Option<f64>,
     pub truth_pct: Option<f64>,
     pub opponents: Option<u8>,
+    /// `table`: which spot was answered and its verdict, so pass marks and the
+    /// no-repeat window don't need the spot library.
+    pub table_spot: Option<u16>,
+    pub table_verdict: Option<Verdict>,
 }
 
 impl AttemptExtra {
@@ -139,13 +147,19 @@ impl Attempt {
         timestamp_ms: u64,
         response_ms: u32,
     ) -> Attempt {
-        let extra = outcome.equity_log.map_or_else(AttemptExtra::default, |e| AttemptExtra {
+        let mut extra = outcome.equity_log.map_or_else(AttemptExtra::default, |e| AttemptExtra {
             check: None,
             band: Some(e.band),
             signed_error: Some(e.signed_error),
             truth_pct: Some(e.truth_pct),
             opponents: Some(e.opponents),
+            table_spot: None,
+            table_verdict: None,
         });
+        if let Reveal::Table(graded) = &outcome.reveal {
+            extra.table_spot = Some(graded.spot.id);
+            extra.table_verdict = Some(graded.spot.verdict);
+        }
         Attempt {
             timestamp_ms,
             mode,
@@ -181,8 +195,12 @@ fn optional<T: ToString>(value: Option<T>) -> String {
 }
 
 fn extra_columns(extra: &AttemptExtra) -> String {
+    let table = match (extra.table_spot, extra.table_verdict) {
+        (Some(spot), Some(verdict)) => format!("\t{spot}\t{}", verdict.code()),
+        _ => String::new(),
+    };
     format!(
-        "\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "\t{}\t{}\t{}\t{}\t{}\t{}\t{}{table}",
         optional(extra.check.map(|c| c.run)),
         optional(extra.check.map(|c| c.form)),
         optional(extra.check.map(|c| c.slot)),
@@ -234,7 +252,7 @@ fn parse_line(line: &str) -> Option<Attempt> {
     let fields: Vec<&str> = line.split('\t').collect();
     let extra = match fields.len() {
         BASE_COLUMNS => AttemptExtra::default(),
-        FULL_COLUMNS => parse_extra(&fields[BASE_COLUMNS..])?,
+        FULL_COLUMNS | TABLE_COLUMNS => parse_extra(&fields[BASE_COLUMNS..])?,
         _ => return None,
     };
     let mode = Mode::from_code(fields[1])?;
@@ -299,7 +317,20 @@ fn parse_extra(fields: &[&str]) -> Option<AttemptExtra> {
         signed_error: parse_finite(fields[4])?,
         truth_pct: parse_finite(fields[5])?,
         opponents: parse_optional(fields[6])?,
+        table_spot: parse_table_spot(fields)?,
+        table_verdict: parse_table_verdict(fields)?,
     })
+}
+
+fn parse_table_spot(fields: &[&str]) -> Option<Option<u16>> {
+    fields.get(7).map_or(Some(None), |text| parse_optional(text))
+}
+
+fn parse_table_verdict(fields: &[&str]) -> Option<Option<Verdict>> {
+    match fields.get(8).copied().unwrap_or("") {
+        "" => Some(None),
+        code => Verdict::from_code(code).map(Some),
+    }
 }
 
 /// Parses log text, oldest attempt first. Malformed lines are skipped and
@@ -308,7 +339,7 @@ pub fn parse_log(text: &str) -> (Vec<Attempt>, Vec<String>) {
     let mut attempts = Vec::new();
     let mut warnings = Vec::new();
     for (index, line) in text.lines().enumerate() {
-        if line.is_empty() || line == LOG_HEADER || line == LEGACY_LOG_HEADER {
+        if line.is_empty() || line == LOG_HEADER || line == CHECKUP_LOG_HEADER || line == LEGACY_LOG_HEADER {
             continue;
         }
         match parse_line(line) {

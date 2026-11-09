@@ -6,9 +6,10 @@ use poker_trainer::cards::{rank_char, Card, Holding};
 use poker_trainer::checkup::{CheckupMetric, CheckupScore};
 use poker_trainer::equity_skill::{EquityBias, BIAS_MIN_ATTEMPTS};
 use poker_trainer::grade::{EquityAnalysis, EvBand, Outcome, Reveal};
-use poker_trainer::item::{EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question, SpotMode, SpotQuestion};
+use poker_trainer::item::{EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question, Skill, SpotMode, SpotQuestion};
 use poker_trainer::preflop::{action_label, Action, PreflopReason, Seat, Range, Situation, CARD};
 use poker_trainer::progress::{pass_mark, BaselineRun, SkillStats, PASS_ATTEMPTS, STEPS};
+use poker_trainer::table::{bb_text, checkup_form_reuses_spots, ev_bb_text, REUSE_NOTE, TableAction, TableActionKind, TableGrade, TableQuestion, TableSeat, TableStreetName, Verdict, ASSUMPTION_NOTE};
 
 #[derive(Clone, Copy)]
 pub struct Style {
@@ -173,7 +174,53 @@ pub fn question(item: &Item, style: Style) -> String {
         Question::BoardType { board, .. } => {
             format!("Flop: {}\nName its suit pattern and rank pattern.", style.cards(board))
         }
+        Question::Table(q) => table_question(q, style),
     }
+}
+
+fn table_seat_name(seat: TableSeat, hero: TableSeat) -> &'static str {
+    if seat == hero {
+        "You"
+    } else {
+        seat.title()
+    }
+}
+
+fn table_action_text(a: &TableAction, hero: TableSeat) -> String {
+    let amount = bb_text(a.amount_cents);
+    let you = a.seat == hero;
+    let verb = |plain: &str, s: &str| if you { plain.to_string() } else { s.to_string() };
+    let what = match a.kind {
+        TableActionKind::Fold => verb("fold", "folds"),
+        TableActionKind::Check => verb("check", "checks"),
+        TableActionKind::Call => format!("{} {amount}bb", verb("call", "calls")),
+        TableActionKind::Bet => format!("{} {amount}bb", verb("bet", "bets")),
+        TableActionKind::Raise => format!("{} to {amount}bb", verb("raise", "raises")),
+    };
+    format!("{} {what}", table_seat_name(a.seat, hero))
+}
+
+fn table_question(q: &TableQuestion, style: Style) -> String {
+    let mut lines = vec![
+        format!("{} players, {}bb stacks, {}bb behind you. You are {}.", q.players, q.stack_bb, bb_text(q.behind_cents), q.seat.sentence()),
+        format!("Your hand: {}", style.holding(q.hero)),
+    ];
+    for s in &q.streets {
+        let cards = q.street_cards(s.street);
+        let head = match s.street {
+            TableStreetName::Preflop => "Preflop".to_string(),
+            _ => format!("{}: {} (pot {}bb)", s.street.title(), style.cards(cards), bb_text(s.pot_start_cents)),
+        };
+        let actions: Vec<String> = s.actions.iter().map(|a| table_action_text(a, q.seat)).collect();
+        if actions.is_empty() {
+            lines.push(head);
+        } else {
+            lines.push(format!("{head}: {}", actions.join(", ")));
+        }
+    }
+    let call = if q.call_cents > 0 { format!(", {}bb to call", bb_text(q.call_cents)) } else { String::new() };
+    lines.push(format!("Pot {}bb{call}. What do you do?", bb_text(q.pot_cents)));
+    lines.join("\n")
 }
 
 fn equity_question(q: &EquityQuestion, style: Style) -> String {
@@ -450,8 +497,43 @@ pub fn reveal(outcome: &Outcome, style: Style) -> String {
                 lines.push("Too slow: answers over 12 seconds count as misses even when right.".to_string());
             }
         }
+        Reveal::Table(graded) => table_reveal(&mut lines, graded),
     }
     lines.join("\n")
+}
+
+fn table_reveal(lines: &mut Vec<String>, g: &TableGrade) {
+    let spot = g.spot;
+    lines.push(spot.verdict.explanation().to_string());
+    lines.push(format!("Best: {}. You chose {}.", g.best().label, g.chosen_option().label));
+    for option in &spot.options {
+        lines.push(format!(
+            "  {}: {}bb, {:.1}% of the pot, best at {:.1}% of simulated tables",
+            option.label,
+            ev_bb_text(option.ev_milli_bb),
+            f64::from(option.ev_pct_tenths) / 10.0,
+            f64::from(option.best_share_milli) / 10.0,
+        ));
+    }
+    if g.chosen != spot.best {
+        let band = match g.band {
+            Some(EvBand::Close) => ", close, so it counts as correct",
+            Some(EvBand::Small) => ", a small error",
+            Some(EvBand::Mistake) => ", a mistake",
+            Some(EvBand::Blunder) => ", a blunder",
+            None => ", a fair read",
+        };
+        lines.push(format!("You gave up {}{band}.", g.loss_text()));
+    }
+    if let Some(note) = g.read_note() {
+        lines.push(note);
+    }
+    if spot.verdict == Verdict::Depends {
+        for row in &spot.archetypes {
+            lines.push(format!("  {}", row.sentence(spot)));
+        }
+    }
+    lines.push(ASSUMPTION_NOTE.to_string());
 }
 
 fn equity_reveal(
@@ -682,8 +764,13 @@ pub fn checkup_line(s: &CheckupScore) -> String {
 
 /// The end-of-checkup report.
 pub fn checkup_report(score: &CheckupScore) -> String {
+    let reused = if score.skill == Skill::Table && checkup_form_reuses_spots(score.form) {
+        format!("{REUSE_NOTE}\n")
+    } else {
+        String::new()
+    };
     format!(
-        "\nCHECKUP RESULT\n\n{}\n\nScored on the {} original questions only; the repeats are a noise check.\n",
+        "\nCHECKUP RESULT\n\n{}\n\nScored on the {} original questions only; the repeats are a noise check.\n{reused}",
         checkup_line(score),
         poker_trainer::checkup::CHECKUP_ORIGINALS
     )

@@ -4,6 +4,7 @@ use crate::board_type::BoardCategory;
 use crate::cards::{Card, Holding};
 use crate::classes::OppClass;
 use crate::preflop::{Seat, Situation};
+use crate::table::TableQuestion;
 
 /// Bump whenever a generator's output for a given seed changes.
 pub const GEN_VERSION: u32 = 1;
@@ -55,10 +56,11 @@ pub enum Skill {
     BoardType,
     Equity,
     Anchor,
+    Table,
 }
 
 impl Skill {
-    pub const ALL: [Skill; 13] = [
+    pub const ALL: [Skill; 14] = [
         Skill::Preflop,
         Skill::Nuts,
         Skill::Possible,
@@ -72,6 +74,7 @@ impl Skill {
         Skill::BoardType,
         Skill::Equity,
         Skill::Anchor,
+        Skill::Table,
     ];
 
     pub fn name(self) -> &'static str {
@@ -89,6 +92,7 @@ impl Skill {
             Skill::BoardType => "board_type",
             Skill::Equity => "equity",
             Skill::Anchor => "anchor",
+            Skill::Table => "table",
         }
     }
 
@@ -103,6 +107,7 @@ impl Skill {
             Skill::Nuts | Skill::Possible | Skill::Made | Skill::Beats | Skill::BoardType => Some(1),
             Skill::Outs | Skill::Price | Skill::Hit | Skill::Equity | Skill::Anchor => Some(2),
             Skill::Spot | Skill::SpotMw => Some(3),
+            Skill::Table => Some(4),
         }
     }
 }
@@ -249,6 +254,8 @@ pub enum Question {
         board: Vec<Card>,
         options: [BoardCategory; 4],
     },
+    /// A spot from the graded library, with its seed's suit permutation applied.
+    Table(TableQuestion),
 }
 
 impl Question {
@@ -301,6 +308,7 @@ impl Question {
                 board: board(&q.board),
                 ..q.clone()
             }),
+            Question::Table(q) => Question::Table(q.with_suit_perm(perm)),
         }
     }
 }

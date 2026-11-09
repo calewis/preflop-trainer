@@ -366,6 +366,7 @@ fn old_lines_still_parse_and_new_columns_go_at_the_end() {
         signed_error: Some(-4.5),
         truth_pct: Some(37.25),
         opponents: Some(2),
+        ..AttemptExtra::default()
     };
     row.mode = Mode::Check;
     let line = format_attempt(&row);

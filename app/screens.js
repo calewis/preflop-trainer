@@ -183,6 +183,29 @@ function renderFailure(err, leave) {
       h('button', { class: 'btn', onclick: leave.action }, leave.label)));
 }
 
+// Answers still being graded or saved, so ending a run can wait for them.
+let answerWork = null;
+
+function trackAnswer(work) {
+  const tracked = Promise.resolve(work).catch(err => showFatalNotice(err.message || String(err))).finally(() => { if (answerWork === tracked) answerWork = null; });
+  answerWork = tracked;
+  return tracked;
+}
+
+async function answersSettled() {
+  while (answerWork) await answerWork;
+}
+
+/** Wraps a submit so a real answer is tracked, while a repeat tap on a locked one is not. */
+function trackedSubmit(submit, isLocked) {
+  return raw => {
+    const already = isLocked();
+    const work = submit(raw);
+    if (!already && isLocked()) trackAnswer(work);
+    return work;
+  };
+}
+
 // Grading can take a moment on a phone; say so rather than looking frozen.
 function showPending(slot) {
   const timer = setTimeout(() => { slot.textContent = 'Working it out...'; }, 150);
@@ -234,6 +257,7 @@ function showItem(planned, bundle) {
   // Real time, so a missed visibility event can never make answers ignored.
   const appearedAt = performance.now();
   window.__trainer.current = { planned, bundle, shownAt, appearedAt };
+  const owner = drill;
   let locked = false;
 
   async function submit(raw) {
@@ -265,14 +289,19 @@ function showItem(planned, bundle) {
       }
       outcome = graded.outcome;
     }
+    if (drill !== owner) {
+      // The player ended the drill while this was being graded: keep the answer, skip the reveal.
+      await trackAnswer(commitAnswer(outcome, response));
+      return;
+    }
     showReveal(outcome, response);
   }
 
-  const controls = answerControls(bundle.format, submit);
+  const controls = answerControls(bundle.format, trackedSubmit(submit, () => locked));
   screen(
     drillHeader(bundle.title, tag),
     h('section', { class: 'question' }, questionView(bundle.question)),
-    h('section', { class: 'answers' }, controls.el, errorSlot, pendingSlot),
+    h('section', { class: 'answers' }, errorSlot, pendingSlot, controls.el),
     status);
   onKey = controls.onKey;
   const lockControls = () => controls.el.querySelectorAll('button').forEach(b => { b.disabled = true; });
@@ -280,7 +309,7 @@ function showItem(planned, bundle) {
   function showReveal(outcome, response) {
     lockControls();
     onKey = null;
-    const commitPromise = commitAnswer(outcome, response);
+    const commitPromise = trackAnswer(commitAnswer(outcome, response));
     const nextBtn = h('button', { class: 'btn primary', onclick: goNext }, 'Next');
     async function goNext() {
       if (nextBtn.disabled) return;
@@ -340,6 +369,7 @@ async function finishDrill(outOfItems) {
   if (!state) return;
   if (state.clock) clearInterval(state.clock);
   drill = null;
+  await answersSettled();
   let summary;
   try {
     summary = await engine.call('session_summary');
@@ -469,7 +499,7 @@ async function renderBaselineItem() {
       h('h1', { class: 'top-title' }, bundle.title),
       h('div', { class: 'top-right' }, h('span', { class: 'count' }, `${index + 1} of ${state.count}`))),
     h('section', { class: 'question' }, questionView(bundle.question)),
-    h('section', { class: 'answers' }, controls.el, errorSlot));
+    h('section', { class: 'answers' }, errorSlot, controls.el));
   onKey = controls.onKey;
 }
 
@@ -534,6 +564,7 @@ export async function showCheckup(skill) {
     h('section', { class: 'panel' },
       h('h2', {}, info.title),
       h('p', {}, `${info.total} questions: ${info.originals} new ones and ${info.repeats} repeats. No feedback until the end.`),
+      info.reuse_note ? h('p', { class: 'hint', 'data-reuse-start': '' }, info.reuse_note) : null,
       info.in_progress
         ? h('p', { class: 'hint' }, `You have an unfinished checkup: ${info.in_progress.answered} of ${info.in_progress.total} answered.`)
         : null,
@@ -641,14 +672,14 @@ async function renderCheckupItem() {
     if (checkup === state) renderCheckupItem();
   }
 
-  const controls = answerControls(bundle.format, submit);
+  const controls = answerControls(bundle.format, trackedSubmit(submit, () => locked));
   screen(
     h('header', { class: 'top-bar' },
       h('button', { class: 'back', onclick: finishCheckup }, 'Stop'),
       h('h1', { class: 'top-title' }, bundle.title),
       h('div', { class: 'top-right' }, h('span', { class: 'count' }, `${next.number} of ${next.total}`))),
     h('section', { class: 'question' }, questionView(bundle.question)),
-    h('section', { class: 'answers' }, controls.el, errorSlot, pendingSlot));
+    h('section', { class: 'answers' }, errorSlot, pendingSlot, controls.el));
   onKey = controls.onKey;
 }
 
@@ -656,6 +687,7 @@ async function finishCheckup() {
   const state = checkup;
   if (!state) return;
   checkup = null;
+  await answersSettled();
   let result;
   try {
     result = await engine.call('check_report', state.run);
@@ -684,6 +716,7 @@ async function finishCheckup() {
       h('h2', {}, state.title),
       h('p', { class: 'big-score' }, r.summary.score),
       h('p', { class: 'hint' }, `${r.summary.margin[0].toUpperCase()}${r.summary.margin.slice(1)}. Scored on the ${r.originals} new questions.`),
+      r.reused_note ? h('p', { class: 'hint', 'data-reused': '' }, r.reused_note) : null,
       h('p', { class: r.summary.passed ? 'mark-line good' : 'mark-line' }, r.summary.status),
       h('dl', { class: 'stat-list' },
         row('Mark', r.mark.join(', ')),

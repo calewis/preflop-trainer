@@ -41,6 +41,7 @@ export function questionView(q) {
     case 'board_type': return boardTypeQuestion(q);
     case 'equity': return equityQuestion(q);
     case 'anchor': return anchorQuestion(q);
+    case 'table': return tableQuestion(q);
     default: return h('p', {}, 'Unknown question');
   }
 }
@@ -130,6 +131,22 @@ function anchorQuestion(q) {
     prompt(q.prompt));
 }
 
+function tableQuestion(q) {
+  return h('div', { class: 'stack compact' },
+    h('div', { class: 'chips' }, chip('Table of', q.players), chip('Your seat', q.seat), chip('Behind', q.behind)),
+    hand(q.hero),
+    h('ol', { class: 'timeline' }, q.streets.map(street => h('li', { class: 'tl-street' },
+      h('div', { class: 'tl-head' },
+        h('strong', {}, street.name),
+        street.cards.length ? h('span', { class: 'mini-cards' }, street.cards.map(c => card(c, 'small'))) : null,
+        street.pot ? h('span', { class: 'tl-pot' }, street.pot) : null),
+      street.actions.length
+        ? h('div', { class: 'tl-actions' }, street.actions.map(a => h('span', { class: `tl-act ${a.kind}${a.hero ? ' you' : ''}` }, a.text)))
+        : null))),
+    h('div', { class: 'chips' }, chip('Pot', q.pot), chip('To call', q.call || 'Nothing')),
+    prompt(`You are ${q.seat_sentence}. What do you do?`));
+}
+
 function holdingCards(cards) {
   return h('span', { class: 'mini-cards' }, cards.map(c => card(c, 'small')));
 }
@@ -163,6 +180,7 @@ function revealBody(r) {
     case 'board_type': return boardTypeReveal(r);
     case 'equity': return equityReveal(r);
     case 'anchor': return anchorReveal(r);
+    case 'table': return tableReveal(r);
     default: return [];
   }
 }
@@ -249,6 +267,25 @@ function spotReveal(r) {
       : r.break_even === '' ? p('Calling already breaks even without winning anything more.')
         : p(`You would need to win about ${r.break_even} more when you hit for calling to break even.`),
     p('This decision was averaged over all possible remaining cards and combos, so the actual next card doesn\'t matter.'),
+  ];
+}
+
+function tableReveal(r) {
+  return [
+    h('p', { class: 'reveal-answer' }, 'Best: ', h('strong', {}, r.best)),
+    p(r.explanation),
+    r.loss
+      ? p(`You gave up ${r.loss} against the best option${r.band ? `: ${r.band}` : ''}.`)
+      : p('You picked the best option.'),
+    r.read_note ? p(r.read_note) : null,
+    h('ul', { class: 'table-options' }, r.options.map(o => h('li', { class: o.is_chosen ? 'chosen' : '' },
+      h('div', { class: 'tl-head' }, h('strong', {}, o.label), o.is_best ? h('span', { class: 'pill good' }, 'Best') : null),
+      h('div', { class: 'hint' }, `${o.ev_bb}, ${o.ev_pct}, ${o.share}`)))),
+    r.archetypes.length ? [
+      h('h3', { class: 'sub-title' }, 'By opponent type'),
+      h('ul', { class: 'facts' }, r.archetypes.map(line => h('li', {}, line))),
+    ] : null,
+    h('p', { class: 'hint' }, r.note),
   ];
 }
 

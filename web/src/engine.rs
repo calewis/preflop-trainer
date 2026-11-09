@@ -17,13 +17,14 @@ use poker_trainer::equity_skill::{equity_band, equity_bias, equity_rung, BIAS_MI
 use poker_trainer::generate::generate;
 use poker_trainer::grade::grade_timed;
 use poker_trainer::item::{Item, Skill};
-use poker_trainer::log::{format_attempt, parse_log, Attempt, CheckRef, Mode, LOG_HEADER};
+use poker_trainer::log::{format_attempt, parse_log, Attempt, CheckRef, ItemRef, Mode, LOG_HEADER};
 use poker_trainer::preflop::{preflop_answer, Action, Seat, Situation, CARD};
 use poker_trainer::progress::{
     all_stats, baseline_runs, current_step, drill_skills, has_baseline, next_baseline_run,
     pass_mark, BaselineRun, SkillStats, WindowMetrics, MIN_ATTEMPTS, PASS_ATTEMPTS, STEPS,
 };
 use poker_trainer::rng::Rng;
+use poker_trainer::table;
 use poker_trainer::schedule::{
     anchor_status, anchors_due, Origin, Planned, Session, SessionLimits, LEITNER_INTERVAL_DAYS,
 };
@@ -121,11 +122,12 @@ fn planned_json(p: Planned) -> V {
 
 /// An item with its question, answer format and every choice already graded.
 /// `board_type` is left ungraded: its answer depends on the response time, so
-/// it is graded when the answer arrives.
+/// it is graded when the answer arrives. `table` is left ungraded so the page
+/// holds no EV, verdict or best option before the player commits.
 fn bundle(item: &Item, make_template: &dyn Fn(&poker_trainer::grade::Outcome) -> Attempt) -> V {
     let format = poker_trainer::answer::answer_format(&item.question);
     let mut graded: Vec<(String, V)> = Vec::new();
-    if item.skill != Skill::BoardType {
+    if !matches!(item.skill, Skill::BoardType | Skill::Table) {
         if let poker_trainer::answer::AnswerFormat::Choice(options) = &format {
             for option in options {
                 if let Ok(outcome) = grade_timed(item, option.code, 0) {
@@ -485,7 +487,14 @@ impl Engine {
         let item = self.session_item(skill, seed);
         match grade_timed(&item, raw, response) {
             Ok(outcome) => {
-                let planned = Planned { skill, seed, origin: Origin::New };
+                // A retry stays a retry even if this answer's commit arrives late.
+                let origin = self
+                    .session
+                    .as_ref()
+                    .and_then(|live| live.current)
+                    .filter(|p| p.skill == skill && p.seed == seed)
+                    .map_or(Origin::New, |p| p.origin);
+                let planned = Planned { skill, seed, origin };
                 let template = format_attempt(&drill_template(planned, &outcome));
                 Ok(obj! { "outcome": present::outcome(&item, &outcome, template, response) })
             }
@@ -515,6 +524,17 @@ impl Engine {
         let response = parse_u64(arg(fields, 3)?, "response")?.min(u64::from(u32::MAX)) as u32;
         let mut attempt = Self::attempt_from_template(arg(fields, 1)?, now, response)?;
         let live = self.session.as_mut().ok_or("no session is open")?;
+        let expected = live.current.is_some_and(|p| p.skill == attempt.skill && attempt.item == ItemRef::Seed(p.seed));
+        if !expected {
+            // The player left this drill while its grade was still on its way, so a
+            // new session may have opened. The answer is real: log it, but leave
+            // that session's bookkeeping alone.
+            let ok = attempt.ok();
+            let answered = live.done.len();
+            let line = format_attempt(&attempt);
+            self.attempts.push(attempt);
+            return Ok(obj! { "line": line, "ok": ok, "answered": answered });
+        }
         let planned = live.current.take().ok_or("no item is waiting for an answer")?;
         attempt.mode = if planned.origin == Origin::SessionRetry {
             Mode::DrillRetry
@@ -594,6 +614,7 @@ impl Engine {
         let skill = skill_from(arg(fields, 1)?)?;
         let runs = checkup_runs(&self.attempts);
         let latest = runs.iter().rfind(|r| r.skill == skill);
+        let upcoming_form = latest.filter(|r| !r.complete).map_or_else(|| next_checkup_form(skill, &self.attempts), |r| r.form);
         let in_progress = latest.filter(|r| !r.complete).map(|r| {
             obj! { "answered": r.answered, "total": CHECKUP_LEN }
         });
@@ -606,6 +627,7 @@ impl Engine {
             "repeats": CHECKUP_REPEATS,
             "in_progress": in_progress,
             "history": history,
+            "reuse_note": (skill == Skill::Table && table::checkup_form_reuses_spots(upcoming_form)).then_some(table::REUSE_NOTE),
         })
     }
 
@@ -791,6 +813,9 @@ fn mark_lines(skill: Skill) -> Vec<String> {
     if let Some(m) = mark.max_mean_abs_error {
         parts.push(format!("average error at most {m:.0} points"));
     }
+    if skill == Skill::Table {
+        parts.push("robust and close spots only".to_string());
+    }
     parts
 }
 
@@ -953,6 +978,9 @@ fn checkup_report_json(s: &CheckupScore, earlier: &[&CheckupScore]) -> V {
     ];
     let compared = earlier.last().map(|prior| present::comparison(prior, s));
     json.push(("comparison".to_string(), compared.into()));
+    let reused = (s.skill == Skill::Table && table::checkup_form_reuses_spots(s.form))
+        .then_some(table::REUSE_NOTE);
+    json.push(("reused_note".to_string(), reused.into()));
     json.push(("originals".to_string(), CHECKUP_ORIGINALS.into()));
     V::Obj(json)
 }
@@ -1290,6 +1318,35 @@ mod tests {
         // The same seed at the second rung averages over hand types.
         let classes = dispatch("grade\x1fequity\x1f4611686018427387921\x1f45\x1f0");
         assert!(!classes.contains("\"combos\":null"), "{classes}");
+    }
+
+    #[test]
+    fn a_late_commit_of_a_retry_stays_a_retry() {
+        load("");
+        assert!(dispatch("session_open\x1f5\x1f1000000\x1fprice").contains("first"));
+        let field = |json: &str, key: &str| {
+            let needle = format!("\"{key}\":\"");
+            let start = json.find(&needle)? + needle.len();
+            Some(json[start..start + json[start..].find('"')?].to_string())
+        };
+        for step in 0..60u64 {
+            let next = dispatch(&format!("session_next\x1f{}", step * 100));
+            let (skill, seed, origin) = (field(&next, "skill").unwrap(), field(&next, "seed").unwrap(), field(&next, "origin").unwrap());
+            let graded = dispatch(&format!("grade\x1f{skill}\x1f{seed}\x1f99\x1f1500"));
+            let line = template(&graded);
+            if origin == "retry" {
+                // The player left: a new session replaces this one before the commit lands.
+                assert!(line.contains("\tdrill-retry\t"), "the template keeps the retry mode: {line}");
+                dispatch("session_open\x1f6\x1f1000000\x1fprice");
+                let committed = dispatch(&format!("commit\x1f{line}\x1f9000000\x1f1500"));
+                assert!(committed.contains("drill-retry"), "{committed}");
+                let export = dispatch("export").replace("\\t", "\t");
+                assert!(export.contains("9000000\tdrill-retry"), "logged as a retry, not a counted drill: {export}");
+                return;
+            }
+            assert!(dispatch(&format!("commit\x1f{line}\x1f{}\x1f1500", 2_000_000 + step)).contains("line"));
+        }
+        panic!("no retry was dealt");
     }
 
     #[test]

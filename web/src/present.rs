@@ -14,6 +14,7 @@ use poker_trainer::item::{
     EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question, Skill, SpotMode, SpotQuestion,
 };
 use poker_trainer::preflop::{action_label, Action, PreflopReason, Seat, Situation, CARD};
+use poker_trainer::table::{bb_text, ev_bb_text, TableAction, TableActionKind, TableGrade, TableQuestion, TableSeat, TableStreetName, Verdict, ASSUMPTION_NOTE};
 
 use crate::json::{obj, V};
 
@@ -32,6 +33,7 @@ pub fn skill_title(skill: Skill) -> &'static str {
         Skill::BoardType => "Reading the board",
         Skill::Equity => "Estimating equity",
         Skill::Anchor => "Key numbers",
+        Skill::Table => "Table spots",
     }
 }
 
@@ -150,6 +152,80 @@ pub fn question(q: &Question) -> V {
             "target_ms": BOARD_TYPE_TARGET_MS,
             "target_seconds": BOARD_TYPE_TARGET_MS / 1000,
         },
+        Question::Table(q) => table_question(q),
+    }
+}
+
+fn table_seat_name(seat: TableSeat, hero: TableSeat) -> &'static str {
+    if seat == hero {
+        "You"
+    } else {
+        seat.title()
+    }
+}
+
+fn table_action_text(a: &TableAction, hero: TableSeat) -> String {
+    let amount = bb_text(a.amount_cents);
+    let you = a.seat == hero;
+    let verb = |plain: &str, third: &str| if you { plain.to_string() } else { third.to_string() };
+    let what = match a.kind {
+        TableActionKind::Fold => verb("fold", "folds"),
+        TableActionKind::Check => verb("check", "checks"),
+        TableActionKind::Call => format!("{} {amount}bb", verb("call", "calls")),
+        TableActionKind::Bet => format!("{} {amount}bb", verb("bet", "bets")),
+        TableActionKind::Raise => format!("{} to {amount}bb", verb("raise", "raises")),
+    };
+    format!("{} {what}", table_seat_name(a.seat, hero))
+}
+
+fn table_action_kind(kind: TableActionKind) -> &'static str {
+    match kind {
+        TableActionKind::Fold => "fold",
+        TableActionKind::Check => "check",
+        TableActionKind::Call => "call",
+        TableActionKind::Bet => "bet",
+        TableActionKind::Raise => "raise",
+    }
+}
+
+fn table_question(q: &TableQuestion) -> V {
+    let streets: Vec<V> = q
+        .streets
+        .iter()
+        .map(|s| {
+            let actions: Vec<V> = s
+                .actions
+                .iter()
+                .map(|a| {
+                    obj! {
+                        "seat": table_seat_name(a.seat, q.seat),
+                        "hero": a.seat == q.seat,
+                        "kind": table_action_kind(a.kind),
+                        "amount": (a.amount_cents > 0).then(|| format!("{}bb", bb_text(a.amount_cents))),
+                        "text": table_action_text(a, q.seat),
+                    }
+                })
+                .collect();
+            obj! {
+                "name": s.street.title(),
+                "cards": cards(q.street_cards(s.street)),
+                "pot": (s.street != TableStreetName::Preflop).then(|| format!("Pot {}bb", bb_text(s.pot_start_cents))),
+                "actions": actions,
+            }
+        })
+        .collect();
+    obj! {
+        "kind": "table",
+        "players": q.players,
+        "seat": q.seat.title(),
+        "seat_sentence": q.seat.sentence(),
+        "behind": format!("{}bb", bb_text(q.behind_cents)),
+        "hero": holding(&q.hero),
+        "board": cards(&q.board),
+        "street": street_name(q.board.len()),
+        "streets": streets,
+        "pot": format!("{}bb", bb_text(q.pot_cents)),
+        "call": (q.call_cents > 0).then(|| format!("{}bb", bb_text(q.call_cents))),
     }
 }
 
@@ -440,6 +516,7 @@ fn reveal(item: &Item, o: &Outcome, response_ms: u32) -> V {
                 "break_even": break_even,
             }
         }
+        Reveal::Table(graded) => table_reveal(graded),
         Reveal::Equity { analysis, estimate_pct, signed_error, band, hit } => {
             equity_reveal(analysis, *estimate_pct, *signed_error, *band, *hit)
         }
@@ -488,6 +565,55 @@ fn points_number(value: f64) -> String {
 
 fn plain_percent(value: f64) -> String {
     format!("{}%", points_number((value * 10.0).round() / 10.0))
+}
+
+fn band_text(band: EvBand) -> &'static str {
+    match band {
+        EvBand::Close => "close, so it counts as correct",
+        EvBand::Small => "a small error",
+        EvBand::Mistake => "a mistake",
+        EvBand::Blunder => "a blunder",
+    }
+}
+
+fn table_reveal(g: &TableGrade) -> V {
+    let spot = g.spot;
+    let options: Vec<V> = spot
+        .options
+        .iter()
+        .enumerate()
+        .map(|(i, option)| {
+            obj! {
+                "label": option.label.as_str(),
+                "ev_bb": format!("{}bb", ev_bb_text(option.ev_milli_bb)),
+                "ev_pct": format!("{:.1}% of the pot", f64::from(option.ev_pct_tenths) / 10.0),
+                "share": format!("best at {:.1}% of simulated tables", f64::from(option.best_share_milli) / 10.0),
+                "is_best": i == spot.best,
+                "is_chosen": i == g.chosen,
+            }
+        })
+        .collect();
+    let archetypes: Vec<String> = if spot.verdict == Verdict::Depends {
+        spot.archetypes.iter().map(|row| row.sentence(spot)).collect()
+    } else {
+        Vec::new()
+    };
+    let loss = (g.chosen != spot.best).then(|| g.loss_text());
+    let read_note = g.read_note();
+    obj! {
+        "kind": "table",
+        "verdict": spot.verdict.code(),
+        "explanation": spot.verdict.explanation(),
+        "note": ASSUMPTION_NOTE,
+        "best": g.best().label.as_str(),
+        "chosen": g.chosen_option().label.as_str(),
+        "matched": g.chosen == spot.best,
+        "options": options,
+        "loss": loss,
+        "band": g.band.map(band_text),
+        "read_note": read_note,
+        "archetypes": archetypes,
+    }
 }
 
 fn equity_reveal(a: &EquityAnalysis, estimate_pct: f64, signed_error: f64, band: u8, hit: bool) -> V {

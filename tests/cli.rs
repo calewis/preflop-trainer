@@ -137,7 +137,7 @@ fn baseline_runs_and_compares_with_earlier_runs() {
     let progress = run(&home, &["progress"], "");
     let stdout = String::from_utf8_lossy(&progress.stdout);
     assert!(stdout.contains("Not enough data"), "{stdout}");
-    assert!(stdout.contains("Current step: 1 of 3"), "{stdout}");
+    assert!(stdout.contains("Current step: 1 of 4"), "{stdout}");
     assert!(stdout.contains("Run 2:"), "{stdout}");
     assert!(!stdout.to_lowercase().contains("win rate"));
     let _ = fs::remove_dir_all(&home);

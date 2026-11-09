@@ -38,7 +38,7 @@ exhaustive 7-card count and regenerating the anchor deck with its full preflop s
   history, and how your equity estimates are biased once there are 30 of them.
 
 Skills are `preflop`, `nuts`, `possible`, `made`, `beats`, `board_type`, `outs`, `price`,
-`hit`, `equity`, `anchor`, `spot` and `spot_mw`. Type `q` at any question to quit; every
+`hit`, `equity`, `anchor`, `spot`, `spot_mw` and `table`. Type `q` at any question to quit; every
 answer is already saved.
 
 Preflop drills are mostly 4-5 players with occasional 6-7. Your seat comes from how
@@ -101,3 +101,49 @@ for review.
   count as misses. A category retires after 3 straight correct answers inside 6 seconds,
   and comes back if a later answer is wrong or slower than 6 seconds. Pass mark: 95%
   correct, median at most 6 seconds.
+
+## Table spots (step 4)
+
+`table` deals realistic decisions from `data/spots_v2.txt`: 3,000 spots already graded
+offline by the engine in `engine/`. Each verdict is about a family of simulated opponents
+built on invented assumptions, not real players; `engine/README.md` says what the verdicts
+do and don't mean, and every reveal repeats the short version.
+
+A spot is chosen by seed, and a seed-derived suit permutation relabels your hand and the
+board, so a spot isn't remembered by its suits. The answer is the option's code (`fold`,
+`check`, `call`, `bet33`, `bet67`, `bet100`, `raise25.2`). The 1% rule below compares the
+options' EVs in big blinds over the pot; losses of 1% or more use the file's printed EV as a
+percent of the pot:
+
+- `robust`: correct if it is the best option or within 1% of the pot of it.
+- `close`: correct if within 1% of the pot of the best option.
+- `depends`: a read question. Correct if the option is best at 15% or more of simulated
+  tables, or within 1% of the pot of the best; other options are wrong.
+
+Drills deal about 45% robust, 40% depends, 15% close and don't repeat a spot seen in the last
+200 attempts while unseen spots remain, so missed spots are not asked again in the session or
+queued for review. Robust and close spots with `id % 3 == 0` are reserved for checkups (268
+spots); depends spots are never in checkups. A checkup is 26 robust and 14 close reserved
+spots plus 10 suit-permuted repeats, fixed by the form number. The reserved spots last six
+forms; from the seventh on, forms reuse some spots from earlier ones, and the result screen
+says so.
+
+Pass mark (starting guesses): over the last 40 graded attempts on robust or close spots, mean
+EV loss at most 3% of the pot and at most 2 blunders, and the latest checkup meets the same
+standard. Depends attempts do not count toward it.
+
+The library is produced by the engine's `library` binary (`library 20261108 8000000 16000
+5000 3000 30 target/library/spots_v2.txt 2 2` in `engine/`, about an hour on the 16-core
+desktop) and copied here. The format is documented in the file's header. It is compiled into
+the library with `include_str!` and parsed strictly on first use. To replace it, rerun
+that, copy the new file over, and update the expected counts in `tests/table.rs`.
+
+## Web app
+
+`index.html` and `app/` are a phone-first web app over the same library, compiled to
+`app/trainer.wasm`; JavaScript holds no poker rules or grading. Rebuild it with
+`web/build.sh` (which also stamps the `sw.js` cache version), and test with
+`web/test/run.py` and `web/test/mutation_check.py`. All of that runs on the desktop `hal`
+through `tools/hal-run`.
+
+Pass marks, EV bands, deal mixes and tolerances in this README are starting guesses.

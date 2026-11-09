@@ -1,6 +1,6 @@
 /* Poker Trainer service worker: precaches the app so it runs offline.
    web/build.sh rewrites the VERSION line. */
-const VERSION = '82a1106cad88';
+const VERSION = 'fc0a0948501f';
 const CACHE_PREFIX = 'poker-trainer-';
 const CACHE = CACHE_PREFIX + VERSION;
 // The origin is shared with other project pages, so only these caches are ours.
