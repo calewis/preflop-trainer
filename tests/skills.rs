@@ -1825,7 +1825,7 @@ fn baseline_items_all_grade_and_their_correct_answers_pass() {
 #[test]
 fn frozen_baseline_file_still_loads_and_round_trips() {
     // The generators moved on; the frozen file is what old runs are compared against.
-    assert_eq!(baseline::to_text(&baseline::load().unwrap()), baseline::BASELINE_TEXT);
+    assert_eq!(baseline::to_text(&baseline::load_file().unwrap()), baseline::BASELINE_TEXT);
 }
 
 #[test]
@@ -1969,4 +1969,69 @@ fn baseline_scores_group_by_run_section_and_step() {
     assert!(!runs[0].complete);
     assert_eq!(runs[0].steps[0].ok, 1);
     assert_eq!(runs[0].steps[1].ok, 1);
+}
+
+/// One logged answer per question of the frozen file, all 36 for an old run.
+fn old_baseline_rows(run: u32, right: impl Fn(&str) -> bool, keep: impl Fn(&str) -> bool) -> Vec<Attempt> {
+    baseline::load_file()
+        .unwrap()
+        .into_iter()
+        .filter(|entry| keep(&entry.id))
+        .enumerate()
+        .map(|(i, entry)| Attempt {
+            timestamp_ms: 1_000 + i as u64,
+            mode: Mode::Baseline,
+            baseline_run: Some(run),
+            skill: entry.item.skill,
+            item: ItemRef::Baseline(entry.id.clone()),
+            gen_version: 1,
+            correct: right(&entry.id),
+            close: false,
+            ev_loss_pct: None,
+            response_ms: 1,
+            answer: String::new(),
+            extra: Default::default(),
+        })
+        .collect()
+}
+
+#[test]
+fn an_old_36_question_run_is_scored_on_the_same_32_questions() {
+    // Retired questions marked wrong, everything else right: a true score of 32 of 32.
+    let log = old_baseline_rows(1, |id| !baseline::is_retired(id), |_| true);
+    assert_eq!(log.len(), 36);
+    let runs = baseline_runs(&log, baseline::BASELINE_SIZE);
+    assert_eq!((runs[0].answered, runs[0].ok), (32, 32));
+    assert!(runs[0].complete, "32 scored rows finish the run");
+    assert!(runs[0].sections.iter().all(|s| s.skill != Skill::Beats), "a retired question scored a section");
+    assert_eq!(runs[0].steps.iter().map(|s| s.answered).sum::<usize>(), 32);
+    // A new run on the 32 has the same total, so the two compare directly.
+    let new = old_baseline_rows(2, |_| true, |id| !baseline::is_retired(id));
+    let both: Vec<Attempt> = log.iter().chain(&new).cloned().collect();
+    let runs = baseline_runs(&both, baseline::BASELINE_SIZE);
+    assert_eq!((runs[0].answered, runs[1].answered, runs[1].complete), (32, 32, true));
+    // Old rows survive the log.
+    let lines: Vec<String> = log.iter().map(format_attempt).collect();
+    let text = format!("{}\n{}\n", poker_trainer::log::LOG_HEADER, lines.join("\n"));
+    assert_eq!(parse_log(&text).0.len(), 36, "retired rows still load");
+}
+
+#[test]
+fn a_half_finished_old_run_counts_only_its_32_question_answers() {
+    // Half of an old run, including a retired question: it isn't complete yet.
+    let half = old_baseline_rows(1, |_| true, |id| matches!(id, "b01" | "b02" | "b13" | "b14"));
+    let runs = baseline_runs(&half, baseline::BASELINE_SIZE);
+    assert_eq!((runs[0].answered, runs[0].complete), (2, false));
+    // Finishing the 32 scored questions completes it, whatever happened to the retired four.
+    let rest = old_baseline_rows(1, |_| true, |id| !baseline::is_retired(id) && !matches!(id, "b01" | "b02"));
+    let done: Vec<Attempt> = half.into_iter().chain(rest).collect();
+    let runs = baseline_runs(&done, baseline::BASELINE_SIZE);
+    assert_eq!((runs[0].answered, runs[0].complete), (32, true));
+    // A run with only retired answers has nothing to score, and doesn't reuse its number.
+    let only_retired = old_baseline_rows(5, |_| true, |id| id == "b13");
+    assert!(baseline_runs(&only_retired, baseline::BASELINE_SIZE).is_empty());
+    assert_eq!(poker_trainer::progress::next_baseline_run(&only_retired), 6);
+    assert_eq!(baseline::load().unwrap().len(), baseline::BASELINE_SIZE);
+    assert!(baseline::load().unwrap().iter().all(|e| !baseline::RETIRED_IDS.contains(&e.id.as_str())));
+    assert_eq!(baseline::load_file().unwrap().len(), 36, "the frozen file keeps every row");
 }

@@ -125,7 +125,7 @@ fn baseline_runs_and_compares_with_earlier_runs() {
     assert!(stdout.contains("first baseline"));
     assert!(!stdout.contains("Correct."), "no feedback during the test");
     let rows = log_rows(&home);
-    assert_eq!(rows.len(), 36);
+    assert_eq!(rows.len(), 32);
     assert!(rows.iter().all(|r| r[1] == "baseline" && r[2] == "1" && r[4].starts_with('b')));
 
     let second = run(&home, &["baseline"], &script);

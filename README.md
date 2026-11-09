@@ -26,8 +26,8 @@ exhaustive 7-card count and regenerating the anchor deck with its full preflop s
 
 ## Commands
 
-- `baseline`: 36 frozen questions in shuffled order with a random suit permutation.
-  No feedback until the end, then scores per section and step against earlier runs.
+- `baseline`: 32 frozen questions in shuffled order with a random suit permutation.
+  No feedback until the end, then scores per section and step against earlier runs. Four `beats` percentage questions (b13-b16) are retired: rows answering them stay in the log but no run, old or new, is scored on them.
 - `card`: prints the preflop card and its notes.
 - `drill [--skill NAME]... [--minutes N] [--items N] [--seed N]`: defaults to 10 minutes.
   `--skill` deals only the named skills. Without it, `preflop` plus every skill up to
@@ -100,7 +100,7 @@ Forms are distinct in seed, not always in content. `price` and `hit` have too fe
 distinct questions to avoid overlap with drills, and `anchor` is a fixed deck, so its
 checkups are the same 40 cards reshuffled. `hit` has only 24 distinct questions, so
 every form contains duplicates among its 40 originals and its reported standard error
-is optimistic. The 36 frozen baseline items predate the reservation and 12 of their
+is optimistic. The 32 frozen baseline items predate the reservation and 9 of their
 seeds have bit 63 set; they are served from the file and are never used as checkup
 seeds. Drill attempts logged with bit 63 set, from before the reservation, are skipped
 for review.

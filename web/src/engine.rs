@@ -1631,6 +1631,19 @@ mod tests {
     }
 
     #[test]
+    fn an_old_baseline_keeps_its_rows_but_is_scored_on_32_questions() {
+        let rows: String = (1..=36).map(|i| format!("{i}\tbaseline\t1\tbeats\tb{i:02}\t1\t1\t0\t\t1000\tx\n")).collect();
+        load(&rows);
+        let report = dispatch("baseline_report\x1f1");
+        assert!(report.contains("\"answered\":32") && report.contains("\"complete\":true"), "{report}");
+        let export = dispatch("export");
+        assert!(export.contains("b13") && export.contains("b16"), "retired rows stay in the export: {export}");
+        let opened = dispatch("baseline_open\x1f9");
+        assert!(opened.contains("\"count\":32") && opened.contains("\"run\":2"), "{opened}");
+        assert!(dispatch("home").contains("\"baseline_size\":32"));
+    }
+
+    #[test]
     fn a_session_retry_bundle_offers_no_reflection() {
         load("");
         assert!(dispatch("session_open\x1f5\x1f1000000\x1fspot").contains("first"));

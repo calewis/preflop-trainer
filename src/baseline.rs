@@ -1,4 +1,4 @@
-//! The frozen 36-item baseline test.
+//! The frozen baseline test: 32 questions from the 36 written to the file.
 
 use crate::cards::{cards_to_string, parse_cards, parse_holding, Card, Holding};
 use crate::classes::{OppClass, OppMix};
@@ -7,18 +7,26 @@ use crate::rng::Rng;
 
 pub const BASELINE_TEXT: &str = include_str!("../data/baseline_v1.txt");
 pub const BASELINE_SEED: u64 = 0x0B45_E11E_2026_0001;
-pub const BASELINE_MIX: [(Skill, usize); 9] = [
+pub const BASELINE_MIX: [(Skill, usize); 8] = [
     (Skill::Nuts, 5),
     (Skill::Possible, 3),
     (Skill::Made, 4),
-    (Skill::Beats, 4),
     (Skill::Outs, 6),
     (Skill::Price, 4),
     (Skill::Hit, 2),
     (Skill::Spot, 6),
     (Skill::SpotMw, 2),
 ];
-pub const BASELINE_SIZE: usize = 36;
+pub const BASELINE_SIZE: usize = 32;
+/// The `beats` percentage questions, no longer asked or scored. The file is frozen, so
+/// they stay in it, and rows answering them stay in the player's log, but every run,
+/// old or new, is scored on the same 32 questions.
+pub const RETIRED_IDS: [&str; 4] = ["b13", "b14", "b15", "b16"];
+
+/// True for a question in the file that is no longer asked or scored.
+pub fn is_retired(id: &str) -> bool {
+    RETIRED_IDS.contains(&id)
+}
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct BaselineItem {
@@ -201,9 +209,14 @@ pub fn parse_baseline(text: &str) -> Result<Vec<BaselineItem>, String> {
     Ok(items)
 }
 
-/// The frozen items compiled into the program.
-pub fn load() -> Result<Vec<BaselineItem>, String> {
+/// Every item in the frozen file, retired ones included.
+pub fn load_file() -> Result<Vec<BaselineItem>, String> {
     parse_baseline(BASELINE_TEXT)
+}
+
+/// The questions asked and scored: the frozen items minus [`RETIRED_IDS`].
+pub fn load() -> Result<Vec<BaselineItem>, String> {
+    Ok(load_file()?.into_iter().filter(|entry| !is_retired(&entry.id)).collect())
 }
 
 /// Applies a random suit permutation and shuffles the order, to reduce memorising.

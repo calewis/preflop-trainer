@@ -100,7 +100,7 @@ fn drills_and_reviews_never_serve_a_held_out_seed() {
 #[test]
 fn checkup_seeds_are_all_held_out_and_baseline_items_never_are_served_from_them() {
     let baseline_seeds: Vec<(Skill, u64)> =
-        baseline::load().unwrap().iter().map(|e| (e.item.skill, e.item.seed)).collect();
+        baseline::load_file().unwrap().iter().map(|e| (e.item.skill, e.item.seed)).collect();
     for skill in Skill::ALL {
         for form in 0..200 {
             let plan = checkup_plan(skill, form);
@@ -1272,7 +1272,7 @@ fn existing_generators_are_unchanged_by_the_new_skills() {
     // Skill::Spot's generator seed must not shift because new variants were added.
     assert_eq!(Skill::SpotMw as usize, 9);
     assert_eq!(Skill::BoardType as usize, 10);
-    assert_eq!(baseline::to_text(&baseline::load().unwrap()), baseline::BASELINE_TEXT);
+    assert_eq!(baseline::to_text(&baseline::load_file().unwrap()), baseline::BASELINE_TEXT);
 }
 
 #[test]

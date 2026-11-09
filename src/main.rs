@@ -26,7 +26,7 @@ use render::Style;
 const USAGE: &str = "poker-trainer: fundamentals drills for no-limit hold'em
 
 Usage:
-  poker-trainer baseline    take the frozen 36-item test
+  poker-trainer baseline    take the frozen 32-question test
   poker-trainer card        print the preflop card
   poker-trainer drill [--skill NAME]... [--minutes N] [--items N] [--seed N]
                             run a drill (10 minutes by default)

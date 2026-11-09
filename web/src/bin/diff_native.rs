@@ -135,7 +135,7 @@ fn origins(out: &mut Out) {
 
 fn baselines(out: &mut Out) {
     for seed in ["1", "991"] {
-        for index in 0..36 {
+        for index in 0..poker_trainer::baseline::BASELINE_SIZE {
             out.call(&["prepare_baseline", seed, &index.to_string()]);
         }
     }

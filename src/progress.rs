@@ -1,10 +1,11 @@
 //! Pass marks and progress. All marks and EV bands are starting guesses, to be
 //! tuned once there is real data.
 
+use crate::baseline;
 use crate::beats_me::counts_for_beats_me_mark;
 use crate::checkup::latest_checkup;
 use crate::item::Skill;
-use crate::log::{asks_confidence, Attempt, Confidence, Mode};
+use crate::log::{ItemRef, asks_confidence, Attempt, Confidence, Mode};
 use crate::read_price::counts_for_read_price_mark;
 use crate::table::Verdict;
 
@@ -331,11 +332,17 @@ pub struct BaselineRun {
     pub steps: Vec<StepScore>,
 }
 
+/// True for a baseline row that counts: rows for retired questions stay in the log
+/// but don't affect a score or whether a run is complete, so runs stay comparable.
+fn scored_baseline_row(attempt: &Attempt) -> bool {
+    attempt.mode == Mode::Baseline && !matches!(&attempt.item, ItemRef::Baseline(id) if baseline::is_retired(id))
+}
+
 /// Scores of every baseline run, oldest first.
 pub fn baseline_runs(attempts: &[Attempt], baseline_size: usize) -> Vec<BaselineRun> {
     let mut ids: Vec<u32> = attempts
         .iter()
-        .filter(|a| a.mode == Mode::Baseline)
+        .filter(|a| scored_baseline_row(a))
         .filter_map(|a| a.baseline_run)
         .collect();
     ids.sort_unstable();
@@ -344,7 +351,7 @@ pub fn baseline_runs(attempts: &[Attempt], baseline_size: usize) -> Vec<Baseline
         .map(|run| {
             let rows: Vec<&Attempt> = attempts
                 .iter()
-                .filter(|a| a.mode == Mode::Baseline && a.baseline_run == Some(run))
+                .filter(|a| scored_baseline_row(a) && a.baseline_run == Some(run))
                 .collect();
             let score = |skill: Skill| -> SectionScore {
                 let list: Vec<&&Attempt> = rows.iter().filter(|a| a.skill == skill).collect();

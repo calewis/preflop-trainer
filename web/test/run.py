@@ -785,12 +785,12 @@ def run_baseline(port=8954 + PORT_SHIFT, inspector_args=None):
         check_baseline_rows(rows_of(page), answers, "1")
         text = page.eval("document.body.innerText")
         print("baseline result:", text[:400].replace("\n", " | "))
-        check(re.search(r"\d+ of 36", text), "baseline report has no score")
+        check(re.search(r"\d+ of 32", text), "baseline report has no score")
         check("By section" in text and "By step" in text, "baseline report sections missing")
         check("first baseline" in text, "first baseline comparison text missing")
         inspector.snapshot("baseline-report")
         lines = log_lines(page)
-        check(lines == 36, f"baseline logged {lines} attempts")
+        check(lines == 32, f"baseline logged {lines} attempts")
         # A second run compares with the first.
         page.eval("location.hash = '#home'")
         page.wait("!!document.querySelector('.app-title')", 20)
@@ -798,7 +798,7 @@ def run_baseline(port=8954 + PORT_SHIFT, inspector_args=None):
         page.eval("location.hash = '#baseline'")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Begin')", 20)
         answers = complete_baseline(page, inspector)
-        check_baseline_rows(rows_of(page)[36:], answers, "2")
+        check_baseline_rows(rows_of(page)[32:], answers, "2")
         text = page.eval("document.body.innerText")
         check("Earlier runs" in text and "Run 1" in text, f"second run missing comparison: {text[:300]}")
         # Quitting early keeps what was answered.
@@ -815,7 +815,7 @@ def run_baseline(port=8954 + PORT_SHIFT, inspector_args=None):
         page.eval("document.querySelector('.top-bar button.back').click()")
         page.wait("document.body.innerText.includes('unfinished')", 20)
         results["baseline_ok"] = True
-        check(log_lines(page) == 73, f"after two runs and one answer: {log_lines(page)} lines")
+        check(log_lines(page) == 65, f"after two runs and one answer: {log_lines(page)} lines")
         results["baseline_errors"] = list(browser.errors)
         check(not browser.errors, f"baseline browser errors: {browser.errors[:5]}")
     finally:
@@ -824,8 +824,8 @@ def run_baseline(port=8954 + PORT_SHIFT, inspector_args=None):
 
 
 def check_baseline_rows(rows, answers, run):
-    check(len(rows) == 36, f"baseline logged {len(rows)} attempts")
-    check(len({r[4] for r in rows}) == 36 and all(re.fullmatch(r"b\d\d", r[4]) for r in rows), "baseline item ids wrong")
+    check(len(rows) == 32, f"baseline logged {len(rows)} attempts")
+    check(len({r[4] for r in rows}) == 32 and not {"b13", "b14", "b15", "b16"} & {r[4] for r in rows} and all(re.fullmatch(r"b\d\d", r[4]) for r in rows), "baseline item ids wrong")
     for row, (skill, answer) in zip(rows, answers):
         check(row[1] == "baseline" and row[2] == run, f"baseline row mode/run {row[1:3]}")
         check(row[3] == skill, f"baseline row skill {row[3]}, expected {skill}")
@@ -841,15 +841,15 @@ def complete_baseline(page, inspector):
         page.eval("location.hash = '#baseline'")
     page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Begin')", 20)
     page.eval("[...document.querySelectorAll('.btn.primary')].find(b => b.textContent === 'Begin').click()")
-    for i in range(36):
+    for i in range(32):
         page.wait(READY, 60)
         inspector.snapshot("baseline-item")
         current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
         counter = page.eval("document.querySelector('.top-bar .count').textContent")
-        check(counter == f"{i + 1} of 36", f"baseline counter {counter} at {i}")
+        check(counter == f"{i + 1} of 32", f"baseline counter {counter} at {i}")
         answers.append((current["bundle"]["skill"], answer_baseline_item(page, current)))
     page.wait("!!document.querySelector('.big-score')", 60)
-    check(page.eval("document.querySelector('.big-score').textContent").endswith("of 36"), "baseline not scored of 36")
+    check(page.eval("document.querySelector('.big-score').textContent").endswith("of 32"), "baseline not scored of 32")
     return answers
 
 
@@ -2671,16 +2671,16 @@ def run_doubletap():
         page.eval("[...document.querySelectorAll('.btn.primary')].find(b => b.textContent === 'Begin').click()")
         fired = 0
         answers = []
-        for i in range(36):
+        for i in range(32):
             page.wait(READY, 60)
             counter = page.eval("document.querySelector('.top-bar .count').textContent")
-            check(counter == f"{i + 1} of 36", f"phantom tap skipped a question: {counter} at {i}")
+            check(counter == f"{i + 1} of 32", f"phantom tap skipped a question: {counter} at {i}")
             current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
             answers.append((current["bundle"]["skill"], answer_baseline_item(page, current)))
-            if i < 35:
+            if i < 31:
                 fired += bool(page.eval(f"({PHANTOM_TAP})(c => c.baselineIndex === {i + 1})"))
         page.wait("!!document.querySelector('.big-score')", 60)
-        check(fired >= 15, f"only {fired} phantom taps landed")
+        check(fired >= 13, f"only {fired} phantom taps landed")
         check_baseline_rows(rows_of(page), answers, "1")
         results["doubletap_baseline_phantoms"] = fired
         # Start tapped twice still starts one drill that shows.
