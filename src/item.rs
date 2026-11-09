@@ -7,7 +7,7 @@ use crate::preflop::{Seat, Situation};
 use crate::table::TableQuestion;
 
 /// Bump whenever a generator's output for a given seed changes.
-pub const GEN_VERSION: u32 = 2;
+pub const GEN_VERSION: u32 = 3;
 
 /// Seeds with this bit set are held out for checkups: drills and reviews never
 /// serve one. See [`is_held_out`].

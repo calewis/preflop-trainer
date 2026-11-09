@@ -19,7 +19,7 @@ use poker_trainer::item::{
 use poker_trainer::log::Confidence;
 use poker_trainer::progress::{ReliabilityRow, RELIABILITY_MIN_RATINGS};
 use poker_trainer::reflection::{Prompt, ReflectionComparison, ReflectionGroup, REFLECTION_MIN_MISSES};
-use poker_trainer::preflop::{action_label, Action, PreflopReason, Seat, Situation, CARD};
+use poker_trainer::preflop::{action_label, why_line, Action, PreflopReason, Seat, Situation, CARD};
 use poker_trainer::table::{bb_text, ev_bb_text, TableAction, TableActionKind, TableGrade, TableQuestion, TableSeat, TableStreetName, Verdict, ASSUMPTION_NOTE};
 
 use crate::json::{obj, V};
@@ -109,10 +109,13 @@ pub fn question(q: &Question) -> V {
     match q {
         Question::Preflop { players, behind, situation, hand } => {
             let seat = Seat::from_behind(*behind);
-            let (kind, limpers) = match situation {
-                Situation::FoldedTo => ("folded", 0),
-                Situation::Limpers(n) => ("limpers", *n),
-                Situation::Raised => ("raised", 0),
+            let (kind, limpers, callers, in_position) = match situation {
+                Situation::FoldedTo => ("folded", 0, 0, false),
+                Situation::Limpers(n) => ("limpers", *n, 0, false),
+                Situation::Raised => ("raised", 0, 0, false),
+                Situation::RaisedCalled(n) => ("callers", 0, *n, false),
+                Situation::ThreeBet { in_position } => ("three_bet", 0, 0, *in_position),
+                Situation::FourBet => ("four_bet", 0, 0, false),
             };
             obj! {
                 "kind": "preflop",
@@ -122,6 +125,8 @@ pub fn question(q: &Question) -> V {
                 "seat_sentence": seat_sentence(seat),
                 "situation": kind,
                 "limpers": limpers,
+                "callers": callers,
+                "in_position": in_position,
                 "hand": holding(hand),
             }
         }
@@ -581,7 +586,8 @@ fn reveal(item: &Item, o: &Outcome, response_ms: u32) -> V {
         Reveal::Preflop { seat, situation, action, reason } => obj! {
             "kind": "preflop",
             "answer": action_label(*action, *seat, *situation),
-            "why": preflop_why(*seat, *reason),
+            "why": preflop_why(*seat, *action, *reason),
+            "chart": preflop_chart_line(*reason),
         },
         Reveal::Nuts { analysis, used_x, consistent, consistent_nuts } => {
             let next = analysis.next.as_ref().map(|(rank, list)| {
@@ -1146,8 +1152,6 @@ fn ahead_kind(kind: &AheadKind) -> V {
 
 const RAISE_ISO_NAME: &str = "the raise-over-limpers range";
 const LIMP_NAME: &str = "the limp-along range";
-const RERAISE_NAME: &str = "the reraise range";
-const CALL_NAME: &str = "the calling range";
 
 fn opening_range_name(seat: Seat) -> &'static str {
     match seat {
@@ -1165,14 +1169,20 @@ pub fn plain_note(text: &str) -> String {
     text.replace("raise iso.raise hands", &format!("raise hands in {RAISE_ISO_NAME}"))
         .replace("iso.raise", RAISE_ISO_NAME)
         .replace("iso.limp", LIMP_NAME)
-        .replace("the face_raise lines", "the reraise and calling ranges")
 }
 
-fn preflop_why(seat: Seat, reason: PreflopReason) -> String {
+/// The chart a reveal came from, written out, or nothing for the older charts.
+fn preflop_chart_line(reason: PreflopReason) -> Option<String> {
+    match reason {
+        PreflopReason::Chart { chart, .. } => Some(chart.summary()),
+        _ => None,
+    }
+}
+
+fn preflop_why(seat: Seat, action: Action, reason: PreflopReason) -> String {
     let open_line = CARD.open_range(seat).map_or("", |l| l.text);
     let open_name = opening_range_name(seat);
     let (raise_iso, limp) = (CARD.iso_raise.text, CARD.iso_limp.text);
-    let (reraise, call) = (CARD.reraise.text, CARD.call.text);
     match reason {
         PreflopReason::InOpen => format!("The hand is in {open_name}: {open_line}."),
         PreflopReason::NotInOpen => format!("The hand is not in {open_name}: {open_line}."),
@@ -1193,10 +1203,6 @@ fn preflop_why(seat: Seat, reason: PreflopReason) -> String {
         PreflopReason::BigBlindCheck => format!(
             "In the big blind with limpers, check anything outside {RAISE_ISO_NAME} ({raise_iso}). Checking is free."
         ),
-        PreflopReason::Reraise => format!("Facing a raise, reraise hands in {RERAISE_NAME}: {reraise}."),
-        PreflopReason::FaceRaiseCall => format!("Facing a raise, call hands in {CALL_NAME}: {call}."),
-        PreflopReason::NotInFaceRaise => format!(
-            "Facing a raise, the hand is in neither {RERAISE_NAME} ({reraise}) nor {CALL_NAME} ({call})."
-        ),
+        PreflopReason::Chart { chart, kind } => why_line(chart, action, kind).to_string(),
     }
 }

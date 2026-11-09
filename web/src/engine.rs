@@ -18,7 +18,7 @@ use poker_trainer::generate::generate;
 use poker_trainer::grade::{grade_choices, grade_timed};
 use poker_trainer::item::{Item, Skill};
 use poker_trainer::log::{asks_confidence, format_attempt, parse_log, Attempt, CheckRef, Confidence, ItemRef, Mode, LOG_HEADER};
-use poker_trainer::preflop::{preflop_answer, Action, Seat, Situation, CARD};
+use poker_trainer::preflop::{chart_for, preflop_answer, Action, Seat, Situation, CARD};
 use poker_trainer::progress::{
     all_stats, baseline_runs, current_step_for, drill_skills, has_baseline, next_baseline_run,
     pass_mark, reliability_table, BaselineRun, SkillStats, WindowMetrics, MIN_ATTEMPTS, PASS_ATTEMPTS, STEPS,
@@ -1070,10 +1070,18 @@ fn card_meta() -> V {
         .iter()
         .map(|&s| obj! { "code": s.code(), "title": present::seat_title(s) })
         .collect();
-    let situations: Vec<V> = [("folded", "Folded to you"), ("limpers", "Limpers"), ("raised", "Someone raised")]
-        .into_iter()
-        .map(|(code, title)| obj! { "code": code, "title": title })
-        .collect();
+    let situations: Vec<V> = [
+        ("folded", "Folded to you", false),
+        ("limpers", "Limpers", false),
+        ("raised", "One raise", false),
+        ("callers", "Raise + callers", false),
+        ("three_bet_ip", "3-bet, in position", true),
+        ("three_bet_oop", "3-bet, out of position", true),
+        ("four_bet", "4-bet", true),
+    ]
+    .into_iter()
+    .map(|(code, title, one_chart)| obj! { "code": code, "title": title, "one_chart": one_chart })
+    .collect();
     let notes: Vec<String> = CARD.notes().iter().map(|n| present::plain_note(n.text)).collect();
     let header: Vec<&str> = CARD
         .header
@@ -1095,6 +1103,10 @@ fn card_view(seat_code: &str, situation_code: &str) -> Reply {
         "folded" => Situation::FoldedTo,
         "limpers" => Situation::Limpers(1),
         "raised" => Situation::Raised,
+        "callers" => Situation::RaisedCalled(1),
+        "three_bet_ip" => Situation::ThreeBet { in_position: true },
+        "three_bet_oop" => Situation::ThreeBet { in_position: false },
+        "four_bet" => Situation::FourBet,
         _ => return Err("unknown situation".to_string()),
     };
     let mut codes_seen: Vec<char> = Vec::new();
@@ -1151,9 +1163,9 @@ fn card_view(seat_code: &str, situation_code: &str) -> Reply {
 fn legend_label(code: char, seat: Seat, situation: Situation) -> String {
     let word = |action| poker_trainer::preflop::action_label(action, seat, situation);
     match code {
-        'r' => match situation {
-            Situation::Raised => "Reraise".to_string(),
-            _ => "Raise".to_string(),
+        'r' => match chart_for(seat, situation) {
+            Some(chart) => chart.raise_word().to_string(),
+            None => "Raise".to_string(),
         },
         'c' => {
             let mut text = word(Action::Call).to_string();
@@ -1183,10 +1195,18 @@ fn card_lines(seat: Seat, situation: Situation) -> Vec<V> {
             line("Raise-over-limpers range".to_string(), &CARD.iso_raise),
             line("Limp-along range".to_string(), &CARD.iso_limp),
         ],
-        Situation::Raised => vec![
-            line("Reraise range".to_string(), &CARD.reraise),
-            line("Calling range".to_string(), &CARD.call),
-        ],
+        Situation::Raised | Situation::RaisedCalled(_) | Situation::ThreeBet { .. } | Situation::FourBet => {
+            let chart = chart_for(seat, situation).expect("these situations have a chart");
+            let (raise, call) = chart.lines();
+            let mut lines = vec![
+                line(format!("{}: {}", chart.title(), chart.raise_word()), raise),
+                line(format!("{}: call", chart.title()), call),
+            ];
+            if let Some(extra) = chart.extra_call() {
+                lines.push(line(format!("{}: also call", chart.title()), extra));
+            }
+            lines
+        }
     }
 }
 

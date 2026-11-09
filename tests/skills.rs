@@ -57,7 +57,7 @@ fn card_parses_to_expected_combo_counts() {
     assert_eq!(CARD.open_range(Seat::Button).unwrap().range.combo_count(), 326);
     assert_eq!(CARD.open_range(Seat::SmallBlind).unwrap().range.combo_count(), 258);
     assert!(CARD.open_range(Seat::BigBlind).is_none());
-    assert_eq!(CARD.notes().len(), 5);
+    assert_eq!(CARD.notes().len(), 8);
     assert!(CARD.note("note.big_blind").contains("check"));
 }
 
@@ -122,9 +122,15 @@ fn only_possible_situations_are_dealt() {
                     assert!((1..=3).contains(&n) && n <= acted, "{n} limpers with {acted} acted");
                 }
                 Situation::Raised => assert!(acted >= 1, "first to act can't face a raise"),
+                Situation::RaisedCalled(n) => assert!(acted >= 2 && n >= 1, "callers need a raiser and {n}"),
+                Situation::ThreeBet { .. } => assert_ne!(seat, Seat::BigBlind, "the big blind never opens"),
+                Situation::FourBet => assert!(acted >= 1, "a 4-bet needs a raise in front of you"),
             }
             if acted == 0 {
-                assert_eq!(situation, Situation::FoldedTo);
+                assert!(
+                    matches!(situation, Situation::FoldedTo | Situation::ThreeBet { .. }),
+                    "first to act can only open or be 3-bet after opening"
+                );
             }
         }
     }
@@ -206,12 +212,14 @@ fn big_blind_raises_iso_hands_and_checks_the_rest() {
 }
 
 #[test]
-fn facing_a_raise_uses_the_same_rules_in_every_seat() {
+fn facing_a_raise_agrees_on_the_clear_hands_in_every_seat() {
     for seat in [Seat::Middle, Seat::Button, Seat::BigBlind] {
         assert_eq!(pf(seat, Situation::Raised, "JhJd"), Action::Raise);
         assert_eq!(pf(seat, Situation::Raised, "AhKd"), Action::Raise);
         assert_eq!(pf(seat, Situation::Raised, "ThTd"), Action::Call);
-        assert_eq!(pf(seat, Situation::Raised, "KhQd"), Action::Fold);
+        // The big blind closes the action at a price that also calls KQo.
+        let kqo = if seat == Seat::BigBlind { Action::Call } else { Action::Fold };
+        assert_eq!(pf(seat, Situation::Raised, "KhQd"), kqo);
         assert_eq!(pf(seat, Situation::Raised, "KhQh"), Action::Call);
         assert_eq!(pf(seat, Situation::Raised, "7h2d"), Action::Fold);
     }
@@ -969,9 +977,11 @@ fn preflop_format(behind: u8, situation: Situation) -> Vec<(&'static str, &'stat
 #[test]
 fn preflop_answer_format_labels_c_for_the_situation() {
     assert_eq!(preflop_format(3, Situation::Limpers(1)), [("r", "raise"), ("c", "limp along"), ("f", "fold")]);
-    assert_eq!(preflop_format(3, Situation::Raised), [("r", "raise"), ("c", "call"), ("f", "fold")]);
+    assert_eq!(preflop_format(3, Situation::Raised), [("r", "3-bet"), ("c", "call"), ("f", "fold")]);
     assert_eq!(preflop_format(0, Situation::Limpers(2)), [("r", "raise"), ("c", "check")]);
-    assert_eq!(preflop_format(0, Situation::Raised), [("r", "raise"), ("c", "call"), ("f", "fold")]);
+    assert_eq!(preflop_format(0, Situation::Raised), [("r", "3-bet"), ("c", "call"), ("f", "fold")]);
+    assert_eq!(preflop_format(3, Situation::ThreeBet { in_position: true }), [("r", "4-bet"), ("c", "call"), ("f", "fold")]);
+    assert_eq!(preflop_format(3, Situation::FourBet), [("r", "all in"), ("c", "call"), ("f", "fold")]);
     assert_eq!(action_label(Action::Call, Seat::Cutoff, Situation::Limpers(1)), "limp along");
     assert_eq!(action_label(Action::Call, Seat::BigBlind, Situation::Limpers(1)), "check");
 }

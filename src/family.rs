@@ -18,6 +18,10 @@ pub const SIBLING_TRIES: u32 = 200;
 pub const SIBLING_EXACT_CHECKS: u32 = 3;
 /// Points of slack when an estimated equity is compared with a family's band.
 const SIBLING_ESTIMATE_SLACK: f64 = 3.0;
+/// Preflop families are a seat and a situation, so some are rare. The rarest,
+/// `early:4bet`, appears about once in 2,300 deals and misses this budget about
+/// a quarter of the time; a miss just falls back to a plain new item.
+pub const PREFLOP_SIBLING_TRIES: u32 = 3000;
 /// Cuts between the `outs` families, in outs.
 pub const OUTS_BANDS: [u32; 3] = [5, 9, 13];
 /// Cuts between the `equity` families, in points of true equity. Starting guesses.
@@ -55,6 +59,10 @@ fn preflop_family(behind: u8, situation: Situation) -> String {
         Situation::FoldedTo => "folded",
         Situation::Limpers(_) => "limpers",
         Situation::Raised => "raised",
+        Situation::RaisedCalled(_) => "callers",
+        Situation::ThreeBet { in_position: true } => "3bet_ip",
+        Situation::ThreeBet { in_position: false } => "3bet_oop",
+        Situation::FourBet => "4bet",
     };
     format!("{}:{situation}", Seat::from_behind(behind).code())
 }
@@ -137,14 +145,16 @@ pub fn table_family(q: &TableQuestion) -> String {
 
 /// A fresh non-held-out seed in `family`, by bounded rejection sampling from
 /// `base`. `avoid` is never returned, so a miss doesn't come back as itself.
-/// `None` once [`SIBLING_TRIES`] candidates are used up, or an `equity` search
+/// `None` once [`SIBLING_TRIES`] candidates ([`PREFLOP_SIBLING_TRIES`] for
+/// `preflop`) are used up, or an `equity` search
 /// has spent [`SIBLING_EXACT_CHECKS`] exact equities. The caller then deals a
 /// plain new item and the family waits for another session.
 pub fn find_sibling(skill: Skill, family: &str, base: u64, avoid: u64) -> Option<u64> {
     let mut rng = Rng::new(base ^ SIBLING_SALT);
     let rung = (skill == Skill::Equity || skill == Skill::BeatsMe).then(|| equity_rung_in_family(family)).flatten();
     let mut exact_left = SIBLING_EXACT_CHECKS;
-    for _ in 0..SIBLING_TRIES {
+    let tries = if skill == Skill::Preflop { PREFLOP_SIBLING_TRIES } else { SIBLING_TRIES };
+    for _ in 0..tries {
         let mut seed = rng.next_u64() & !HELD_OUT_BIT;
         if let Some(rung) = rung {
             seed = if skill == Skill::BeatsMe { beats_me_seed_with_rung(seed, rung) } else { equity_seed_with_rung(seed, rung) };

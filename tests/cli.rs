@@ -56,7 +56,7 @@ fn drill_logs_each_answer_and_ignores_invalid_input() {
         assert_eq!(row[2], "");
         assert_eq!(row[3], "price", "--skill deals only the named skill");
         assert!(row[4].parse::<u64>().is_ok());
-        assert_eq!(row[5], "2");
+        assert_eq!(row[5], "3");
         assert!(row[6] == "0" || row[6] == "1");
         assert!(row[9].parse::<u32>().unwrap() <= 60_000);
     }

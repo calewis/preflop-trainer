@@ -8,7 +8,7 @@ use poker_trainer::equity_skill::{EquityBias, BIAS_MIN_ATTEMPTS};
 use poker_trainer::beats_me::{mix_method, prompt_text, ways_method, Standing};
 use poker_trainer::grade::{any_of_suit_text, BeatsMeReveal, EquityAnalysis, EvBand, FlipFacts, Outcome, Reveal, BEATS_RANDOM_NOTE};
 use poker_trainer::item::{BeatsMeAsk, BeatsMeQuestion, ChainHand, ChainQuestion, ChainStage, EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question, Skill, SpotMode, SpotQuestion};
-use poker_trainer::preflop::{action_label, Action, PreflopReason, Seat, Range, Situation, CARD};
+use poker_trainer::preflop::{action_label, why_line, Action, CardLine, Chart, PreflopReason, Seat, Range, Situation, CARD};
 use poker_trainer::progress::{pass_mark, BaselineRun, SkillStats, PASS_ATTEMPTS, STEPS};
 use poker_trainer::table::{bb_text, checkup_form_reuses_spots, ev_bb_text, REUSE_NOTE, TableAction, TableActionKind, TableGrade, TableQuestion, TableSeat, TableStreetName, Verdict, ASSUMPTION_NOTE};
 
@@ -115,13 +115,22 @@ pub fn question(item: &Item, style: Style) -> String {
                 Situation::Limpers(1) => "1 player has limped in front of you.".to_string(),
                 Situation::Limpers(n) => format!("{n} players have limped in front of you."),
                 Situation::Raised => "Someone has raised in front of you.".to_string(),
+                Situation::RaisedCalled(1) => "Someone has raised and 1 player has called.".to_string(),
+                Situation::RaisedCalled(n) => format!("Someone has raised and {n} players have called."),
+                Situation::ThreeBet { in_position: true } => {
+                    "You opened and got 3-bet by a blind. You will act last after the flop.".to_string()
+                }
+                Situation::ThreeBet { in_position: false } => {
+                    "You opened and got 3-bet. You will act first after the flop.".to_string()
+                }
+                Situation::FourBet => "You 3-bet and got 4-bet.".to_string(),
             };
-            format!(
-                "Table of {players}. You are {} with {} still to act behind you.\nYour hand: {}\n{spot}",
-                seat_name(seat),
-                players_word(*behind),
-                style.holding(*hand)
-            )
+            let table = if matches!(situation, Situation::ThreeBet { .. } | Situation::FourBet) {
+                format!("Table of {players}. You are {}.", seat_name(seat))
+            } else {
+                format!("Table of {players}. You are {} with {} still to act behind you.", seat_name(seat), players_word(*behind))
+            };
+            format!("{table}\nYour hand: {}\n{spot}", style.holding(*hand))
         }
         Question::Nuts { board } => format!(
             "Board: {}\nName the best possible holding right now.",
@@ -673,7 +682,6 @@ fn preflop_reveal(lines: &mut Vec<String>, seat: Seat, situation: Situation, act
     let open_line = CARD.open_range(seat).map_or("", |l| l.text);
     let open_name = opening_range_name(seat);
     let (raise_iso, limp) = (CARD.iso_raise.text, CARD.iso_limp.text);
-    let (reraise, call) = (CARD.reraise.text, CARD.call.text);
     let why = match reason {
         PreflopReason::InOpen => format!("The hand is in {open_name}: {open_line}."),
         PreflopReason::NotInOpen => format!("The hand is not in {open_name}: {open_line}."),
@@ -694,19 +702,17 @@ fn preflop_reveal(lines: &mut Vec<String>, seat: Seat, situation: Situation, act
         PreflopReason::BigBlindCheck => format!(
             "In the big blind with limpers, check anything outside {RAISE_ISO_NAME} ({raise_iso}). Checking is free."
         ),
-        PreflopReason::Reraise => format!("Facing a raise, reraise hands in {RERAISE_NAME}: {reraise}."),
-        PreflopReason::FaceRaiseCall => format!("Facing a raise, call hands in {CALL_NAME}: {call}."),
-        PreflopReason::NotInFaceRaise => format!(
-            "Facing a raise, the hand is in neither {RERAISE_NAME} ({reraise}) nor {CALL_NAME} ({call})."
-        ),
+        PreflopReason::Chart { chart, kind } => {
+            lines.push(why_line(chart, action, kind).to_string());
+            lines.push(chart.summary());
+            return;
+        }
     };
     lines.push(why);
 }
 
 const RAISE_ISO_NAME: &str = "the raise-over-limpers range";
 const LIMP_NAME: &str = "the limp-along range";
-const RERAISE_NAME: &str = "the reraise range";
-const CALL_NAME: &str = "the calling range";
 
 fn opening_range_name(seat: Seat) -> &'static str {
     match seat {
@@ -735,7 +741,6 @@ fn plain_note(text: &str) -> String {
     text.replace("raise iso.raise hands", &format!("raise hands in {RAISE_ISO_NAME}"))
         .replace("iso.raise", RAISE_ISO_NAME)
         .replace("iso.limp", LIMP_NAME)
-        .replace("the face_raise lines", "the reraise and calling ranges")
 }
 
 /// `142 combos (10.7% of hands)`.
@@ -761,10 +766,18 @@ pub fn card_text() -> String {
             ));
         }
     }
-    let rows = [
-        ("One or more limpers", [("Raise-over-limpers range", &CARD.iso_raise), ("Limp-along range", &CARD.iso_limp)]),
-        ("Someone raised", [("Reraise range", &CARD.reraise), ("Calling range", &CARD.call)]),
-    ];
+    let mut rows: Vec<(String, Vec<(String, &CardLine)>)> = vec![(
+        "One or more limpers".to_string(),
+        vec![("Raise-over-limpers range".to_string(), &CARD.iso_raise), ("Limp-along range".to_string(), &CARD.iso_limp)],
+    )];
+    for chart in Chart::ALL {
+        let (raise, call) = chart.lines();
+        let mut lines = vec![(format!("{} range", chart.raise_word()), raise), ("Call range".to_string(), call)];
+        if let Some(extra) = chart.extra_call() {
+            lines.push(("Also call here".to_string(), extra));
+        }
+        rows.push((chart.title().to_string(), lines));
+    }
     for (title, lines) in rows {
         out.push_str(&format!("\n{title}\n"));
         for (name, line) in lines {
@@ -1018,7 +1031,7 @@ mod tests {
     use poker_trainer::item::Skill;
 
     const PLAIN: Style = Style { color: false };
-    const INTERNAL_KEYS: [&str; 5] = ["iso.", "open.", "face_raise", "note.", "small_blind"];
+    const INTERNAL_KEYS: [&str; 7] = ["iso.", "open.", "face_raise", "face_callers", "three_bet", "note.", "small_blind"];
 
     fn cards(text: &str) -> Vec<Card> {
         parse_cards(text).unwrap()
@@ -1057,8 +1070,11 @@ mod tests {
         assert!(text.contains("Middle position"), "{text}");
         assert!(text.contains("Raise-over-limpers range"), "{text}");
         assert!(text.contains("Limp-along range"), "{text}");
-        assert!(text.contains("Reraise range"), "{text}");
-        assert!(text.contains("Calling range"), "{text}");
+        assert!(text.contains("3-bet range"), "{text}");
+        assert!(text.contains("Call range"), "{text}");
+        for chart in Chart::ALL {
+            assert!(text.contains(chart.title()), "{text}");
+        }
         // 142 of 1,326 combinations.
         assert!(text.contains("142 combos (10.7% of hands)"), "{text}");
         assert!(text.contains("raise hands in the raise-over-limpers range"), "{text}");
@@ -1083,8 +1099,13 @@ mod tests {
         assert!(revealed(&item(4, Situation::FoldedTo, "KhQd"), "r").contains("your middle-position opening range"));
         assert!(revealed(&item(3, Situation::Limpers(1), "AhJd"), "r").contains("the raise-over-limpers range"));
         assert!(revealed(&item(3, Situation::Limpers(1), "Ah2h"), "c").contains("the limp-along range"));
-        assert!(revealed(&item(3, Situation::Raised, "JhJd"), "r").contains("the reraise range"));
-        assert!(revealed(&item(3, Situation::Raised, "ThTd"), "c").contains("the calling range"));
+        // The new charts give one line about the hand and the chart itself.
+        let reraise = revealed(&item(3, Situation::Raised, "JhJd"), "r");
+        assert!(reraise.contains("Answer: 3-bet."), "{reraise}");
+        assert!(reraise.contains("Jacks are ahead"), "{reraise}");
+        assert!(reraise.contains(Chart::Position.title()), "{reraise}");
+        let blinds = revealed(&item(0, Situation::Raised, "ThTd"), "c");
+        assert!(blinds.contains(Chart::BlindsBb.title()), "{blinds}");
     }
 
     #[test]
@@ -1250,8 +1271,11 @@ mod tests {
             })
         };
         assert_eq!(hint(3, Situation::Limpers(1)), "r raise, c limp along, f fold");
-        assert_eq!(hint(3, Situation::Raised), "r raise, c call, f fold");
+        assert_eq!(hint(3, Situation::Raised), "r 3-bet, c call, f fold");
         assert_eq!(hint(0, Situation::Limpers(1)), "r raise, c check");
-        assert_eq!(hint(0, Situation::Raised), "r raise, c call, f fold");
+        assert_eq!(hint(0, Situation::Raised), "r 3-bet, c call, f fold");
+        assert_eq!(hint(3, Situation::RaisedCalled(1)), "r 3-bet, c call, f fold");
+        assert_eq!(hint(3, Situation::ThreeBet { in_position: false }), "r 4-bet, c call, f fold");
+        assert_eq!(hint(3, Situation::FourBet), "r all in, c call, f fold");
     }
 }

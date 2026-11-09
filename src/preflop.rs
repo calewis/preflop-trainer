@@ -68,7 +68,15 @@ impl Seat {
 pub enum Situation {
     FoldedTo,
     Limpers(u8),
+    /// One raise in front of you and nobody has called it yet.
     Raised,
+    /// A raise and this many callers (1 to 3) in front of you.
+    RaisedCalled(u8),
+    /// You opened and were 3-bet. In position means you did not open the small
+    /// blind and the 3-bettor is in a blind.
+    ThreeBet { in_position: bool },
+    /// You 3-bet and were 4-bet.
+    FourBet,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -92,9 +100,12 @@ impl Action {
 /// limping along, and calling in the big blind without a raise is a check.
 pub fn action_label(action: Action, seat: Seat, situation: Situation) -> &'static str {
     match (action, situation) {
+        (Action::Raise, Situation::Raised | Situation::RaisedCalled(_)) => "3-bet",
+        (Action::Raise, Situation::ThreeBet { .. }) => "4-bet",
+        (Action::Raise, Situation::FourBet) => "all in",
         (Action::Raise, _) => "raise",
         (Action::Fold, _) => "fold",
-        (Action::Call, Situation::Raised) => "call",
+        (Action::Call, Situation::Raised | Situation::RaisedCalled(_) | Situation::ThreeBet { .. } | Situation::FourBet) => "call",
         (Action::Call, _) if seat == Seat::BigBlind => "check",
         (Action::Call, Situation::Limpers(_)) => "limp along",
         (Action::Call, Situation::FoldedTo) => "call",
@@ -114,9 +125,25 @@ pub enum PreflopReason {
     NotInIso,
     BigBlindIsoRaise,
     BigBlindCheck,
-    Reraise,
-    FaceRaiseCall,
-    NotInFaceRaise,
+    /// The answer came from one of the facing-action charts.
+    Chart { chart: Chart, kind: HandKind },
+}
+
+/// The chart that answers a situation with action in front of you, or `None`
+/// where the opening and limper lines answer instead.
+pub fn chart_for(seat: Seat, situation: Situation) -> Option<Chart> {
+    match situation {
+        Situation::FoldedTo | Situation::Limpers(_) => None,
+        Situation::Raised if seat == Seat::BigBlind => Some(Chart::BlindsBb),
+        Situation::Raised if seat == Seat::SmallBlind => Some(Chart::Blinds),
+        Situation::Raised if matches!(seat, Seat::Early | Seat::Middle) => Some(Chart::PositionEarly),
+        Situation::Raised => Some(Chart::Position),
+        Situation::RaisedCalled(_) if seat == Seat::BigBlind => Some(Chart::CallersBb),
+        Situation::RaisedCalled(_) => Some(Chart::Callers),
+        Situation::ThreeBet { in_position: true } => Some(Chart::ThreeBetIp),
+        Situation::ThreeBet { in_position: false } => Some(Chart::ThreeBetOop),
+        Situation::FourBet => Some(Chart::FourBet),
+    }
 }
 
 pub fn preflop_answer(seat: Seat, situation: Situation, hand: Holding) -> (Action, PreflopReason) {
@@ -147,15 +174,379 @@ pub fn preflop_answer(seat: Seat, situation: Situation, hand: Holding) -> (Actio
                 (Action::Fold, PreflopReason::NotInIso)
             }
         }
-        Situation::Raised => {
-            if card.reraise.range.contains_holding(hand) {
-                (Action::Raise, PreflopReason::Reraise)
-            } else if card.call.range.contains_holding(hand) {
-                (Action::Call, PreflopReason::FaceRaiseCall)
-            } else {
-                (Action::Fold, PreflopReason::NotInFaceRaise)
-            }
+        Situation::Raised | Situation::RaisedCalled(_) | Situation::ThreeBet { .. } | Situation::FourBet => {
+            let chart = chart_for(seat, situation).expect("this situation has a chart");
+            (chart.action(hand), PreflopReason::Chart { chart, kind: HandKind::of(hand) })
         }
+    }
+}
+
+/// A facing-action chart on the card: a raise list and a call list, fold the rest.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Chart {
+    /// One raise, from the cutoff or button.
+    Position,
+    /// One raise, from an early or middle seat: a much tighter call list.
+    PositionEarly,
+    Blinds,
+    /// One raise, closing the action from the big blind: two more calls.
+    BlindsBb,
+    Callers,
+    /// Callers, closing the action from the big blind: two more calls.
+    CallersBb,
+    ThreeBetIp,
+    ThreeBetOop,
+    FourBet,
+}
+
+impl Chart {
+    pub const ALL: [Chart; 9] = [
+        Chart::Position,
+        Chart::PositionEarly,
+        Chart::Blinds,
+        Chart::BlindsBb,
+        Chart::Callers,
+        Chart::CallersBb,
+        Chart::ThreeBetIp,
+        Chart::ThreeBetOop,
+        Chart::FourBet,
+    ];
+
+    /// The raise line and the call line of this chart.
+    pub fn lines(self) -> (&'static CardLine, &'static CardLine) {
+        let card = &CARD;
+        match self {
+            Chart::Position => (&card.reraise, &card.call),
+            Chart::PositionEarly => (&card.reraise, &card.early_call),
+            Chart::Blinds | Chart::BlindsBb => (&card.blinds_reraise, &card.blinds_call),
+            Chart::Callers | Chart::CallersBb => (&card.callers_reraise, &card.callers_call),
+            Chart::ThreeBetIp => (&card.three_bet_ip_raise, &card.three_bet_ip_call),
+            Chart::ThreeBetOop => (&card.three_bet_oop_raise, &card.three_bet_oop_call),
+            Chart::FourBet => (&card.four_bet_raise, &card.four_bet_call),
+        }
+    }
+
+    /// The extra call line some charts add to their call list.
+    pub fn extra_call(self) -> Option<&'static CardLine> {
+        match self {
+            Chart::BlindsBb => Some(&CARD.blinds_bb_call),
+            Chart::CallersBb => Some(&CARD.callers_bb_call),
+            _ => None,
+        }
+    }
+
+    /// The one action this chart gives a hand.
+    pub fn action(self, hand: Holding) -> Action {
+        let (raise, call) = self.lines();
+        if raise.range.contains_holding(hand) {
+            Action::Raise
+        } else if call.range.contains_holding(hand) || self.extra_call().is_some_and(|l| l.range.contains_holding(hand)) {
+            Action::Call
+        } else {
+            Action::Fold
+        }
+    }
+
+    /// Title for the card, in plain words.
+    pub fn title(self) -> &'static str {
+        match self {
+            Chart::Position => "One raise, cutoff or button",
+            Chart::PositionEarly => "One raise, early or middle seat",
+            Chart::Blinds => "One raise, from the blinds",
+            Chart::BlindsBb => "One raise, from the big blind",
+            Chart::Callers => "A raise and callers",
+            Chart::CallersBb => "A raise and callers, big blind",
+            Chart::ThreeBetIp => "You opened and got 3-bet, in position",
+            Chart::ThreeBetOop => "You opened and got 3-bet, out of position",
+            Chart::FourBet => "You 3-bet and got 4-bet",
+        }
+    }
+
+    /// The word for this chart's raise line.
+    pub fn raise_word(self) -> &'static str {
+        match self {
+            Chart::ThreeBetIp | Chart::ThreeBetOop => "4-bet",
+            Chart::FourBet => "All in",
+            _ => "3-bet",
+        }
+    }
+
+    /// `3-bet JJ+ AQs+ AKo. Call 22 33. Fold the rest.`, the chart as a line.
+    pub fn summary(self) -> String {
+        let (raise, call) = self.lines();
+        match self.extra_call() {
+            Some(extra) => format!(
+                "{}. {} {}. Call {}. Also call {} here. Fold the rest.",
+                self.title(),
+                self.raise_word(),
+                raise.text,
+                call.text,
+                extra.text
+            ),
+            None => format!("{}. {} {}. Call {}. Fold the rest.", self.title(), self.raise_word(), raise.text, call.text),
+        }
+    }
+}
+
+/// What a hand is, for choosing the line that explains its action.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum HandKind {
+    KingsOrAces,
+    Queens,
+    Jacks,
+    Tens,
+    MiddlePair,
+    SmallPair,
+    AceKing,
+    AceQueen,
+    SuitedAce,
+    SuitedBroadway,
+    SuitedConnector,
+    OtherSuited,
+    OffsuitBroadway,
+    OffsuitAce,
+    OtherOffsuit,
+}
+
+const TEN: u8 = 8;
+const JACK: u8 = 9;
+const QUEEN: u8 = 10;
+const KING: u8 = 11;
+const ACE: u8 = 12;
+/// 7 is the lowest middle pair.
+const SEVEN: u8 = 5;
+
+impl HandKind {
+    pub fn of(hand: Holding) -> HandKind {
+        let (a, b) = (hand[0].rank(), hand[1].rank());
+        let (high, low) = if a >= b { (a, b) } else { (b, a) };
+        if high == low {
+            return match high {
+                ACE | KING => HandKind::KingsOrAces,
+                QUEEN => HandKind::Queens,
+                JACK => HandKind::Jacks,
+                TEN => HandKind::Tens,
+                r if r >= SEVEN => HandKind::MiddlePair,
+                _ => HandKind::SmallPair,
+            };
+        }
+        if high == ACE && low == KING {
+            return HandKind::AceKing;
+        }
+        if high == ACE && low == QUEEN {
+            return HandKind::AceQueen;
+        }
+        let suited = hand[0].suit() == hand[1].suit();
+        match (high, suited) {
+            (ACE, true) => HandKind::SuitedAce,
+            (ACE, false) if low >= TEN => HandKind::OffsuitBroadway,
+            (ACE, false) => HandKind::OffsuitAce,
+            _ if low >= TEN && suited => HandKind::SuitedBroadway,
+            _ if low >= TEN => HandKind::OffsuitBroadway,
+            _ if suited && high - low == 1 => HandKind::SuitedConnector,
+            _ if suited => HandKind::OtherSuited,
+            _ => HandKind::OtherOffsuit,
+        }
+    }
+}
+
+/// One line on why a chart gives this answer for this kind of hand, written about
+/// what the hand does in the spot. The tests check, per chart cell, computed facts about
+/// the hands that reach the cell and some position words in the text. They do not parse
+/// the sentence, so a reworded line needs its claims reviewed by hand.
+pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
+    use Action::{Call, Fold, Raise};
+    use Chart::{Blinds, BlindsBb, Callers, CallersBb, FourBet, Position, PositionEarly, ThreeBetIp, ThreeBetOop};
+    use HandKind::*;
+    match (chart, action, kind) {
+        // Facing one raise. The same raises at every seat.
+        (Position | PositionEarly | Blinds | BlindsBb, Raise, KingsOrAces) => {
+            "Aces or kings are ahead of almost every hand that raises or calls, so 3-bet and build the pot now."
+        }
+        (Position | PositionEarly | Blinds | BlindsBb, Raise, Queens) => {
+            "Queens are ahead of nearly every hand that raises or calls, so 3-bet and make weaker hands pay now."
+        }
+        (Position | PositionEarly | Blinds | BlindsBb, Raise, Jacks) => {
+            "Jacks are ahead of most hands that raise or call, so 3-bet before overcards can come."
+        }
+        (Position | PositionEarly | Blinds | BlindsBb, Raise, AceKing) => {
+            "Ace-king dominates the aces and kings that call, so 3-bet and build a pot you flop top pair in."
+        }
+        (Position | PositionEarly | Blinds | BlindsBb, Raise, AceQueen) => {
+            "Ace-queen suited dominates the weaker aces that call, so 3-bet and make them pay."
+        }
+        (Position | PositionEarly, Call, Tens) => {
+            "Tens flop an overcard too often to build a big pot, so call and see the flop with position."
+        }
+        (Blinds | BlindsBb, Call, Tens) => "Tens flop an overcard too often to build a big pot, so call from the blinds.",
+        (Position | PositionEarly, Call, MiddlePair | SmallPair) => {
+            "A pair flops a set about one time in eight, and in position a set wins a big pot from players who call too much."
+        }
+        (Blinds | BlindsBb, Call, MiddlePair | SmallPair) => {
+            "A pair flops a set about one time in eight, and with deep stacks a set wins a big pot even from the blinds."
+        }
+        (Position | PositionEarly, Call, AceQueen) => {
+            "Ace-queen offsuit is strong enough to call in position, but it is behind the hands that 3-bet it."
+        }
+        (Blinds | BlindsBb, Call, AceQueen) => {
+            "Ace-queen offsuit is strong enough to call, but it is behind the hands that 3-bet it."
+        }
+        (Position | PositionEarly, Call, SuitedAce) => {
+            "A suited ace makes the nut flush draw, and position makes it easier to play."
+        }
+        (Blinds | BlindsBb, Call, SuitedAce) => "A suited ace makes the nut flush draw, even out of position.",
+        (Position | PositionEarly, Call, SuitedBroadway) => {
+            "Two suited high cards make strong pairs and big draws, and position lets you use them."
+        }
+        (Blinds | BlindsBb, Call, SuitedBroadway) => {
+            "Two suited high cards make strong pairs and big draws, enough to play from the blinds."
+        }
+        (Position, Call, SuitedConnector) => {
+            "Suited connectors make straights and flushes that get paid, and position lets you use them."
+        }
+        (Blinds | BlindsBb, Call, SuitedConnector) => {
+            "Suited connectors make straights and flushes that get paid, and you already have money in the pot."
+        }
+
+        // An early seat folds hands the cutoff and button call: players are still to act behind you.
+        (PositionEarly, Fold, SmallPair) => {
+            "With players still to act behind you, a small pair needs a flopped set, and they can raise that chance away."
+        }
+        (PositionEarly, Fold, SuitedAce) => {
+            "With players still to act behind you, a weak suited ace is dominated by the better aces that raise."
+        }
+        (PositionEarly, Fold, SuitedBroadway) => {
+            "With players still to act behind you, these suited cards are dominated by the bigger hands that raise."
+        }
+        (PositionEarly, Fold, SuitedConnector) => {
+            "With players still to act behind you, a suited connector is usually behind the raiser."
+        }
+
+        // Facing a raise and callers.
+        (BlindsBb, Call, OffsuitBroadway) => {
+            "Ace-jack and king-queen offsuit have the equity to call at the big blind's price."
+        }
+
+        (Callers | CallersBb, Raise, KingsOrAces) => {
+            "Aces or kings are strong enough to 3-bet even with callers, and you want more money in while they are ahead."
+        }
+        (Callers | CallersBb, Raise, Queens) => {
+            "Queens are strong enough to 3-bet with callers in, and a 3-bet thins the field while you are ahead."
+        }
+        (Callers | CallersBb, Raise, AceKing) => {
+            "Ace-king makes top pair with the best kicker, so 3-bet and thin the field while it is ahead."
+        }
+        (Callers | CallersBb, Call, Jacks) => {
+            "Jacks flop an overcard more often than not, so with callers in you call and see the flop."
+        }
+        (Callers | CallersBb, Call, Tens) => {
+            "Tens flop an overcard more often than not, so with callers in you call and see the flop."
+        }
+        (Callers | CallersBb, Call, MiddlePair | SmallPair) => {
+            "With callers in, a flopped set wins a bigger pot, and a pair flops one about one time in eight."
+        }
+        (Callers | CallersBb, Call, AceQueen) => {
+            "Ace-queen is good with callers in, but a 3-bet risks running into ace-king, so call and see the flop."
+        }
+        (Callers | CallersBb, Call, SuitedAce) => {
+            "With callers the pot is bigger, so the nut flush draw from a suited ace pays more."
+        }
+        (Callers | CallersBb, Call, SuitedBroadway) => {
+            "Suited high cards make big hands that win a bigger pot with callers in."
+        }
+        (Callers | CallersBb, Call, SuitedConnector) => {
+            "Suited connectors make straights and flushes that win a bigger pot with callers in."
+        }
+        (CallersBb, Call, OffsuitBroadway) => {
+            "Ace-jack and king-queen offsuit have the equity to close the action at the big blind's price."
+        }
+        (Callers | CallersBb, Fold, OffsuitBroadway | OffsuitAce) => {
+            "Offsuit high cards are dominated with this many hands in, so top pair is often second best."
+        }
+
+        // You opened and got 3-bet.
+        (ThreeBetIp | ThreeBetOop, Raise, KingsOrAces) => {
+            "Aces or kings are ahead of most of the hands that 3-bet here, so 4-bet and get more money in."
+        }
+        (ThreeBetIp, Call, Queens) => {
+            "Queens are strong but lose to the biggest hands that 3-bet here, so call and keep the pot smaller."
+        }
+        (ThreeBetOop, Call, Queens) => {
+            "Queens are strong but lose to the biggest hands that 3-bet here, so call and play a smaller pot."
+        }
+        (ThreeBetIp, Call, Jacks | Tens) => {
+            "This pair beats some of the hands that 3-bet here but not the biggest ones, so call and use position."
+        }
+        (ThreeBetOop, Call, Jacks | Tens) => {
+            "This pair beats some of the hands that 3-bet here but not the biggest ones, so call and keep the pot small."
+        }
+        (ThreeBetIp, Call, MiddlePair | SmallPair) => {
+            "This pair flops a set about one time in eight, and in position a set can stack a 3-bettor's big pair."
+        }
+        (ThreeBetOop, Call, MiddlePair | SmallPair) => {
+            "This pair flops a set about one time in eight, and a set gets paid when the 3-bettor has a big pair."
+        }
+        (ThreeBetOop, Fold, SmallPair) => {
+            "Out of position the smallest pairs rarely win without a set, so they fold where bigger pairs can call."
+        }
+        (ThreeBetIp | ThreeBetOop, Call, AceKing) => {
+            "Ace-king makes top pair with the best kicker, so call and see the flop rather than 4-bet into bigger pairs."
+        }
+        (ThreeBetIp, Call, AceQueen) => {
+            "Ace-queen suited makes top pair or the nut flush draw and plays well in position."
+        }
+        (ThreeBetOop, Call, AceQueen) => {
+            "Ace-queen suited makes top pair or the nut flush draw, enough to call even out of position."
+        }
+        (ThreeBetIp, Call, SuitedAce) => {
+            "Ace-jack suited makes top pair or the nut flush draw and plays well in position."
+        }
+        (ThreeBetIp, Call, SuitedBroadway) => {
+            "King-queen suited flops strong pairs and big draws and plays well in position."
+        }
+        (ThreeBetIp | ThreeBetOop, Fold, AceQueen) => {
+            "Ace-queen offsuit is dominated by the ace-kings that 3-bet here and behind the big pairs."
+        }
+        (ThreeBetIp | ThreeBetOop, Fold, SuitedAce) => {
+            "A smaller suited ace is dominated by the better aces that 3-bet here, so fold."
+        }
+        (ThreeBetIp | ThreeBetOop, Fold, SuitedBroadway) => "These cards are usually behind the big hands that 3-bet here.",
+        (ThreeBetIp | ThreeBetOop, Fold, SuitedConnector) => {
+            "A suited connector is usually behind the hands that 3-bet here, so fold."
+        }
+        (ThreeBetIp | ThreeBetOop, Fold, OffsuitBroadway) => "Offsuit high cards are usually behind the hands that 3-bet here.",
+        (ThreeBetIp | ThreeBetOop, Fold, OffsuitAce | OtherSuited | OtherOffsuit) => {
+            "This hand is usually behind the hands that 3-bet here, so fold."
+        }
+
+        // You 3-bet and got 4-bet.
+        (FourBet, Raise, KingsOrAces) => "Aces or kings are the hands you 3-bet for, so go all in now.",
+        (FourBet, Call, Queens) => {
+            "Queens are too good to fold to a 4-bet, but going all in runs into aces and kings, so call and see the flop."
+        }
+        (FourBet, Call, AceKing) => {
+            "Suited ace-king has enough equity to call a 4-bet, but going all in risks the big pairs that beat it."
+        }
+        (FourBet, Fold, AceKing) => {
+            "Offsuit ace-king is behind the big pairs that 4-bet here and has no flush draw to help it, so fold."
+        }
+        (FourBet, Fold, Jacks) => "Jacks are behind the big pairs that 4-bet here and only slightly ahead of ace-king.",
+        (FourBet, Fold, AceQueen) => "Ace-queen suited is dominated by the ace-kings that 4-bet here and behind the big pairs.",
+        (FourBet, Fold, _) => "A 4-bet here is almost always a big pair or ace-king, and this hand is behind that.",
+
+        // Shared folds for every other cell.
+        (_, Fold, SuitedConnector) => "A small suited connector usually ends with one pair or less, and that is not enough to call a raise with.",
+        (Blinds | BlindsBb, Fold, OffsuitBroadway | OffsuitAce) => {
+            "Out of position, an offsuit hand like this usually ends with one pair or less, and that is hard to play against a raise."
+        }
+        (_, Fold, OffsuitBroadway) => "Offsuit high cards usually end with one pair or less, and that is not enough to call a raise with.",
+        (_, Fold, OffsuitAce) => "A weak offsuit ace usually ends with one pair or less, and that is not enough to call a raise with.",
+        (_, Fold, OtherSuited) => "This suited hand usually ends with one pair or less, and that is not enough to call a raise with.",
+        (_, Fold, OtherOffsuit) => "This offsuit hand usually ends with one pair or less, and that is not enough to call a raise with.",
+        // The charts never reach these cells; a test checks that every reached cell has its own line.
+        (_, Fold, _) => "This hand isn't strong enough to continue here.",
+        (_, Call, _) => "This hand is strong enough to continue here.",
+        (_, Raise, _) => "This hand is strong enough to raise here.",
     }
 }
 
@@ -250,8 +641,23 @@ pub struct PreflopCard {
     pub open: [CardLine; 5],
     pub iso_raise: CardLine,
     pub iso_limp: CardLine,
+    /// Facing one raise, acting after the raiser and not in a blind.
     pub reraise: CardLine,
     pub call: CardLine,
+    /// Facing one raise from an early or middle seat.
+    pub early_call: CardLine,
+    pub blinds_reraise: CardLine,
+    pub blinds_call: CardLine,
+    pub blinds_bb_call: CardLine,
+    pub callers_reraise: CardLine,
+    pub callers_call: CardLine,
+    pub callers_bb_call: CardLine,
+    pub three_bet_ip_raise: CardLine,
+    pub three_bet_ip_call: CardLine,
+    pub three_bet_oop_raise: CardLine,
+    pub three_bet_oop_call: CardLine,
+    pub four_bet_raise: CardLine,
+    pub four_bet_call: CardLine,
     pub notes: [CardNote; MAX_NOTES],
     pub note_count: usize,
 }
@@ -382,11 +788,24 @@ pub const fn parse_card(text: &'static str) -> PreflopCard {
         iso_limp: CardLine::EMPTY,
         reraise: CardLine::EMPTY,
         call: CardLine::EMPTY,
+        early_call: CardLine::EMPTY,
+        blinds_reraise: CardLine::EMPTY,
+        blinds_call: CardLine::EMPTY,
+        blinds_bb_call: CardLine::EMPTY,
+        callers_reraise: CardLine::EMPTY,
+        callers_call: CardLine::EMPTY,
+        callers_bb_call: CardLine::EMPTY,
+        three_bet_ip_raise: CardLine::EMPTY,
+        three_bet_ip_call: CardLine::EMPTY,
+        three_bet_oop_raise: CardLine::EMPTY,
+        three_bet_oop_call: CardLine::EMPTY,
+        four_bet_raise: CardLine::EMPTY,
+        four_bet_call: CardLine::EMPTY,
         notes: [CardNote { key: "", text: "" }; MAX_NOTES],
         note_count: 0,
     };
     let mut pos = 0;
-    let mut seen = 0u16;
+    let mut seen = 0u32;
     let mut header_end = 0;
     let mut in_header = true;
     while pos < bytes.len() {
@@ -470,12 +889,51 @@ pub const fn parse_card(text: &'static str) -> PreflopCard {
         } else if key_is(bytes, start, key_end, b"face_raise.call") {
             slot = 8;
             card.call = line;
+        } else if key_is(bytes, start, key_end, b"face_raise.blinds.reraise") {
+            slot = 9;
+            card.blinds_reraise = line;
+        } else if key_is(bytes, start, key_end, b"face_raise.blinds.call") {
+            slot = 10;
+            card.blinds_call = line;
+        } else if key_is(bytes, start, key_end, b"face_raise.early.call") {
+            slot = 19;
+            card.early_call = line;
+        } else if key_is(bytes, start, key_end, b"face_raise.big_blind.call") {
+            slot = 21;
+            card.blinds_bb_call = line;
+        } else if key_is(bytes, start, key_end, b"face_callers.big_blind.call") {
+            slot = 20;
+            card.callers_bb_call = line;
+        } else if key_is(bytes, start, key_end, b"face_callers.reraise") {
+            slot = 11;
+            card.callers_reraise = line;
+        } else if key_is(bytes, start, key_end, b"face_callers.call") {
+            slot = 12;
+            card.callers_call = line;
+        } else if key_is(bytes, start, key_end, b"three_bet.ip.fourbet") {
+            slot = 13;
+            card.three_bet_ip_raise = line;
+        } else if key_is(bytes, start, key_end, b"three_bet.ip.call") {
+            slot = 14;
+            card.three_bet_ip_call = line;
+        } else if key_is(bytes, start, key_end, b"three_bet.oop.fourbet") {
+            slot = 15;
+            card.three_bet_oop_raise = line;
+        } else if key_is(bytes, start, key_end, b"three_bet.oop.call") {
+            slot = 16;
+            card.three_bet_oop_call = line;
+        } else if key_is(bytes, start, key_end, b"four_bet.allin") {
+            slot = 17;
+            card.four_bet_raise = line;
+        } else if key_is(bytes, start, key_end, b"four_bet.call") {
+            slot = 18;
+            card.four_bet_call = line;
         } else {
             panic!("unknown key in preflop card");
         }
         seen |= 1 << slot;
     }
-    if seen != 0b1_1111_1111 {
+    if seen != (1 << 22) - 1 {
         panic!("preflop card is missing a line");
     }
     card.header = sub_str(bytes, 0, header_end);

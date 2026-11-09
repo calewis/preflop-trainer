@@ -1,5 +1,5 @@
 """Full browser test suite: python3 web/test/run.py [sections...]
-Sections: native libresearch libcli research researchshots (on request only) libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card offline nostorage legacy screens
+Sections: native libresearch libcli research researchshots (on request only) libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card preflopspots libpreflop offline nostorage legacy screens
 Results go to target/webtest/results.json and screenshots to target/webtest/screens/."""
 import itertools, json, os, pathlib, random, re, shutil, subprocess, sys, time
 
@@ -126,6 +126,13 @@ def check_differential_coverage(commands, replies):
     lines = [r for f, r in zip(fields, replies) if f[0] in ("commit", "reflect_commit")]
     check(any("\\treflect\\t" in r for r in lines), "differential: no reflection row logged")
     check(any("\\tdrill-retry\\t" in r for r in lines), "differential: no retry row logged")
+    prepared = [r for f, r in zip(fields, replies) if f[0] in ("prepare", "session_next") and '"kind":"preflop"' in r]
+    for situation in ("folded", "limpers", "raised", "callers", "three_bet", "four_bet"):
+        check(sum(f'"situation":"{situation}"' in r for r in prepared) >= 5, f"differential: preflop situation {situation} never compared")
+    check(count("card_view") >= 42, "differential: not every card view is compared")
+    views = [r for f, r in zip(fields, replies) if f[0] == "card_view"]
+    for word in ("All in", "4-bet", "3-bet"):
+        check(sum(word in r for r in views) >= 1, f"differential: card legend {word} never compared")
 
 
 def run_differential():
@@ -271,7 +278,7 @@ SHOT_JS = """
 })()
 """
 
-INTERNAL = re.compile(r"\b(open\.\w+|iso\.\w+|face_raise|note\.\w+|small_blind|big_blind|spot_mw|board_type|out_of_items|2p|4k|oesd)\b")
+INTERNAL = re.compile(r"\b(open\.\w+|iso\.\w+|face_raise|face_callers|three_bet\.\w*|four_bet\.\w*|note\.\w+|small_blind|big_blind|spot_mw|board_type|out_of_items|2p|4k|oesd)\b")
 
 
 class Inspector:
@@ -1695,6 +1702,12 @@ def run_lib_cli():
     if done.returncode != 0:
         print(done.stderr[-1500:])
     check(done.returncode == 0, f"command-line tests failed: {done.stdout[-400:]}")
+def run_lib_preflop():
+    done = subprocess.run(["cargo", "test", "--release", "--test", "preflop", "--test", "skills"], capture_output=True, text=True, cwd=ROOT)
+    print(done.stdout[-4000:])
+    if done.returncode != 0:
+        print(done.stderr[-1500:])
+    check(done.returncode == 0, f"library preflop tests failed: {done.stdout[-400:]}")
 
 
 def run_lib_table():
@@ -2152,9 +2165,11 @@ def run_card():
         check(opening == "Cutoff", f"card opened on {opening}")
         seats = page.eval("[...document.querySelectorAll('.tabs')[0].children].length")
         check(seats == 6, f"{seats} seat tabs")
+        tab_count = page.eval("[...document.querySelectorAll('.tabs')[1].children].length")
+        check(tab_count == 7, f"{tab_count} situation tabs")
         seen = 0
         for s in range(6):
-            for k in range(3):
+            for k in range(tab_count):
                 page.eval(f"document.querySelectorAll('.tabs')[0].children[{s}].click(); document.querySelectorAll('.tabs')[1].children[{k}].click();")
                 time.sleep(0.05)
                 page.wait("document.querySelectorAll('.cell').length === 169", 5)
@@ -2164,11 +2179,37 @@ def run_card():
                     check(page.eval("/% of hands/.test(document.body.innerText)"), f"no percent on card view {s},{k}")
         text = page.eval("document.body.innerText")
         check("Notes" in text and "iso." not in text, "card notes")
+        check_card_charts(page, inspector)
         results["card_views"] = seen
         check(not browser.errors, f"card errors {browser.errors[:3]}")
     finally:
         browser.close()
         srv.shutdown()
+
+
+def check_card_charts(page, inspector):
+    """The new charts are legible, and the seat tabs go away when the seat doesn't matter."""
+    seat_group_visible = "getComputedStyle(document.querySelectorAll('.tabs')[0]).display !== 'none'"
+    expected = {3: ("A raise and callers", "3-bet", True), 4: ("You opened and got 3-bet, in position", "4-bet", False),
+                5: ("You opened and got 3-bet, out of position", "4-bet", False), 6: ("You 3-bet and got 4-bet", "All in", False)}
+    for k, (title, word, seat_visible) in expected.items():
+        page.eval(f"document.querySelectorAll('.tabs')[1].children[{k}].click();")
+        must_see(page, f"document.body.innerText.includes({json.dumps(title)}) && document.querySelectorAll('.cell').length === 169", 5, f"card chart title {title} missing")
+        check(page.eval(seat_group_visible) == seat_visible, f"seat tabs at situation {k}")
+        check(page.eval(f"[...document.querySelectorAll('.legend li')].some(l => l.textContent.includes({json.dumps(word)}))"),
+              f"legend misses {word} at situation {k}")
+        inspector.snapshot(f"card-chart-{k}")
+    # The callers chart adds two calls in the big blind.
+    page.eval("document.querySelectorAll('.tabs')[1].children[3].click(); document.querySelectorAll('.tabs')[0].children[5].click();")
+    must_see(page, "document.body.innerText.includes('A raise and callers, big blind: also call')", 5, "callers big blind line missing")
+    # A lone raise depends on your seat again.
+    page.eval("document.querySelectorAll('.tabs')[1].children[2].click();")
+    page.wait("document.body.innerText.includes('One raise')", 5)
+    check(page.eval(seat_group_visible), "seat tabs for a lone raise")
+    page.eval("document.querySelectorAll('.tabs')[0].children[5].click();")
+    page.wait("document.body.innerText.includes('One raise, from the big blind')", 5)
+    check("3-bet" in page.eval("document.querySelector('.legend').textContent"), "legend for a lone raise")
+    page.eval("document.querySelectorAll('.tabs')[1].children[0].click();")
 
 
 def run_offline():
@@ -2322,6 +2363,10 @@ def capture_mode(browser, port, viewport, mobile, theme):
     page.eval("document.querySelectorAll('.tabs')[1].children[2].click()")
     time.sleep(0.1)
     inspector.snapshot("card-raised")
+    for tab, name in [(3, "card-callers"), (4, "card-three-bet-ip"), (5, "card-three-bet-oop"), (6, "card-four-bet")]:
+        page.eval(f"document.querySelectorAll('.tabs')[1].children[{tab}].click()")
+        time.sleep(0.1)
+        inspector.snapshot(name, full=True)
     page.eval("location.hash = '#progress'")
     page.wait("!!document.querySelector('.skill-row')", 20)
     inspector.snapshot("progress")
@@ -2859,6 +2904,51 @@ def run_sw_scope():
         browser.close()
         srv.shutdown()
 
+def run_preflop_spots():
+    """Every new situation is dealt in the real drill, gets its one-line why, and logs correctly."""
+    port = 8983 + PORT_SHIFT
+    srv = server.start(port)
+    browser = Browser("preflopspots")
+    try:
+        page = browser.page
+        page.viewport(390, 844, True)
+        page.theme("light")
+        page.navigate(f"http://127.0.0.1:{port}/")
+        page.wait("!!document.querySelector('.app-title') && !!window.__trainer", 30)
+        inspector = Inspector(page, (390, 844), "light", False)
+        open_limited_drill(page, "preflop")
+        wanted = {"callers": "called", "three_bet": "got 3-bet", "four_bet": "got 4-bet"}
+        seen = set()
+        for step in range(120):
+            page.wait(READY, 30)
+            current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+            situation = current["bundle"]["question"]["situation"]
+            sentence = page.eval("document.querySelector('.prompt').textContent")
+            if situation in wanted:
+                check(wanted[situation] in sentence, f"{situation} prompt read {sentence!r}")
+                check("Still to act" not in page.eval("document.querySelector('.chips').innerText") or situation == "callers",
+                      f"{situation} shows a still-to-act chip")
+            kind, answer = pick_answer(page, current, step % 3 != 0)
+            type_answer(page, current, kind, answer)
+            page.wait("!!document.querySelector('.reveal')", 30)
+            reveal_text = page.eval("document.querySelector('.reveal').innerText")
+            inspector.snapshot(f"preflop-{situation}", full=True)
+            if situation in wanted or situation == "raised":
+                check(page.eval("!!document.querySelector('.reveal .hint')"), f"{situation} reveal has no chart line: {reveal_text}")
+                check("Fold the rest" in reveal_text, f"{situation} reveal has no chart: {reveal_text}")
+                check(not re.search(r"\bbook\b|\bauthor\b|\bchapter\b|according to|\bsolver\b|%", reveal_text.lower()), f"{situation} reveal cites a source: {reveal_text}")
+                seen.add(situation)
+            if seen >= set(wanted) | {"raised"}:
+                break
+            next_drill_item(page)
+        check(seen >= set(wanted) | {"raised"}, f"preflop drill never reached all spots: saw {sorted(seen)}")
+        results["preflop_spots_seen"] = sorted(seen)
+        check(not browser.errors, f"preflop spot errors {browser.errors[:3]}")
+    finally:
+        browser.close()
+        srv.shutdown()
+
+
 SECTIONS = {
     "native": run_native, "wasmclean": run_wasm_clean, "doubletap": run_doubletap, "twotabs": run_twotabs,
     "libresearch": run_lib_research, "libcli": run_lib_cli, "research": run_research, "researchshots": run_research_shots, "libtable": run_lib_table, "tablespots": run_table_spots, "midgrade": run_mid_grade,
@@ -2867,7 +2957,7 @@ SECTIONS = {
     "differential": run_differential, "timing": run_timing, "e2e": run_e2e, "baseline": run_baseline,
     "newskills": run_new_skills, "noneleft": run_none_left, "checkup": run_checkup, "checkupquit": run_checkup_quit,
     "checkuptabs": run_checkup_tabs, "checkupconflict": run_checkup_conflict, "progressnew": run_progress_new,
-    "card": run_card, "offline": run_offline, "nostorage": run_nostorage, "legacy": run_legacy, "screens": run_screens,
+    "preflopspots": run_preflop_spots, "libpreflop": run_lib_preflop, "card": run_card, "offline": run_offline, "nostorage": run_nostorage, "legacy": run_legacy, "screens": run_screens,
 }
 
 if __name__ == "__main__":

@@ -14,10 +14,35 @@ open.button = 22+ A2s+ K8s+ Q9s+ J9s+ T8s+ 97s+ 86s+ 75s+ 65s 54s ATo+ KTo+ QTo+
 open.small_blind = 22+ A2s+ K9s+ Q9s+ J9s+ T9s 98s 87s ATo+ KJo+ QJo
 iso.raise = 77+ ATs+ KJs+ QJs AJo+ KQo
 iso.limp = 22 33 44 55 66 A2s A3s A4s A5s A6s A7s A8s A9s KTs QTs JTs T9s 98s 87s 76s 65s 54s
-face_raise.reraise = JJ+ AKs AKo
-face_raise.call = 22 33 44 55 66 77 88 99 TT AQs AQo AJs ATs KQs KJs QJs JTs T9s
+# Facing one raise and no callers. The reraise and call lines are for the cutoff and button.
+face_raise.reraise = JJ+ AQs+ AKo
+face_raise.call = 22 33 44 55 66 77 88 99 TT A2s A3s A4s A5s A6s A7s A8s A9s ATs AJs KTs+ QTs+ JTs T9s 98s 87s 76s 65s AQo
+# From the small or big blind you play out of position, so the speculative calls shrink.
+# Early and middle seats call far less, using the same reraise line.
+face_raise.early.call = 77 88 99 TT ATs AJs KQs KJs QJs AQo
+face_raise.blinds.reraise = JJ+ AQs+ AKo
+face_raise.blinds.call = 22 33 44 55 66 77 88 99 TT A2s A3s A4s A5s A6s A7s A8s A9s ATs AJs KTs+ QTs+ JTs T9s 98s 87s AQo
+# Closing the action from the big blind against one raise, these also call.
+face_raise.big_blind.call = AJo KQo
+# The callers chart ignores your seat on purpose: multiway prices justify a few suited calls a middle seat would not open.
+# Facing a raise and one or more callers: thin 3-bets become calls, and suited hands that make big hands get better.
+face_callers.reraise = QQ+ AKs AKo
+face_callers.call = 22 33 44 55 66 77 88 99 TT JJ A2s A3s A4s A5s A6s A7s A8s A9s ATs AJs AQs KTs+ QTs+ JTs T9s 98s 87s 76s 65s 54s AQo
+# Closing the action from the big blind, these also call.
+face_callers.big_blind.call = AJo KQo
+# You opened and were 3-bet. In position means you did not open the small blind and the 3-bettor is in a blind.
+three_bet.ip.fourbet = KK+
+three_bet.ip.call = 22 33 44 55 66 77 88 99 TT JJ QQ AKs AKo AQs AJs KQs
+three_bet.oop.fourbet = KK+
+three_bet.oop.call = 66 77 88 99 TT JJ QQ AKs AKo AQs
+# You 3-bet and got 4-bet.
+four_bet.allin = KK+
+four_bet.call = QQ AKs
 note.seats = Count the players still to act behind you: 5 or more is early, 4 is middle, 3 is cutoff, 2 is button, 1 is small blind. At 5 players the first to act is middle. At 4 players the first to act is cutoff.
 note.open = Folded to you: raise to 3bb with your seat's range, otherwise fold.
 note.iso = One or more limpers: raise to 4bb plus 1bb per limper with iso.raise. Limp along with iso.limp only from the cutoff, button or small blind, or when two or more have limped. Fold the rest.
-note.face_raise = Someone raised: reraise, call or fold using the face_raise lines.
+note.face_raise = One raise and no callers: early and middle seats have the tightest calling list, the cutoff and button call wider, and the blinds have their own list. From the big blind, also call AJo and KQo. 3-bet to about 3 times the raise, call or fold.
+note.callers = A raise and at least one caller: use the callers chart. Fewer hands 3-bet here, and hands that make big hands multiway get better. 3-bet to 3 times the raise plus one more raise per caller. From the big blind, also call AJo and KQo.
+note.three_bet = You opened and got 3-bet: use the in-position chart if you did not open the small blind and the 3-bettor is in a blind, otherwise the out-of-position chart. 4-bet to about 2.5 times the 3-bet, call or fold.
+note.four_bet = You 3-bet and got 4-bet: go all in with kings or aces, call queens and ace-king suited, fold everything else.
 note.big_blind = In the big blind with no raise, check. With limpers, raise iso.raise hands and check the rest.

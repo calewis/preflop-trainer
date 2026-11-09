@@ -38,6 +38,7 @@ fn main() {
     anchor_only_session(&mut out);
     table_session(&mut out);
     table_checkup(&mut out);
+    preflop_charts(&mut out);
     for (command, reply) in out.commands {
         // One request per output line: a JSON reply never holds a raw newline.
         assert!(!reply.contains('\n'), "a reply holds a raw newline: {reply}");
@@ -370,6 +371,24 @@ fn number_field<'a>(json: &'a str, key: &str) -> Option<&'a str> {
     let tail = &json[start..];
     let end = tail.find(|c: char| !c.is_ascii_digit()).unwrap_or(tail.len());
     (end > 0).then(|| &tail[..end])
+}
+
+/// Every seat and situation on the preflop card, and dealt preflop items with
+/// all three answers, so the new charts and reveals are compared byte for byte.
+fn preflop_charts(out: &mut Out) {
+    out.call(&["card_meta"]);
+    for seat in ["early", "middle", "cutoff", "button", "small_blind", "big_blind"] {
+        for situation in ["folded", "limpers", "raised", "callers", "three_bet_ip", "three_bet_oop", "four_bet"] {
+            out.call(&["card_view", seat, situation]);
+        }
+    }
+    for i in 0..400u64 {
+        let seed = (i * 2_654_435_761 + 5).to_string();
+        out.call(&["prepare", "preflop", &seed]);
+        for answer in ["r", "c", "f"] {
+            out.call(&["grade", "preflop", &seed, answer, "0"]);
+        }
+    }
 }
 
 fn print_timing(count: u64) {

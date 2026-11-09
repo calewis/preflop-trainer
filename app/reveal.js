@@ -57,12 +57,18 @@ function preflopQuestion(q) {
     folded: 'It is folded to you.',
     limpers: q.limpers === 1 ? '1 player has limped in front of you.' : `${q.limpers} players have limped in front of you.`,
     raised: 'Someone has raised in front of you.',
+    callers: `Someone has raised and ${q.callers === 1 ? '1 player has' : `${q.callers} players have`} called.`,
+    three_bet: q.in_position ? 'You opened and got 3-bet by a blind. You will act last after the flop.'
+      : 'You opened and got 3-bet. You will act first after the flop.',
+    four_bet: 'You 3-bet and got 4-bet.',
   };
+  const acted = q.situation === 'three_bet' || q.situation === 'four_bet';
   return h('div', { class: 'stack' },
     h('div', { class: 'chips' }, chip('Table of', q.players), chip('Position', q.seat_title),
-      chip('Still to act', q.behind)),
+      acted ? null : chip('Still to act', q.behind)),
     hand(q.hand),
-    h('p', { class: 'context' }, `Table of ${q.players}. You are ${q.seat_sentence} with ${plural(q.behind, 'player', 'players')} still to act behind you.`),
+    h('p', { class: 'context' }, acted ? `Table of ${q.players}. You are ${q.seat_sentence}.`
+      : `Table of ${q.players}. You are ${q.seat_sentence} with ${plural(q.behind, 'player', 'players')} still to act behind you.`),
     prompt(lines[q.situation]));
 }
 
@@ -190,7 +196,7 @@ function p(...children) { return h('p', { class: 'reveal-line' }, ...children); 
 
 function revealBody(r) {
   switch (r.kind) {
-    case 'preflop': return [answerLine(r.answer), p(r.why)];
+    case 'preflop': return [answerLine(r.answer), p(r.why), r.chart ? h('p', { class: 'hint' }, r.chart) : null];
     case 'nuts': return nutsReveal(r);
     case 'possible': return possibleReveal(r);
     case 'made': return [answerLine(r.answer), p(r.description), p(`Your best five cards make ${r.rank}.`)];

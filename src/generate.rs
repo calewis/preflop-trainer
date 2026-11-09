@@ -15,7 +15,7 @@ use crate::item::{
     HitStreet, Item, Question, Skill, SpotMode, SpotQuestion,
 };
 use crate::money;
-use crate::preflop::{Range, Seat, Situation, CARD};
+use crate::preflop::{chart_for, Range, Seat, Situation, CARD};
 use crate::rng::Rng;
 use crate::table;
 
@@ -137,18 +137,8 @@ pub fn generate_preflop(seed: u64, players: u8) -> Item {
     let behind = rng.below(u64::from(players)) as u8;
     let acted = players - 1 - behind;
     let seat = Seat::from_behind(behind);
-    let situation = gen_situation(&mut rng, seat, acted);
-
-    let hand = if rng.chance(1, 2) {
-        let range = relevant_range(seat, situation);
-        let combos: Vec<Holding> = unseen_holdings(0)
-            .into_iter()
-            .filter(|&h| range.contains_holding(h))
-            .collect();
-        rng.pick(&combos)
-    } else {
-        deal_holding(&mut rng, 0)
-    };
+    let situation = gen_situation(&mut rng, seat, acted, behind);
+    let hand = deal_preflop_hand(&mut rng, seat, situation);
     Item {
         skill: Skill::Preflop,
         seed,
@@ -156,20 +146,83 @@ pub fn generate_preflop(seed: u64, players: u8) -> Item {
     }
 }
 
-/// Only possible situations: first to act is only ever folded to, the big blind
-/// is never folded to, and limpers never exceed 3 or the players who acted first.
-fn gen_situation(rng: &mut Rng, seat: Seat, acted: u8) -> Situation {
+/// Deals the hand for a situation. Hands must be ones hero could hold in the
+/// spot: after opening, the seat's open range; after 3-betting, the hands the
+/// chart 3-bets. Against a raise, every hand is one the chart plays or a player
+/// would open on the button, so there are no obvious folds.
+fn deal_preflop_hand(rng: &mut Rng, seat: Seat, situation: Situation) -> Holding {
+    let pool = match situation {
+        Situation::ThreeBet { .. } => Some(CARD.open_range(seat).expect("an opener has an open range").range),
+        Situation::FourBet => Some(chart_for_three_bet(seat)),
+        Situation::Raised | Situation::RaisedCalled(_) => Some(relevant_range(seat, situation)),
+        Situation::FoldedTo | Situation::Limpers(_) if rng.chance(1, 2) => Some(relevant_range(seat, situation)),
+        _ => None,
+    };
+    match pool {
+        Some(range) => {
+            let combos: Vec<Holding> = unseen_holdings(0).into_iter().filter(|&h| range.contains_holding(h)).collect();
+            rng.pick(&combos)
+        }
+        None => deal_holding(rng, 0),
+    }
+}
+
+/// The 3-bet hands of the chart hero used to 3-bet from this seat.
+fn chart_for_three_bet(seat: Seat) -> Range {
+    let chart = chart_for(seat, Situation::Raised).expect("the raised chart");
+    chart.lines().0.range
+}
+
+/// Percent shares of each situation outside the big blind and first to act. Callers
+/// need two earlier players, so a table with fewer gives that share to a lone raise.
+const SHARE_FOLDED: u64 = 28;
+const SHARE_LIMPERS: u64 = 22;
+const SHARE_RAISED: u64 = 22;
+const SHARE_CALLERS: u64 = 13;
+const SHARE_THREE_BET: u64 = 12;
+// The remaining 3 percent is facing a 4-bet.
+/// In the big blind: limpers, a lone raise, callers, a 4-bet.
+const BB_SHARES: [u64; 4] = [40, 32, 20, 8];
+/// First to act can open and then be 3-bet.
+const FIRST_TO_ACT_THREE_BET: u64 = 18;
+
+/// Only possible situations: first to act is folded to or has opened and been
+/// 3-bet, the big blind is never folded to and never opens, and limpers never
+/// exceed 3 or the players who acted first. Callers need two earlier players.
+fn gen_situation(rng: &mut Rng, seat: Seat, acted: u8, behind: u8) -> Situation {
+    let three_bet = |rng: &mut Rng| {
+        // Hero opened: the 3-bettor is anyone behind, and a blind leaves hero in position.
+        let bettor = rng.below(u64::from(behind));
+        Situation::ThreeBet { in_position: behind >= 2 && bettor >= u64::from(behind) - 2 }
+    };
     if acted == 0 {
-        return Situation::FoldedTo;
+        return if rng.chance(FIRST_TO_ACT_THREE_BET, 100) { three_bet(rng) } else { Situation::FoldedTo };
     }
     let limpers = |rng: &mut Rng| Situation::Limpers(rng.range(1, u64::from(acted.min(3))) as u8);
+    let callers = |rng: &mut Rng| {
+        if acted >= 2 {
+            Situation::RaisedCalled(rng.range(1, u64::from((acted - 1).min(3))) as u8)
+        } else {
+            Situation::Raised
+        }
+    };
     if seat == Seat::BigBlind {
-        return if rng.chance(1, 2) { limpers(rng) } else { Situation::Raised };
+        let roll = rng.below(BB_SHARES.iter().sum());
+        return match roll {
+            r if r < BB_SHARES[0] => limpers(rng),
+            r if r < BB_SHARES[0] + BB_SHARES[1] => Situation::Raised,
+            r if r < BB_SHARES[0] + BB_SHARES[1] + BB_SHARES[2] => callers(rng),
+            _ => Situation::FourBet,
+        };
     }
-    match rng.below(10) {
-        0..=3 => Situation::FoldedTo,
-        4..=6 => limpers(rng),
-        _ => Situation::Raised,
+    let roll = rng.below(100);
+    match roll {
+        r if r < SHARE_FOLDED => Situation::FoldedTo,
+        r if r < SHARE_FOLDED + SHARE_LIMPERS => limpers(rng),
+        r if r < SHARE_FOLDED + SHARE_LIMPERS + SHARE_RAISED => Situation::Raised,
+        r if r < SHARE_FOLDED + SHARE_LIMPERS + SHARE_RAISED + SHARE_CALLERS => callers(rng),
+        r if r < SHARE_FOLDED + SHARE_LIMPERS + SHARE_RAISED + SHARE_CALLERS + SHARE_THREE_BET => three_bet(rng),
+        _ => Situation::FourBet,
     }
 }
 
@@ -180,7 +233,12 @@ fn relevant_range(seat: Seat, situation: Situation) -> Range {
             _ => CARD.iso_raise.range.union(&CARD.iso_limp.range),
         },
         Situation::Limpers(_) => CARD.iso_raise.range.union(&CARD.iso_limp.range),
-        Situation::Raised => CARD.reraise.range.union(&CARD.call.range),
+        Situation::Raised | Situation::RaisedCalled(_) | Situation::ThreeBet { .. } | Situation::FourBet => {
+            let (raise, call) = chart_for(seat, situation).expect("this situation has a chart").lines();
+            // Also the hands a player opens with but folds here, so the folds are real decisions.
+            let open = CARD.open_range(Seat::Button).expect("the button has an open range").range;
+            raise.range.union(&call.range).union(&open)
+        }
     }
 }
 

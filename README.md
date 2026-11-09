@@ -45,6 +45,17 @@ answer is already saved.
 Preflop drills are mostly 4-5 players with occasional 6-7. Your seat comes from how
 many players are still to act behind you.
 
+The card has one action for every hand in every spot, with no mixing. Besides opening and
+limpers it covers one raise (from an early or middle seat, from the cutoff or button, or from the
+blinds, with two extra calls closing the action from the big blind), a raise with callers (again
+with two extra big blind calls), being
+3-bet after you opened (in position or out of position) and being 4-bet after you 3-bet.
+Hands not listed fold. The ranges are rules of thumb for a loose game with few light
+3-bets, so raises are for value. Drills deal hands you could really hold: after opening,
+the seat's open range; after 3-betting, the hands the chart 3-bets. About a third of
+preflop items are folded to you, a fifth each are limpers or a lone raise, a tenth each
+are a raise with callers or a 3-bet, and about 3% are a 4-bet.
+
 Attempts go to `$POKER_TRAINER_HOME/attempts.tsv` (default `~/.poker-trainer/`), an
 append-only log. Colour is used only on a terminal with `NO_COLOR` unset.
 

@@ -379,6 +379,7 @@ a { color: var(--accent); }
 
 /* Preflop card */
 .tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.tabs.wrap { flex-wrap: wrap; overflow-x: visible; }
 .tab { flex: 0 0 auto; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); cursor: pointer; font-size: 14px; white-space: nowrap; }
 .tab[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .grid {

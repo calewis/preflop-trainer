@@ -865,8 +865,12 @@ export async function showCard() {
     onclick: () => { cardState.situation = s.code; refresh(); },
   }, s.title));
 
+  const seatGroup = h('div', { class: 'tabs', role: 'group', 'aria-label': 'Seat' }, seatTabs);
+
   async function refresh() {
     const view = await engine.call('card_view', cardState.seat, cardState.situation);
+    // A chart that depends only on the action, not your seat, doesn't need the seat tabs.
+    seatGroup.hidden = meta.situations.find(s => s.code === cardState.situation).one_chart;
     seatTabs.forEach((t, i) => t.setAttribute('aria-pressed', String(meta.seats[i].code === cardState.seat)));
     situationTabs.forEach((t, i) => t.setAttribute('aria-pressed', String(meta.situations[i].code === cardState.situation)));
     body.replaceChildren(
@@ -886,8 +890,8 @@ export async function showCard() {
   await refresh();
   screen(
     topBar('Preflop card'),
-    h('div', { class: 'tabs', role: 'group', 'aria-label': 'Seat' }, seatTabs),
-    h('div', { class: 'tabs', role: 'group', 'aria-label': 'Situation' }, situationTabs),
+    seatGroup,
+    h('div', { class: 'tabs wrap', role: 'group', 'aria-label': 'Situation' }, situationTabs),
     h('section', { class: 'panel' }, body),
     h('section', { class: 'panel' },
       h('h2', { class: 'panel-title' }, 'Notes'),
