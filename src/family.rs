@@ -11,7 +11,7 @@ use crate::read_price::read_price_family;
 use crate::classes::made_class;
 use crate::preflop::{Seat, Situation};
 use crate::rng::Rng;
-use crate::table::TableQuestion;
+use crate::table::{TableActionKind, TableQuestion};
 
 /// Seeds tried when dealing a fresh sibling, before falling back to a plain new item.
 pub const SIBLING_TRIES: u32 = 200;
@@ -135,14 +135,16 @@ pub fn equity_family(q: &EquityQuestion, truth_pct: f64) -> String {
     format!("{}:{}:{band}", q.rung(), q.opponents.count())
 }
 
-/// Street and whether the pot is heads-up or multiway.
+/// Street and whether two or more than two players are still in at the decision.
 pub fn table_family(q: &TableQuestion) -> String {
     let street = match q.board.len() {
         0..=3 => "flop",
         4 => "turn",
         _ => "river",
     };
-    format!("{street}:{}", if q.players <= 2 { "hu" } else { "mw" })
+    let folded = q.streets.iter().flat_map(|s| &s.actions).filter(|a| a.kind == TableActionKind::Fold).count();
+    let left = usize::from(q.players).saturating_sub(folded);
+    format!("{street}:{}", if left <= 2 { "hu" } else { "mw" })
 }
 
 /// A fresh non-held-out seed in `family`, by bounded rejection sampling from

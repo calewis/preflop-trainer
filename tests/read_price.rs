@@ -111,7 +111,7 @@ fn a_seed_carries_its_rung_and_the_extra_values_wrap() {
 
 #[test]
 fn existing_skills_keep_their_positions_and_the_generator_version() {
-    assert_eq!(GEN_VERSION, 2);
+    assert_eq!(GEN_VERSION, 3, "read_price adds a skill without changing an existing generator");
     assert_eq!(Skill::BeatsMe as u64, 15, "existing positions seed their generators");
     assert_eq!(Skill::ReadPrice as u64, 16);
     assert_eq!(Skill::ALL.last(), Some(&Skill::ReadPrice));

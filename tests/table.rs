@@ -4,8 +4,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use poker_trainer::answer::{answer_format, AnswerFormat};
 use poker_trainer::checkup::{
-    checkup_plan, latest_checkup, next_checkup_form, CheckupMetric, CHECKUP_LEN, CHECKUP_ORIGINALS, CHECKUP_REPEATS, MIN_REPEAT_GAP,
+    checkup_plan, checkup_runs, latest_checkup, next_checkup_form, CheckupMetric, CHECKUP_LEN, CHECKUP_ORIGINALS, CHECKUP_REPEATS, MIN_REPEAT_GAP,
 };
+use poker_trainer::family::table_family;
 use poker_trainer::generate::generate;
 use poker_trainer::grade::{ev_band, grade, EvBand, Outcome, Reveal};
 use poker_trainer::item::{is_held_out, Item, Question, Skill, GEN_VERSION, HELD_OUT_BIT};
@@ -314,7 +315,7 @@ fn the_reveal_carries_every_fact_the_front_ends_show() {
     let g = graded(&depends);
     assert_eq!(g.spot.verdict, Verdict::Depends);
     assert_eq!(g.spot.verdict.explanation(), "No option was best at nearly all simulated tables, so the right play can change with the opponent.");
-    assert_eq!(g.read_note().as_deref(), Some("It was best at 24.2% of simulated tables, so it can be the right read against some opponents."));
+    assert_eq!(g.read_note().as_deref(), Some("It was best at 24.2% of simulated tables, so it can be the right read at some tables."));
     let best = answer(167, "call");
     assert_eq!(graded(&best).read_note().as_deref(), Some("With no read on the opponent, this was a fair choice."));
     let wrong_read = table::grade_option(spot_by_id(57), 3);
@@ -890,7 +891,12 @@ fn v2_row(id: u16, t: u64, loss: f64, verdict: Verdict) -> Attempt {
 fn new_table_rows_record_the_library_they_were_dealt_from() {
     let row = Attempt::from_drill(Planned { skill: Skill::Table, seed: seed_for(0), origin: Origin::New }, &answer(0, "check"), 1, 1000);
     assert_eq!(row.gen_version, LIBRARY_GEN_VERSION);
-    assert_ne!(LIBRARY_GEN_VERSION, GEN_VERSION, "a table row must be distinguishable from one written before library 3");
+    // A library number can never collide with a generator version, past or future.
+    let base = table::LIBRARY_GEN_BASE;
+    assert!(GEN_VERSION < base && row.gen_version >= base, "{}", row.gen_version);
+    assert_eq!(table::library_of_gen_version(LIBRARY_GEN_VERSION), 3);
+    assert_eq!(table::library_of_gen_version(2), 2);
+    assert_eq!(table::library_of_gen_version(1), 2, "both old generator versions used the same file");
     assert!(row.in_current_library());
 }
 
@@ -936,6 +942,51 @@ fn a_checkup_on_the_old_library_still_counts_but_new_forms_start_over() {
     log.extend(table_checkup(2, 1, 0.5, CHECKUP_LEN));
     assert_eq!(next_checkup_form(Skill::Table, &log), 2);
     assert!(latest_checkup(Skill::Table, &log).unwrap().in_current_library);
+}
+
+#[test]
+fn a_table_run_spanning_two_libraries_is_not_a_result_or_comparable() {
+    // An old tab can write rows from the previous library into a current run.
+    let mut log = forty(0.5);
+    let mixed: Vec<Attempt> = table_checkup(1, 0, 0.5, CHECKUP_LEN)
+        .into_iter()
+        .enumerate()
+        .map(|(i, a)| if i % 2 == 0 { Attempt { gen_version: 2, ..a } } else { a })
+        .collect();
+    log.extend(mixed);
+    let run = &checkup_runs(&log)[0];
+    assert!(run.complete && run.generator_key.is_none() && !run.in_current_library, "{run:?}");
+    assert!(latest_checkup(Skill::Table, &log).is_none(), "a mixed run isn't the latest result");
+    // A clean current run after it counts, with a stale flag of its own.
+    log.extend(table_checkup(2, 1, 0.5, CHECKUP_LEN));
+    let latest = latest_checkup(Skill::Table, &log).unwrap();
+    assert_eq!(latest.run, 2);
+    assert_eq!(latest.generator_key, Some(3));
+    assert!(!latest.stale, "the current library isn't stale");
+}
+
+/// Players not folded at the decision, counted from the spot's own actions.
+fn players_left(q: &TableQuestion) -> usize {
+    let folded = q.streets.iter().flat_map(|s| &s.actions).filter(|a| a.kind == TableActionKind::Fold).count();
+    usize::from(q.players) - folded
+}
+
+#[test]
+fn the_table_family_counts_the_players_left_at_the_decision() {
+    let (mut heads_up, mut multiway) = (0, 0);
+    for id in 0..table::SPOT_COUNT as u16 {
+        let q = question(id);
+        let family = table_family(&q);
+        let left = players_left(&q);
+        assert!(left >= 2, "spot {id}: a decision needs an opponent");
+        assert_eq!(family.ends_with(":hu"), left == 2, "spot {id}: {family} with {left} left of {}", q.players);
+        heads_up += usize::from(family.ends_with(":hu"));
+        multiway += usize::from(family.ends_with(":mw"));
+    }
+    assert!(heads_up > 100 && multiway > 100, "heads-up {heads_up}, multiway {multiway}");
+    // A table of 7 with 4 folds is two left, even though the table is seven handed.
+    let seven = (0..table::SPOT_COUNT as u16).map(question).find(|q| q.players == 7 && players_left(q) == 2).expect("a seven-handed spot down to two");
+    assert!(table_family(&seven).ends_with(":hu"));
 }
 
 #[test]

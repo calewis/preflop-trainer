@@ -892,8 +892,9 @@ pub fn checkup_line(s: &CheckupScore) -> String {
         "not passed".to_string()
     };
     let diff = s.agreement.mean_abs_diff.map_or(String::new(), |d| format!(", mean gap {d:.1}"));
+    let older = if s.skill == Skill::Table && !s.in_current_library { " (older spot library)" } else { "" };
     format!(
-        "  {} form {} (run {}): {}, standard error {:.1}; repeats agreed {} of {}{diff}; {status}",
+        "  {}{older} form {} (run {}): {}, standard error {:.1}; repeats agreed {} of {}{diff}; {status}",
         s.skill.name(),
         s.form,
         s.run,

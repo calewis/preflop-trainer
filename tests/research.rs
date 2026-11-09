@@ -25,7 +25,7 @@ use poker_trainer::reflection::{
     ReflectState, MAX_CUES, REFLECTION_MIN_MISSES,
 };
 use poker_trainer::schedule::{due_families, Origin, Planned, Session, DAY_MS};
-use poker_trainer::table::{self, Verdict};
+use poker_trainer::table::{self, TableActionKind, Verdict};
 
 const DAY: u64 = DAY_MS;
 
@@ -177,7 +177,8 @@ fn table_spots_have_a_street_and_seat_label_for_reflection_only() {
     let Question::Table(q) = &question.question else { panic!() };
     let label = family(&question);
     assert!(label.starts_with(match q.board.len() { 0..=3 => "flop:", 4 => "turn:", _ => "river:" }), "{label}");
-    assert_eq!(q.players <= 2, label.ends_with(":hu"), "{label}");
+    let folded = q.streets.iter().flat_map(|s| &s.actions).filter(|a| a.kind == TableActionKind::Fold).count();
+    assert_eq!(usize::from(q.players) - folded <= 2, label.ends_with(":hu"), "{label}");
 }
 
 #[test]
@@ -1254,7 +1255,7 @@ mod beats_me {
     use poker_trainer::beats_me::{beats_me_rung, kinds_analysis, mix_standing, ways_count, BeatKind, MixBand, MIX_AHEAD_PCT, MIX_BEHIND_PCT};
     use poker_trainer::classes::PlayerType;
     use poker_trainer::grade::{BeatsMeReveal, BEATS_RANDOM_NOTE};
-    use poker_trainer::item::{beats_me_rung_of_seed, beats_me_seed_with_rung, BeatsMeAsk, BeatsMeQuestion, BEATS_ME_RUNGS};
+    use poker_trainer::item::{beats_me_rung_of_seed, beats_me_seed_with_rung, BeatsMeAsk, BeatsMeQuestion, BEATS_ME_RUNGS, CHAIN_STAGES};
     use poker_trainer::progress::{skills_up_to_step, PASS_BEATS_ME};
     use poker_trainer::schedule::{BEATS_WEIGHT_PER_MILLE, MIN_PREFLOP_PERCENT};
 
@@ -1534,8 +1535,14 @@ mod beats_me {
 
     #[test]
     fn the_mix_method_never_rounds_across_a_band_edge() {
-        let s = poker_trainer::beats_me::MixStanding { total: 106, beat_you: 64, tie: 0, pct: 39.62, band: MixBand::Behind };
-        assert!(poker_trainer::beats_me::mix_method(&s).contains("39.6%"));
+        let line = |pct: f64, band| poker_trainer::beats_me::mix_method(&poker_trainer::beats_me::MixStanding { total: 106, beat_you: 64, tie: 0, pct, band });
+        assert!(line(39.62, MixBand::Behind).contains("39.6%"));
+        assert!(line(39.965, MixBand::Behind).contains("39.9%"), "{}", line(39.965, MixBand::Behind));
+        assert!(!line(39.965, MixBand::Behind).contains("40.0%"));
+        assert!(line(60.02, MixBand::Ahead).contains("60.1%"), "{}", line(60.02, MixBand::Ahead));
+        // The even band includes its edges, so these already read true.
+        assert!(line(59.96, MixBand::Even).contains("60.0%"));
+        assert!(line(40.02, MixBand::Even).contains("40.0%"));
     }
 
     #[test]
@@ -1578,7 +1585,7 @@ mod beats_me {
     #[test]
     fn a_checkup_begun_under_an_older_generator_is_stale() {
         let row = |t: u64, slot: u32, gen_version: u32| {
-            let mut attempt = logged(Skill::Made, t, t, true, "top");
+            let mut attempt = logged(Skill::Spot, t, t, true, "allin:loose");
             attempt.mode = Mode::Check;
             attempt.gen_version = gen_version;
             attempt.extra.check = Some(CheckRef { run: 1, form: 0, slot });
@@ -1587,6 +1594,139 @@ mod beats_me {
         let runs = |rows: Vec<Attempt>| poker_trainer::checkup::checkup_runs(&rows);
         assert!(runs(vec![row(1, 0, 1), row(2, 1, GEN_VERSION)])[0].stale);
         assert!(!runs(vec![row(1, 0, GEN_VERSION), row(2, 1, GEN_VERSION)])[0].stale);
+    }
+
+    #[test]
+    fn a_generator_bump_only_voids_the_skills_it_changed() {
+        let row = |skill: Skill, version: u32| {
+            let mut attempt = logged(skill, 1, 1, false, "fam");
+            attempt.gen_version = version;
+            attempt
+        };
+        let checkup_row = |skill: Skill, version: u32| {
+            let mut attempt = row(skill, version);
+            attempt.mode = Mode::Check;
+            attempt.extra.check = Some(CheckRef { run: 1, form: 0, slot: 0 });
+            attempt
+        };
+        let stale = |skill, version| poker_trainer::checkup::checkup_runs(&[checkup_row(skill, version)])[0].stale;
+        let due = |skill, version| !due_families(&[row(skill, version)], 10 * DAY_MS).is_empty();
+        // The preflop bump to version 3 leaves every other skill's rows alone.
+        assert!(stale(Skill::Preflop, 2) && !due(Skill::Preflop, 2));
+        assert!(!stale(Skill::Made, 2) && due(Skill::Made, 2));
+        assert!(!stale(Skill::Spot, 2) && due(Skill::Spot, 2));
+        // Version 1 rows are only void for the generators that changed at version 2.
+        assert!(!stale(Skill::Made, 1) && due(Skill::Made, 1));
+        assert!(stale(Skill::Spot, 1) && !due(Skill::Spot, 1));
+        assert!(stale(Skill::Equity, 1) && !due(Skill::Equity, 1));
+    }
+
+    #[test]
+    fn a_checkup_spanning_a_generator_change_is_not_a_result() {
+        use poker_trainer::checkup::{checkup_runs, latest_checkup};
+        let rows = |skill: Skill, versions: fn(u32) -> u32| -> Vec<Attempt> {
+            (0..CHECKUP_LEN as u32)
+                .map(|slot| {
+                    let mut attempt = logged(skill, u64::from(slot) + 1, u64::from(slot) + 1, true, "fam");
+                    attempt.mode = Mode::Check;
+                    attempt.gen_version = versions(slot);
+                    attempt.extra.check = Some(CheckRef { run: 1, form: 0, slot });
+                    attempt
+                })
+                .collect()
+        };
+        let half: fn(u32) -> u32 = |slot| if slot < 20 { 2 } else { 3 };
+        let preflop = rows(Skill::Preflop, half);
+        assert_eq!(checkup_runs(&preflop)[0].generator_key, None, "version 2 and 3 preflop items differ");
+        assert!(latest_checkup(Skill::Preflop, &preflop).is_none());
+        // The same version numbers are one generator for a skill the bump didn't touch.
+        let made = rows(Skill::Made, half);
+        assert!(checkup_runs(&made)[0].generator_key.is_some());
+        assert!(latest_checkup(Skill::Made, &made).is_some());
+    }
+
+    #[test]
+    fn the_generator_changes_are_recorded_exactly() {
+        use poker_trainer::item::{generator_changed, GENERATOR_CHANGES};
+        // Each step from version 1 to the current version is listed, in order.
+        let listed: Vec<u32> = GENERATOR_CHANGES.iter().map(|&(version, _)| version).collect();
+        assert_eq!(listed, (2..=GEN_VERSION).collect::<Vec<_>>(), "every GEN_VERSION bump is documented");
+        let to_v2 = [Skill::Spot, Skill::SpotMw, Skill::Equity];
+        for skill in Skill::ALL {
+            assert_eq!(generator_changed(skill, 1, 2), to_v2.contains(&skill), "{skill:?} v1 to v2");
+            assert_eq!(generator_changed(skill, 2, 3), skill == Skill::Preflop, "{skill:?} v2 to v3");
+            assert_eq!(generator_changed(skill, 1, 3), to_v2.contains(&skill) || skill == Skill::Preflop, "{skill:?} v1 to v3");
+            assert!(!generator_changed(skill, GEN_VERSION, GEN_VERSION), "{skill:?}: a version is itself");
+            assert!(generator_changed(skill, GEN_VERSION + 1, GEN_VERSION), "{skill:?}: an unknown version is a change");
+            assert!(generator_changed(skill, GEN_VERSION, GEN_VERSION + 1));
+        }
+        // Rows of a library number never read as a generator version.
+        assert!(generator_changed(Skill::Table, table::LIBRARY_GEN_VERSION, GEN_VERSION));
+    }
+
+    #[test]
+    fn a_chain_waiting_for_the_floor_starts_right_after_the_next_preflop() {
+        // A waiting chain is dealt the moment it fits; until then only preflop comes next.
+        let mut waits = 0;
+        for seed in 0..2_000u64 {
+            let mut session = Session::new(skills_up_to_step(3), &[], 1000, seed).with_preflop_floor();
+            let (mut preflop, mut total) = (0u64, 0u64);
+            for i in 0..30u64 {
+                let waiting = session.chain_is_waiting();
+                let planned = session.try_next_item().unwrap();
+                if waiting {
+                    waits += 1;
+                    let fits = preflop * 100 >= (total + CHAIN_STAGES) * MIN_PREFLOP_PERCENT;
+                    let expected = if fits { Skill::Chain } else { Skill::Preflop };
+                    assert_eq!(planned.skill, expected, "seed {seed} item {i}");
+                }
+                total += 1;
+                preflop += u64::from(planned.skill == Skill::Preflop);
+                session.record(planned, i % 3 != 0);
+            }
+        }
+        assert!(waits > 100, "only {waits} chains waited, so the check above proves little");
+    }
+
+    #[test]
+    fn the_preflop_floor_holds_at_every_point_and_chains_are_not_lost() {
+        let mut chain_items = 0u64;
+        let mut items = 0u64;
+        for seed in 0..1_000u64 {
+            let mut session = Session::new(skills_up_to_step(3), &[], 1000, seed).with_preflop_floor();
+            let (mut preflop, mut total) = (0u64, 0u64);
+            for i in 0..60u64 {
+                let planned = session.try_next_item().unwrap();
+                total += 1;
+                preflop += u64::from(planned.skill == Skill::Preflop);
+                chain_items += u64::from(planned.skill == Skill::Chain);
+                items += 1;
+                assert!(preflop * 100 >= total * MIN_PREFLOP_PERCENT, "seed {seed}: {preflop} of {total}");
+                session.record(planned, i % 3 != 0);
+            }
+        }
+        let pct = chain_items as f64 * 100.0 / items as f64;
+        println!("chain share {pct:.1}%");
+        // Dropping the pick instead of delaying it leaves chain near 7%.
+        assert!(pct >= 11.0, "chain was dealt {pct:.1}% of items");
+    }
+
+    #[test]
+    fn a_look_ahead_copy_knows_when_it_would_be_guessing() {
+        // A family is due, so the next item needs a sibling search.
+        let log = vec![logged(Skill::Made, 42, 1, false, "top")];
+        let mut copy = Session::new(vec![Skill::Made], &log, 10 * DAY_MS, 3).without_sibling_search();
+        assert!(!copy.guessed_without_search());
+        assert!(copy.try_next_item().is_some());
+        assert!(copy.guessed_without_search(), "the review needs a search this copy can't do");
+        // No family is due and no retry is ready: the guess is the real item.
+        let mut plain = Session::new(vec![Skill::Made], &[], 10 * DAY_MS, 3).without_sibling_search();
+        assert!(plain.try_next_item().is_some());
+        assert!(!plain.guessed_without_search());
+        // The real session (not a copy) doesn't guess.
+        let mut real = Session::new(vec![Skill::Made], &log, 10 * DAY_MS, 3);
+        real.try_next_item();
+        assert!(!real.guessed_without_search());
     }
 
     #[test]

@@ -22,9 +22,24 @@ pub const SPOT_COUNT: usize = 3000;
 pub const COUNT_ROBUST: usize = 461;
 pub const COUNT_CLOSE: usize = 282;
 pub const COUNT_DEPENDS: usize = 2257;
-/// Written as `gen_version` on `table` rows. Spot ids mean different spots in different
-/// libraries, so a row with any other value answered an earlier library's spot.
-pub const LIBRARY_GEN_VERSION: u32 = 3;
+/// Library numbers in `gen_version` start here, far above anything the app-wide
+/// generator version can reach, so a library number is never mistaken for a generator version.
+pub const LIBRARY_GEN_BASE: u32 = 1000;
+/// The library this build deals from, as written to `gen_version` on `table` rows:
+/// [`LIBRARY_GEN_BASE`] plus the file's version. Spot ids mean different spots in
+/// different libraries, so a row with any other value answered an earlier library's spot.
+pub const LIBRARY_GEN_VERSION: u32 = LIBRARY_GEN_BASE + 3;
+
+/// The library a `table` row was dealt from, by its `gen_version`. Rows from before
+/// library numbers carry a generator version, and all of them used `spots_v2`.
+pub fn library_of_gen_version(gen_version: u32) -> u32 {
+    if gen_version >= LIBRARY_GEN_BASE {
+        gen_version - LIBRARY_GEN_BASE
+    } else {
+        2
+    }
+}
+
 /// Library version 3 keeps the version 2 line format, so it keeps this header too.
 const FORMAT_HEADER: &str = "#SPOTS v2";
 const SPOT_FIELDS: usize = 17;
@@ -799,7 +814,7 @@ impl TableGrade {
             "With no read on the opponent, this was a fair choice.".to_string()
         } else {
             // Correct only on its share of tables: a read can justify it, but no read can't.
-            format!("It was best at {share:.1}% of simulated tables, so it can be the right read against some opponents.")
+            format!("It was best at {share:.1}% of simulated tables, so it can be the right read at some tables.")
         })
     }
 }

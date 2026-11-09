@@ -1135,7 +1135,7 @@ def run_research(viewport=(390, 844), mobile=True, theme="light", port_offset=0)
         boot_app(page, port, (*viewport, mobile), theme)
         inspector = Inspector(page, viewport, theme, True)
         # --- 1. Start over warns about the next form, not the unfinished one.
-        check_line = lambda form, slot, t: f"{t}\tcheck\t\ttable\t7\t3\t1\t0\t\t1000\tfold\t1\t{form}\t{slot}\t\t\t\t"
+        check_line = lambda form, slot, t: f"{t}\tcheck\t\ttable\t7\t1003\t1\t0\t\t1000\tfold\t1\t{form}\t{slot}\t\t\t\t"
         for form, expect_note in [(3, False), (4, True)]:
             seed_log(page, port, RESEARCH_LOG_COLUMNS + "\n" + check_line(form, 0, 1000) + "\n")
             page.eval("location.hash = '#checkup:table'")
@@ -1307,6 +1307,40 @@ def run_research(viewport=(390, 844), mobile=True, theme="light", port_offset=0)
                 break
             next_drill_item(page)
         check(partial_kept, "no offered form found for the partial End test")
+        # Leaving by the browser's back gesture keeps the cues too, at once and only once.
+        seed_log(page, port, LOG_COLUMNS + "\n")
+        open_limited_drill(page, "spot")
+        back_kept = False
+        for step in range(40):
+            page.wait(READY, 60)
+            current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+            outcomes = graded_outcomes(page, current)
+            offered = [c for c, o in outcomes.items() if o["reflection"]] if current["planned"]["origin"] != "retry" else []
+            type_answer(page, current, "choice", offered[0] if offered else next(iter(outcomes)))
+            page.wait("!!document.querySelector('.reveal')", 30)
+            if offered:
+                time.sleep(0.35)
+                page.eval("document.querySelector('[data-reflect] .btn.cue').click()")
+                before = len(rows_of(page))
+                page.eval("location.hash = '#home'")
+                wait_home(page)
+                deadline = time.time() + 5
+                while len(rows_of(page)) <= before and time.time() < deadline:
+                    time.sleep(0.1)
+                reflections = [r for r in rows_of(page) if r[1] == "reflect"]
+                check(len(reflections) == 1 and reflections[0][23] == "answered" and ":" in reflections[0][10], f"cues lost on the back gesture: {reflections}")
+                # A later session finishing must not write that row again.
+                open_limited_drill(page, "spot")
+                page.wait(READY, 60)
+                page.eval("document.querySelector('.top-bar button.back').click()")
+                page.wait("!!document.querySelector('.big-score') || location.hash === '#home'", 20)
+                time.sleep(0.5)
+                reflections = [r for r in rows_of(page) if r[1] == "reflect"]
+                check(len(reflections) == 1, f"the reflection row was written twice: {reflections}")
+                back_kept = True
+                break
+            next_drill_item(page)
+        check(back_kept, "no offered form found for the back gesture test")
         page.eval("location.hash = '#home'")
         wait_home(page)
         # --- 4. Confidence: asked only when on, before the reveal, on its own skills.
@@ -1576,7 +1610,7 @@ def run_table_spots():
         check(not page.eval("!!document.querySelector('[data-reused]')"), "an early form claimed reuse")
         inspector.snapshot("table-checkup-result", full=True)
         # A start screen for a late form says it reuses spots too.
-        unfinished = "\n".join([LOG_COLUMNS] + [f"{i}\tcheck\t\ttable\t{i}\t3\t1\t0\t0.5000\t1500\tcheck\t1\t6\t{i}\t\t\t\t\t205\trobust" for i in range(3)]) + "\n"
+        unfinished = "\n".join([LOG_COLUMNS] + [f"{i}\tcheck\t\ttable\t{i}\t1003\t1\t0\t0.5000\t1500\tcheck\t1\t6\t{i}\t\t\t\t\t205\trobust" for i in range(3)]) + "\n"
         seed_log(page, port, unfinished)
         page.eval("location.hash = '#checkup:table'")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Resume')", 20)
@@ -1584,15 +1618,16 @@ def run_table_spots():
         page.eval("location.hash = '#home'")
         wait_home(page)
         # An unfinished checkup from the old library can't be resumed: its form names different spots now.
-        seed_log(page, port, unfinished.replace("\t3\t1\t0\t0.5000", "\t2\t1\t0\t0.5000"))
+        seed_log(page, port, unfinished.replace("\t1003\t1\t0\t0.5000", "\t2\t1\t0\t0.5000"))
         page.eval("location.hash = '#checkup:table'")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Begin')", 20)
         text = page.eval("document.body.innerText")
         check("Resume" not in text and "reuses some spots" not in text, f"an old-library checkup was offered for resume: {text[:300]}")
+        check("older spot library" in text, f"an old-library run was not labelled in Earlier checkups: {text[:300]}")
         page.eval("location.hash = '#home'")
         wait_home(page)
         # A late form reuses reserved spots and says so on the result screen.
-        late = "\n".join([LOG_COLUMNS] + [f"{i}\tcheck\t\ttable\t{i}\t3\t1\t0\t0.5000\t1500\tcheck\t1\t5\t{i}\t\t\t\t\t205\trobust" for i in range(3)]) + "\n"
+        late = "\n".join([LOG_COLUMNS] + [f"{i}\tcheck\t\ttable\t{i}\t1003\t1\t0\t0.5000\t1500\tcheck\t1\t5\t{i}\t\t\t\t\t205\trobust" for i in range(3)]) + "\n"
         seed_log(page, port, late)
         page.eval("location.hash = '#checkup:table'")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Resume')", 20)

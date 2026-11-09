@@ -32,7 +32,8 @@ exhaustive 7-card count and regenerating the anchor deck with its full preflop s
 - `drill [--skill NAME]... [--minutes N] [--items N] [--seed N]`: defaults to 10 minutes.
   `--skill` deals only the named skills. Without it, `preflop` plus every skill up to
   your current step is in rotation, and `preflop` is at least 25% of the items
-  (`MIN_PREFLOP_PERCENT`).
+  (`MIN_PREFLOP_PERCENT`). A `chain` picked when its four stages would break that share
+  starts right after the next `preflop` item.
 - `check --skill NAME`: a held-out checkup. 40 new items plus 10 repeats, no feedback
   until the end, then a score with its standard error.
 - `progress`: last-40 stats against the pass marks, current step, baseline and checkup
@@ -179,7 +180,7 @@ offline by the engine in `engine/`. Each verdict is about simulated opponents, d
 says what the verdicts do and don't mean, and every reveal repeats the short version.
 
 Spot ids are not stable between libraries, so `table` rows record the library in their
-`gen_version` column (3 for `spots_v3`); rows from the earlier library keep the old value,
+`gen_version` column (1003 for `spots_v3`, always above any generator version); rows from the earlier library keep the old value,
 still count toward pass marks and earlier checkup scores, and are ignored by the no-repeat
 window and the choice of the next checkup form.
 

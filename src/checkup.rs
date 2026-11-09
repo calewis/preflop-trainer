@@ -5,7 +5,7 @@
 use crate::anchors;
 use crate::board_type::{seed_with_category, BoardCategory};
 use crate::generate::generate;
-use crate::item::{beats_me_seed_with_rung, chain_seed_for_stage, equity_seed_with_rung, read_price_seed_with_rung, ChainStage, BEATS_ME_RUNGS, GEN_VERSION, Item, Question, Skill, HELD_OUT_BIT, READ_PRICE_RUNGS};
+use crate::item::{beats_me_seed_with_rung, chain_seed_for_stage, equity_seed_with_rung, generator_changed, read_price_seed_with_rung, ChainStage, BEATS_ME_RUNGS, GEN_VERSION, Item, Question, Skill, HELD_OUT_BIT, READ_PRICE_RUNGS};
 use crate::log::{Attempt, CheckRef, Mode};
 use crate::progress::{meets_mark, pass_mark, window_metrics, PassMark, WindowMetrics};
 use crate::rng::Rng;
@@ -250,6 +250,10 @@ pub struct CheckupScore {
     /// False for a `table` run on an earlier spot library. It still counts as a
     /// result, but its form names different spots now, so it can't be resumed.
     pub in_current_library: bool,
+    /// The generator or spot library this run's rows came from, or `None` if they
+    /// came from more than one (an old tab finishing the run later), which can't
+    /// be compared with anything and doesn't count as the latest result.
+    pub generator_key: Option<u32>,
 }
 
 /// The next form index for `skill`, one past every form started on the current
@@ -360,9 +364,16 @@ fn score_run(skill: Skill, check: CheckRef, rows: &[&Attempt]) -> CheckupScore {
         metrics,
         agreement: agreement(&plan, &by_slot),
         passed: complete && meets_mark(&mark, &metrics),
-        stale: rows.iter().any(|a| if a.skill == Skill::Table { !a.in_current_library() } else { a.gen_version != GEN_VERSION }),
+        stale: rows.iter().any(|a| if a.skill == Skill::Table { !a.in_current_library() } else { generator_changed(a.skill, a.gen_version, GEN_VERSION) }),
         in_current_library: rows.iter().all(|a| a.in_current_library()),
+        generator_key: single_generator(rows),
     }
+}
+
+/// The one generator or library behind `rows`, if they all agree.
+fn single_generator(rows: &[&Attempt]) -> Option<u32> {
+    let first = rows.first()?.generator_key();
+    rows.iter().all(|a| a.generator_key() == first).then_some(first).flatten()
 }
 
 /// Scores of every checkup run, oldest first.
@@ -387,7 +398,8 @@ pub fn checkup_runs(attempts: &[Attempt]) -> Vec<CheckupScore> {
         .collect()
 }
 
-/// The most recent completed checkup for a skill.
+/// The most recent completed checkup for a skill. A run whose rows span more than
+/// one generator or spot library isn't a result of either, so it doesn't count.
 pub fn latest_checkup(skill: Skill, attempts: &[Attempt]) -> Option<CheckupScore> {
-    checkup_runs(attempts).into_iter().rfind(|s| s.skill == skill && s.complete)
+    checkup_runs(attempts).into_iter().rfind(|s| s.skill == skill && s.complete && s.generator_key.is_some())
 }

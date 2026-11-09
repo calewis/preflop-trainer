@@ -11,7 +11,7 @@ use crate::equity_skill::{equity_band, equity_rung, next_band};
 use crate::family::{family_of, find_sibling};
 use crate::generate::generate;
 use crate::item::{
-    beats_me_seed_with_rung, chain_seed_for_stage, equity_rung_of_seed, CHAIN_STAGES, equity_seed_with_rung, is_held_out, read_price_seed_with_rung, ChainStage, Item, Question, Skill,
+    beats_me_seed_with_rung, chain_seed_for_stage, equity_rung_of_seed, generator_changed, CHAIN_STAGES, equity_seed_with_rung, is_held_out, read_price_seed_with_rung, ChainStage, Item, Question, Skill,
     GEN_VERSION, HELD_OUT_BIT,
 };
 use crate::log::{Attempt, ItemRef, Mode};
@@ -156,14 +156,15 @@ fn median_ms(times: &mut [u32]) -> u32 {
 /// first-time answer at or after the due time moves it up, and a correct answer
 /// at the 30-day step retires it. A later miss starts the ladder again, since a
 /// family is a kind of problem, not one board. Baseline and checkup attempts,
-/// held-out seeds, other [`GEN_VERSION`]s and rows with no family (from before
-/// families were logged) don't count. Attempts must be in time order.
+/// held-out seeds, rows dealt before the skill's generator last changed and rows
+/// with no family (from before families were logged) don't count. Attempts must be
+/// in time order.
 pub fn due_families(attempts: &[Attempt], now_ms: u64) -> Vec<DueFamily> {
     let mut states: HashMap<(Skill, String), LadderState> = HashMap::new();
     let mut order: Vec<(Skill, String)> = Vec::new();
     for attempt in attempts {
         let ItemRef::Seed(seed) = attempt.item else { continue };
-        if attempt.gen_version != GEN_VERSION
+        if generator_changed(attempt.skill, attempt.gen_version, GEN_VERSION)
             || !matches!(attempt.mode, Mode::Drill | Mode::DrillRetry)
             || is_held_out(seed)
             || !reviewed_by_family(attempt.skill)
@@ -304,8 +305,14 @@ pub struct Session {
     chain: Option<(u64, ChainStage)>,
     /// True for the default drill: `preflop` keeps its minimum share.
     preflop_floor: bool,
+    /// A `chain` was picked but wouldn't have left `preflop` its share, so it
+    /// starts right after the next `preflop` item instead of being dropped.
+    chain_waiting: bool,
     /// False on a look-ahead copy, so a guess at the next item can't start a slow search.
     searches_siblings: bool,
+    /// Set on a look-ahead copy when a deal needed a sibling search it couldn't do:
+    /// its guess at the next item is then not the item the real deal will find.
+    skipped_search: bool,
     /// `beats_me`: the rung new items are dealt at.
     beats_me_rung: u8,
     /// `read_price`: the rung new items are dealt at, and the reviews dealt so far.
@@ -356,7 +363,9 @@ impl Session {
             sibling_memo: Rc::new(RefCell::new(HashMap::new())),
             chain: None,
             preflop_floor: false,
+            chain_waiting: false,
             searches_siblings: true,
+            skipped_search: false,
             beats_me_rung: beats_me_rung(attempts),
             read_price_rung: read_price_rung(attempts),
             read_price_reviews: 0,
@@ -430,6 +439,11 @@ impl Session {
         self.rng.below(1000) < READ_PRICE_DEAL_PER_MILLE
     }
 
+    /// True while a picked `chain` is waiting for the next `preflop` item.
+    pub fn chain_is_waiting(&self) -> bool {
+        self.chain_waiting
+    }
+
     /// The fully specified item for a plan from this session: an `equity` item
     /// is served with its rung's current tolerance band.
     pub fn item_for(&self, planned: Planned) -> Item {
@@ -473,7 +487,13 @@ impl Session {
             return Some(self.deal(Skill::Chain, chain_seed_for_stage(hand, stage), Origin::New));
         }
         let blocked = self.blocked();
-        let preflop_owed = self.preflop_owed(blocked);
+        // The chain that had to wait starts as soon as it fits, which takes a
+        // `preflop` item: one is enough unless the floor is exactly met, then two.
+        if self.chain_waiting && self.chain_fits_preflop_floor() {
+            self.chain_waiting = false;
+            return Some(self.deal_fresh(Skill::Chain));
+        }
+        let preflop_owed = self.preflop_owed(blocked) || (self.chain_waiting && blocked != Some(Skill::Preflop));
         // Dealing a retry now must keep retries at or under 1 in MAX_RETRY_ONE_IN.
         let retry_allowed =
             (self.retries_dealt + 1) * MAX_RETRY_ONE_IN <= self.dealt.len() as u64 + 1;
@@ -502,8 +522,10 @@ impl Session {
         } else {
             self.choose_skill(&eligible, blocked)
         };
-        // A chain's stages come in a row, so it only starts if the floor survives them all.
+        // A chain's stages come in a row, so it only starts if the floor survives them
+        // all. Otherwise it waits for the next `preflop` item instead of being lost.
         if skill == Skill::Chain && !self.chain_fits_preflop_floor() {
+            self.chain_waiting = true;
             if blocked == Some(Skill::Preflop) {
                 let others: Vec<Skill> = eligible.iter().copied().filter(|&s| s != Skill::Chain).collect();
                 skill = self.choose_skill(&others, blocked);
@@ -523,15 +545,22 @@ impl Session {
         Some(self.deal_fresh(skill))
     }
 
+    /// True if the last deal on this look-ahead copy was a guess because it needed
+    /// a sibling search, so the player would get a different item from the real deal.
+    pub fn guessed_without_search(&self) -> bool {
+        self.skipped_search
+    }
+
     /// A previously searched sibling, or a new search. `avoid` is the missed
     /// item's own seed, or an impossible seed for a later-day review.
-    fn sibling(&self, skill: Skill, family: &str, base: u64, avoid: u64) -> Option<u64> {
+    fn sibling(&mut self, skill: Skill, family: &str, base: u64, avoid: u64) -> Option<u64> {
         let key = (skill, family.to_string(), base);
         let found = self.sibling_memo.borrow().get(&key).copied();
         if let Some(search) = found {
             return search.result;
         }
         if !self.searches_siblings {
+            self.skipped_search = true;
             return None;
         }
         let result = find_sibling(skill, family, base, avoid);

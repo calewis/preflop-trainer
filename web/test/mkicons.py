@@ -1,4 +1,4 @@
-"""Renders app/icon-*.png from app/icon.svg with headless Chrome. Run on hal."""
+"""Renders app/icon-*.png from app/icon.svg with headless Chrome."""
 import pathlib, subprocess, sys, tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]

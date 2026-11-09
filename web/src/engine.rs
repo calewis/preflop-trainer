@@ -479,10 +479,14 @@ impl Engine {
             return Ok(obj! { "planned": V::Null });
         };
         let mut copy = live.real.clone().without_sibling_search();
-        // The family isn't known ahead of grading, which only matters if a retry
-        // comes due on this very item: then the speculative guess is the same seed.
+        // The family isn't known ahead of grading, but this item's miss can't come
+        // back as the very next item: retries wait at least RETRY_MIN_GAP items.
         copy.record_with_family(current, ok, 0, None);
-        Ok(obj! { "planned": copy.try_next_item().map(planned_json) })
+        let planned = copy.try_next_item();
+        // A retry or review needs a sibling search only the real deal can do. Guessing
+        // would have the prep worker build an item the player won't get, and the job
+        // can't be cancelled, so the real item would wait behind it: guess nothing.
+        Ok(obj! { "planned": planned.filter(|_| !copy.guessed_without_search()).map(planned_json) })
     }
 
     fn session_summary(&self) -> Reply {
@@ -661,7 +665,7 @@ impl Engine {
         let skill = skill_from(arg(fields, 1)?)?;
         let runs = checkup_runs(&self.attempts);
         // A run from an older generator or an earlier spot library can't be picked up.
-        let unfinished = runs.iter().rfind(|r| r.skill == skill).filter(|r| !r.complete && !r.stale && r.in_current_library);
+        let unfinished = unfinished_run(&runs, skill);
         let upcoming_form = unfinished.map_or_else(|| next_checkup_form(skill, &self.attempts), |r| r.form);
         let in_progress = unfinished.map(|r| {
             obj! { "answered": r.answered, "total": CHECKUP_LEN }
@@ -686,10 +690,8 @@ impl Engine {
     fn check_begin(&mut self, fields: &[&str]) -> Reply {
         let skill = skill_from(arg(fields, 1)?)?;
         let resume = arg(fields, 2)? == "1";
-        let unfinished = checkup_runs(&self.attempts)
-            .into_iter()
-            .rfind(|r| r.skill == skill)
-            .filter(|r| !r.complete && !r.stale && r.in_current_library);
+        let runs = checkup_runs(&self.attempts);
+        let unfinished = unfinished_run(&runs, skill);
         let (run, form) = match unfinished.filter(|_| resume) {
             Some(score) => (score.run, score.form),
             None => {
@@ -944,10 +946,16 @@ fn skill_status(s: &SkillStats) -> String {
     }
 }
 
+/// The player's latest run of `skill` this build can still deal, if it's unfinished.
+/// A run from an older generator or an earlier spot library can't be picked up, and
+/// it mustn't hide a newer run that can, as it would if an old tab wrote it later.
+fn unfinished_run(runs: &[CheckupScore], skill: Skill) -> Option<&CheckupScore> {
+    runs.iter().rfind(|r| r.skill == skill && r.in_current_library && !r.stale).filter(|r| !r.complete)
+}
+
 /// `None` when no checkup is offered for this skill.
 fn checkup_action(s: &SkillStats, checkups: &[CheckupScore]) -> V {
-    // A run from an older generator or an earlier spot library can't be picked up.
-    let unfinished = checkups.iter().rfind(|r| r.skill == s.skill).filter(|r| !r.complete && !r.stale && r.in_current_library);
+    let unfinished = unfinished_run(checkups, s.skill);
     if let Some(run) = unfinished {
         return obj! {
             "skill": s.skill.name(),
@@ -1020,6 +1028,9 @@ fn stats_json(s: &SkillStats, checkups: &[CheckupScore]) -> V {
     }
 }
 
+/// Beside a run on a spot library this build no longer deals.
+const OLDER_LIBRARY_NOTE: &str = "older spot library";
+
 fn checkup_json(s: &CheckupScore) -> V {
     let status = if !s.complete {
         format!("Unfinished: {} of {CHECKUP_LEN} answered", s.answered)
@@ -1038,6 +1049,7 @@ fn checkup_json(s: &CheckupScore) -> V {
         "score": s.complete.then(|| present::checkup_score(s)),
         "margin": s.complete.then(|| present::checkup_margin(s)),
         "status": status,
+        "library_note": (s.skill == Skill::Table && !s.in_current_library).then_some(OLDER_LIBRARY_NOTE),
     }
 }
 
@@ -1048,7 +1060,9 @@ fn checkup_report_json(s: &CheckupScore, earlier: &[&CheckupScore]) -> V {
         ("mark".to_string(), mark_lines(s.skill).into()),
         ("measures".to_string(), measure_lines(s.skill, &s.metrics).into()),
     ];
-    let compared = earlier.last().map(|prior| present::comparison(prior, s));
+    // Only a run on the same generator or spot library asked comparable questions.
+    let prior = s.generator_key.and_then(|key| earlier.iter().rev().find(|r| r.generator_key == Some(key)));
+    let compared = prior.map(|prior| present::comparison(prior, s));
     json.push(("comparison".to_string(), compared.into()));
     let reused = (s.skill == Skill::Table && s.in_current_library && table::checkup_form_reuses_spots(s.form))
         .then_some(table::REUSE_NOTE);
@@ -1457,10 +1471,14 @@ mod tests {
 
     #[test]
     fn an_old_generators_unfinished_checkup_cannot_resume() {
-        load("1\tcheck\t\thit\t7\t1\t1\t0\t\t1000\t20\t1\t5\t0\t\t\t\t\n");
-        assert!(dispatch("check_info\x1fhit").contains("\"in_progress\":null"), "offered a resume");
-        let begun = dispatch("check_begin\x1fhit\x1f1");
+        // `spot` changed at version 2, so its old items can't be dealt again.
+        load("1\tcheck\t\tspot\t7\t1\t1\t0\t\t1000\tcall\t1\t5\t0\t\t\t\t\n");
+        assert!(dispatch("check_info\x1fspot").contains("\"in_progress\":null"), "offered a resume");
+        let begun = dispatch("check_begin\x1fspot\x1f1");
         assert!(begun.contains("\"run\":2"), "{begun}");
+        // `hit` hasn't changed since version 1, so the same questions are still there.
+        load("1\tcheck\t\thit\t7\t1\t1\t0\t\t1000\t20\t1\t5\t0\t\t\t\t\n");
+        assert!(dispatch("check_info\x1fhit").contains("\"in_progress\":{\"answered\":1"), "a run nothing has changed can resume");
     }
 
     #[test]
@@ -1505,7 +1523,7 @@ mod tests {
 
     #[test]
     fn starting_over_a_late_table_checkup_warns_about_the_next_form() {
-        let line = |form: u32, slot: u32| format!("{}\tcheck\t\ttable\t7\t3\t1\t0\t\t1000\tfold\t1\t{form}\t{slot}\t\t\t\t\n", 100 + slot);
+        let line = |form: u32, slot: u32| format!("{}\tcheck\t\ttable\t7\t1003\t1\t0\t\t1000\tfold\t1\t{form}\t{slot}\t\t\t\t\n", 100 + slot);
         let note = "\"start_over_note\":";
         // Form 3 unfinished: starting over deals form 4, which still has fresh spots.
         load(&line(3, 0));
@@ -1547,6 +1565,69 @@ mod tests {
         load(&rows);
         let report = dispatch("check_report\x1f1");
         assert!(report.contains("\"reused_note\":null"), "{report}");
+    }
+
+    fn table_run(run: u32, form: u32, gen_version: u32, loss: f64, start: u64) -> String {
+        (0..50u64)
+            .map(|slot| {
+                format!("{}\tcheck\t\ttable\t7\t{gen_version}\t1\t0\t{loss:.4}\t1000\tfold\t{run}\t{form}\t{slot}\t\t\t\t\t205\trobust\n", start + slot)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_checkup_is_compared_only_with_runs_on_the_same_library() {
+        // An old-library run, then a current one, then another current one, then a mixed one.
+        let old = table_run(1, 0, 2, 0.5, 100);
+        let first_new = table_run(2, 0, 1003, 1.0, 1000);
+        let second_new = table_run(3, 1, 1003, 0.8, 2000);
+        let mixed: String = (0..50u64)
+            .map(|slot| {
+                let gen_version = if slot < 25 { 2 } else { 1003 };
+                format!("{}\tcheck\t\ttable\t7\t{gen_version}\t1\t0\t0.7000\t1000\tfold\t4\t2\t{slot}\t\t\t\t\t205\trobust\n", 3000 + slot)
+            })
+            .collect();
+        load(&format!("{old}{first_new}{second_new}{mixed}"));
+        let first = dispatch("check_report\x1f2");
+        assert!(first.contains("\"comparison\":null"), "the first new run has only an old-library run behind it: {first}");
+        assert!(first.contains("older spot library"), "the old run in the list is labelled: {first}");
+        let second = dispatch("check_report\x1f3");
+        assert!(second.contains("Better than your last checkup"), "compared with the first new run: {second}");
+        assert!(second.contains("older spot library"), "{second}");
+        let unmixed = dispatch("check_report\x1f4");
+        assert!(unmixed.contains("\"comparison\":null"), "a run across libraries compares with nothing: {unmixed}");
+    }
+
+    #[test]
+    fn an_old_tabs_unfinished_run_does_not_hide_a_resumable_one() {
+        // Run 1 is on this library and unfinished; run 2, on the old one, was written after it.
+        let line = |t: u64, gen_version: u32, run: u32| format!("{t}\tcheck\t\ttable\t7\t{gen_version}\t1\t0\t\t1000\tfold\t{run}\t0\t0\t\t\t\t\n");
+        load(&(line(100, 1003, 1) + &line(200, 2, 2)));
+        let info = dispatch("check_info\x1ftable");
+        assert!(info.contains("\"in_progress\":{\"answered\":1"), "the current run stays resumable: {info}");
+        let home = dispatch("home");
+        assert!(home.contains("\"resume\":true"), "{home}");
+        let begun = dispatch("check_begin\x1ftable\x1f1");
+        assert!(begun.contains("\"run\":1,"), "resumes run 1, not a new one: {begun}");
+    }
+
+    #[test]
+    fn a_retry_or_review_coming_next_is_not_speculated() {
+        // Two families are due, so whatever is dealt first, the next one needs a sibling search.
+        let row = |t: u64, seed: u64, family: &str| {
+            format!("{t}\tdrill\t\tmade\t{seed}\t3\t0\t0\t\t2000\tx\t\t\t\t\t\t\t\t\t\t{family}\t\t\t\n")
+        };
+        load(&(row(100, 1, "pair") + &row(200, 2, "twopair")));
+        dispatch("session_open\x1f7\x1f1000000000\x1fmade");
+        assert!(dispatch("session_next\x1f0").contains("\"planned\""));
+        let peek = dispatch("session_peek\x1f1");
+        assert!(peek.contains("\"planned\":null"), "a review coming up needs a search: {peek}");
+        // Ordinary items are still looked ahead.
+        load("");
+        dispatch("session_open\x1f5\x1f1000000\x1fprice");
+        assert!(dispatch("session_next\x1f0").contains("\"planned\""));
+        let peek = dispatch("session_peek\x1f1");
+        assert!(!peek.contains("\"planned\":null"), "{peek}");
     }
 
     #[test]

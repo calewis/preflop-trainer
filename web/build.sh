@@ -1,10 +1,8 @@
 #!/bin/sh
 # Rebuilds app/trainer.wasm and stamps sw.js with a version derived from the
 # app's contents, so an update reaches clients only when something changed.
-# Run it on hal from the repo root, then copy the two outputs back:
-#   tools/hal-run ./web/build.sh
-#   tools/hal-run --fetch app/trainer.wasm app/trainer.wasm
-#   tools/hal-run --fetch sw.js sw.js
+# Run it from the repo root on a machine with the wasm32-unknown-unknown target,
+# and commit app/trainer.wasm and sw.js together.
 set -eu
 cd "$(dirname "$0")/.."
 # Keep local paths out of the panic messages compiled into the wasm.

@@ -465,12 +465,26 @@ fn plural_cards(count: u32, rank: u8) -> String {
     format!("{count} {}{}", rank_char(rank), if count == 1 { "" } else { "s" })
 }
 
+/// `standing`'s percent to one decimal, kept on its band's side of the band's edge:
+/// a true 39.965 is under 40%, so it must not read "40.0%" beside that answer.
+fn pct_in_band(standing: &MixStanding) -> f64 {
+    let rounded = (standing.pct * 10.0).round() / 10.0;
+    if MixBand::from_pct(rounded) == standing.band {
+        return rounded;
+    }
+    match standing.band {
+        MixBand::Ahead => MIX_AHEAD_PCT + 0.1,
+        MixBand::Behind => MIX_BEHIND_PCT - 0.1,
+        MixBand::Even => rounded,
+    }
+}
+
 /// The one-line method after a `Mix` answer.
 pub fn mix_method(standing: &MixStanding) -> String {
     let ties = if standing.tie > 0 { format!(", {} tie", standing.tie) } else { String::new() };
     format!(
         "Of the {} hands in that mix, {} beat you{ties}. That makes you {:.1}% against it.",
-        standing.total, standing.beat_you, standing.pct
+        standing.total, standing.beat_you, pct_in_band(standing)
     )
 }
 

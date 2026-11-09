@@ -845,7 +845,7 @@ function row(label, value) {
 
 function checkupLine(run) {
   const date = runDate(run);
-  const prefix = `${run.title}${date ? ` (${date})` : ''}`;
+  const prefix = `${run.title}${date ? ` (${date})` : ''}${run.library_note ? `, ${run.library_note}` : ''}`;
   if (!run.complete) return h('li', {}, `${prefix}: ${run.status}`);
   return h('li', {}, `${prefix}: ${run.score}, ${run.margin}. ${run.status}.`);
 }
@@ -1127,6 +1127,7 @@ export function noticeIfStorageLost() {
 
 export function endEverything() {
   flushConfidence();
+  if (pendingReflection) { pendingReflection(); pendingReflection = null; }
   if (drill && drill.clock) clearInterval(drill.clock);
   drill = null;
   baseline = null;

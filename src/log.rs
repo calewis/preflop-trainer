@@ -2,7 +2,7 @@
 
 use crate::baseline::BaselineItem;
 use crate::grade::{Outcome, Reveal};
-use crate::item::{ChainStage, Skill, GEN_VERSION};
+use crate::item::{generator_epoch, ChainStage, Skill, GEN_VERSION};
 use crate::reflection::ReflectState;
 use crate::schedule::{Origin, Planned};
 use crate::table::{self, Verdict};
@@ -128,7 +128,7 @@ pub struct AttemptExtra {
     pub opponents: Option<u8>,
     /// `table`: which spot was answered and its verdict, so pass marks and the
     /// no-repeat window don't need the spot library. The id only means anything
-    /// in the library that row's `gen_version` names.
+    /// in the library that row's `gen_version` names (see [`Attempt::in_current_library`]).
     pub table_spot: Option<u16>,
     pub table_verdict: Option<Verdict>,
     /// The item's family, so scheduling and comparisons needn't regenerate it.
@@ -244,6 +244,16 @@ impl Attempt {
     /// practice, but its spot id names a different spot now.
     pub fn in_current_library(&self) -> bool {
         self.skill != Skill::Table || self.gen_version == table::LIBRARY_GEN_VERSION
+    }
+
+    /// Which generator or spot library wrote this row. Two rows with the same key
+    /// came from the same questions; `None` for a version this app doesn't know.
+    pub fn generator_key(&self) -> Option<u32> {
+        if self.skill == Skill::Table {
+            Some(table::library_of_gen_version(self.gen_version))
+        } else {
+            generator_epoch(self.skill, self.gen_version)
+        }
     }
 
     /// Correct, or close enough to count: outs within 1, spots within the close band.

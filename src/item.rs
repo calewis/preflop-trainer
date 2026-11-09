@@ -7,8 +7,34 @@ use crate::preflop::{Seat, Situation};
 use crate::read_price::DrawKind;
 use crate::table::TableQuestion;
 
-/// Bump whenever a generator's output for a given seed changes.
+/// Bump whenever a generator's output for a given seed changes, and add the
+/// bump to [`GENERATOR_CHANGES`].
 pub const GEN_VERSION: u32 = 3;
+
+/// Which skills' generators changed at each [`GEN_VERSION`], so a bump for one skill
+/// doesn't void another skill's unfinished checkups or queued reviews. `chain` and
+/// `beats_me` first appeared in version 2 and `read_price` in version 3, so they have no
+/// earlier rows to compare.
+pub const GENERATOR_CHANGES: [(u32, &[Skill]); 2] = [
+    (2, &[Skill::Spot, Skill::SpotMw, Skill::Equity]),
+    (3, &[Skill::Preflop]),
+];
+
+/// Which of `skill`'s generators wrote a row marked `version`: the number of times
+/// it has changed up to that version. `None` for a version outside this app's history.
+/// Not meaningful for `table`, whose rows name a spot library instead.
+pub fn generator_epoch(skill: Skill, version: u32) -> Option<u32> {
+    if version == 0 || version > GEN_VERSION {
+        return None;
+    }
+    Some(GENERATOR_CHANGES.iter().filter(|(at, skills)| *at <= version && skills.contains(&skill)).count() as u32)
+}
+
+/// True if `skill`'s items differ between versions `from` and `to` of the
+/// generators. An unknown version counts as a change, since nothing is known about it.
+pub fn generator_changed(skill: Skill, from: u32, to: u32) -> bool {
+    from != to && (generator_epoch(skill, from).is_none() || generator_epoch(skill, from) != generator_epoch(skill, to))
+}
 
 /// Seeds with this bit set are held out for checkups: drills and reviews never
 /// serve one. See [`is_held_out`].
