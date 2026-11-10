@@ -33,7 +33,7 @@ exhaustive 7-card count and regenerating the anchor deck with its full preflop s
   `--skill` deals only the named skills. Without it, `preflop` plus every skill up to
   your current step is in rotation, and `preflop` is at least 25% of the items
   (`MIN_PREFLOP_PERCENT`). A `chain` picked when its four stages would break that share
-  starts right after the next `preflop` item.
+  waits and starts after the next one or two `preflop` items.
 - `check --skill NAME`: a held-out checkup. 40 new items plus 10 repeats, no feedback
   until the end, then a score with its standard error.
 - `progress`: last-40 stats against the pass marks, current step, baseline and checkup
@@ -224,12 +224,15 @@ Missed items no longer return as the same seed. `family_of` gives each item a fa
 `made` answer class, a `price` bet size, an `outs` band with whether a tempting card exists,
 and so on), logged in a new column. A same-session retry and a later-day review deal a fresh
 sibling: a new non-held-out seed in the same family, found by bounded rejection sampling (200
-tries, and at most 3 exact equities for `equity`). If none turns up the player gets a plain new
+tries, 3,000 for `preflop`, and at most 3 exact equities for `equity`). If none turns up the player gets a plain new
 item of that skill, and a later-day family waits for another session. `anchor`, `board_type`, `table` and `chain` keep
 their own scheduling. Later-day review is per (skill, family): due 1, 3, 7, 14 and 30 days
 after each correct review, reset to 1 day by a miss, retired after a correct 30-day review,
 and a retired family can come back on a new miss. Among due families the slowest relative to
 the skill's median come first. Rows logged before families existed are not reviewed.
+A generator change resets queued reviews and unfinished checkups only for the skills it changed:
+`spot`, `spot_mw` and `equity` at version 2, and `preflop` at version 3. `table` checkups reset
+when the spot library changes instead.
 
 Spot reveals add library-computed flip facts: the largest call that breaks even, from
 `C* = share * (P + X) / (1 - share)`, and on heads-up spots how many next cards put hero
