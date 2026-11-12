@@ -84,10 +84,14 @@ an early or middle seat, from the cutoff or button, or from the blinds, with ext
 the action from the big blind), a raise with callers (again with extra big blind calls), being
 3-bet after you opened (in position or out of position) and being 4-bet after you 3-bet.
 Hands not listed fold. The ranges are rules of thumb for a loose game with few light
-3-bets, so raises are for value. Drills deal hands you could really hold: after opening,
-the seat's open range; after 3-betting, the hands the chart 3-bets. About a third of
-preflop items are folded to you, a fifth each are limpers or a lone raise, a tenth each
-are a raise with callers or a 3-bet, and about 3% are a 4-bet.
+3-bets, so raises are for value. You 3-bet, but against a 3-bet or a 4-bet only kings or
+aces continue (4-bet or all in) and everything else folds, queens and ace-king included.
+Drills deal hands you could really hold: after opening, the seat's open range; after
+3-betting, the hands the chart 3-bets. Facing a 3-bet or a 4-bet, a third of the hands are
+kings or aces and the rest are tempting folds (tens or better, ace-king, ace-queen, ace-jack
+suited, king-queen suited), never trash. About a third of preflop items are folded to you,
+a fifth limpers, a quarter a lone raise and a tenth a raise with callers; 3-bets (about 4%)
+and 4-bets (about 1.5%) are rare.
 
 Attempts go to `$POKER_TRAINER_HOME/attempts.tsv` (default `~/.poker-trainer/`), an
 append-only log. Colour is used only on a terminal with `NO_COLOR` unset.

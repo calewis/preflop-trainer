@@ -154,8 +154,11 @@ pub fn generate_preflop(seed: u64, players: u8) -> Item {
 /// would open on the button, so there are no obvious folds.
 fn deal_preflop_hand(rng: &mut Rng, seat: Seat, situation: Situation) -> Holding {
     let pool = match situation {
-        Situation::ThreeBet { .. } => Some(CARD.open_range(seat).expect("an opener has an open range").range),
-        Situation::FourBet => Some(chart_for_three_bet(seat)),
+        Situation::ThreeBet { .. } => {
+            let opened = CARD.open_range(seat).expect("an opener has an open range").range;
+            Some(close_to_the_line(rng, seat, situation, opened))
+        }
+        Situation::FourBet => Some(close_to_the_line(rng, seat, situation, chart_for_three_bet(seat))),
         Situation::Raised | Situation::RaisedCalled(_) => Some(relevant_range(seat, situation)),
         Situation::FoldedTo | Situation::Limpers(_) if rng.chance(1, 2) => Some(relevant_range(seat, situation)),
         _ => None,
@@ -169,6 +172,20 @@ fn deal_preflop_hand(rng: &mut Rng, seat: Seat, situation: Situation) -> Holding
     }
 }
 
+/// Strong hands a player is tempted to continue with against a 3-bet or a 4-bet.
+const TEMPTING: &str = "TT+ AJs+ KQs AQo+";
+
+/// Facing a 3-bet or a 4-bet only kings or aces continue, so most hands are plain folds.
+/// Deal from the hands near the line instead: a third of the time a hand that continues,
+/// otherwise a tempting hand that folds, always among the hands `held` allows.
+fn close_to_the_line(rng: &mut Rng, seat: Seat, situation: Situation, held: Range) -> Range {
+    let chart = chart_for(seat, situation).expect("this situation has a chart");
+    let (raise, call) = chart.lines();
+    let continues = raise.range.union(&call.range);
+    let wanted = if rng.chance(1, 3) { continues } else { Range::parse(TEMPTING).without(&continues) };
+    wanted.intersect(&held)
+}
+
 /// The 3-bet hands of the chart hero used to 3-bet from this seat.
 fn chart_for_three_bet(seat: Seat) -> Range {
     let chart = chart_for(seat, Situation::Raised).expect("the raised chart");
@@ -179,14 +196,16 @@ fn chart_for_three_bet(seat: Seat) -> Range {
 /// need two earlier players, so a table with fewer gives that share to a lone raise.
 const SHARE_FOLDED: u64 = 28;
 const SHARE_LIMPERS: u64 = 22;
-const SHARE_RAISED: u64 = 22;
-const SHARE_CALLERS: u64 = 13;
-const SHARE_THREE_BET: u64 = 12;
-// The remaining 3 percent is facing a 4-bet.
+const SHARE_RAISED: u64 = 27;
+const SHARE_CALLERS: u64 = 16;
+/// Facing a 3-bet or a 4-bet is rare: only kings or aces continue, so these spots
+/// teach one rule and would mostly be folds if dealt often.
+const SHARE_THREE_BET: u64 = 5;
+// The remaining 2 percent is facing a 4-bet.
 /// In the big blind: limpers, a lone raise, callers, a 4-bet.
-const BB_SHARES: [u64; 4] = [40, 32, 20, 8];
+const BB_SHARES: [u64; 4] = [42, 36, 20, 2];
 /// First to act can open and then be 3-bet.
-const FIRST_TO_ACT_THREE_BET: u64 = 18;
+const FIRST_TO_ACT_THREE_BET: u64 = 7;
 
 /// Only possible situations: first to act is folded to or has opened and been
 /// 3-bet, the big blind is never folded to and never opens, and limpers never

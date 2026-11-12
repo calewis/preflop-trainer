@@ -276,9 +276,13 @@ impl Chart {
         }
     }
 
-    /// `3-bet JJ+ AQs+ AKo. Call 22 33. Fold the rest.`, the chart as a line.
+    /// `3-bet JJ+ AQs+ AKo. Call 22 33. Fold the rest.`, the chart as a line. A chart
+    /// with an empty call line, such as facing a 4-bet, has no call sentence.
     pub fn summary(self) -> String {
         let (raise, call) = self.lines();
+        if call.text.is_empty() && self.extra_call().is_none() {
+            return format!("{}. {} {}. Fold the rest.", self.title(), self.raise_word(), raise.text);
+        }
         match self.extra_call() {
             Some(extra) => format!(
                 "{}. {} {}. Call {}. Also call {} here. Fold the rest.",
@@ -500,72 +504,32 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
             "A weak offsuit ace is dominated with this many hands in, so top pair is often second best."
         }
 
-        // You opened and got 3-bet.
+        // You opened and got 3-bet. Both charts continue only with kings or aces.
         (ThreeBetIp | ThreeBetOop, Raise, KingsOrAces) => {
-            "Aces or kings are ahead of most of the hands that 3-bet here, so 4-bet and get more money in."
+            "Aces or kings are the only hands with enough equity to get the money in against a 3-bet, so 4-bet."
         }
-        (ThreeBetIp, Call, Queens) => {
-            "Queens are strong but lose to the biggest hands that 3-bet here, so call and keep the pot smaller."
+        (ThreeBetIp | ThreeBetOop, Fold, Queens) => {
+            "A 3-bet against your open is usually aces, kings or ace-king, and queens are behind that range, so fold."
         }
-        (ThreeBetOop, Call, Queens) => {
-            "Queens are strong but lose to the biggest hands that 3-bet here, so call and play a smaller pot."
+        (ThreeBetIp | ThreeBetOop, Fold, AceKing) => {
+            "A 3-bet against your open is usually aces, kings or ace-king, and even ace-king is behind that range, so fold."
         }
-        (ThreeBetIp, Call, Jacks | Tens) => {
-            "This pair beats some of the hands that 3-bet here but not the biggest ones, so call and use position."
-        }
-        (ThreeBetOop, Call, Jacks | Tens) => {
-            "This pair beats some of the hands that 3-bet here but not the biggest ones, so call and keep the pot small."
-        }
-        (ThreeBetIp, Call, MiddlePair | SmallPair) => {
-            "This pair flops a set about one time in eight, and in position a set can stack a 3-bettor's big pair."
-        }
-        (ThreeBetOop, Call, MiddlePair | SmallPair) => {
-            "This pair flops a set about one time in eight, and a set gets paid when the 3-bettor has a big pair."
-        }
-        (ThreeBetOop, Fold, SmallPair) => {
-            "Out of position the smallest pairs rarely win without a set, so they fold where bigger pairs can call."
-        }
-        (ThreeBetIp | ThreeBetOop, Call, AceKing) => {
-            "Ace-king makes top pair with the best kicker, so call and see the flop rather than 4-bet into bigger pairs."
-        }
-        (ThreeBetIp, Call, AceQueen) => {
-            "Ace-queen suited makes top pair or the nut flush draw and plays well in position."
-        }
-        (ThreeBetOop, Call, AceQueen) => {
-            "Ace-queen suited makes top pair or the nut flush draw, enough to call even out of position."
-        }
-        (ThreeBetIp, Call, SuitedAce) => {
-            "Ace-jack suited makes top pair or the nut flush draw and plays well in position."
-        }
-        (ThreeBetIp, Call, SuitedBroadway) => {
-            "King-queen suited flops strong pairs and big draws and plays well in position."
+        (ThreeBetIp | ThreeBetOop, Fold, Jacks | Tens | MiddlePair | SmallPair) => {
+            "A 3-bet against your open is usually aces, kings or ace-king, and this pair is behind that range, so fold."
         }
         (ThreeBetIp | ThreeBetOop, Fold, AceQueen) => {
-            "Ace-queen offsuit is dominated by the ace-kings that 3-bet here and behind the big pairs."
+            "A 3-bet against your open is usually aces, kings or ace-king, and ace-queen is dominated by the ace-kings, so fold."
         }
-        (ThreeBetIp | ThreeBetOop, Fold, SuitedAce) => {
-            "A smaller suited ace is dominated by the better aces that 3-bet here, so fold."
-        }
-        (ThreeBetIp | ThreeBetOop, Fold, SuitedBroadway) => "These cards are usually behind the big hands that 3-bet here.",
-        (ThreeBetIp | ThreeBetOop, Fold, SuitedConnector) => {
-            "A suited connector is usually behind the hands that 3-bet here, so fold."
-        }
-        (ThreeBetIp | ThreeBetOop, Fold, OffsuitBroadway) => "Offsuit high cards are usually behind the hands that 3-bet here.",
-        (ThreeBetIp | ThreeBetOop, Fold, OffsuitAce | OtherSuited | OtherOffsuit) => {
-            "This hand is usually behind the hands that 3-bet here, so fold."
+        (ThreeBetIp | ThreeBetOop, Fold, _) => {
+            "A 3-bet against your open is usually aces, kings or ace-king, and this hand is behind that range, so fold."
         }
 
-        // You 3-bet and got 4-bet.
+        // You 3-bet and got 4-bet. Only kings or aces continue.
         (FourBet, Raise, KingsOrAces) => "Aces or kings are the hands you 3-bet for, so go all in now.",
-        (FourBet, Call, Queens) => {
-            "Queens are too good to fold to a 4-bet, but going all in runs into aces and kings, so call and see the flop."
+        (FourBet, Fold, Queens) => {
+            "Queens are behind the aces and kings that 4-bet here and only slightly ahead of ace-king, so fold."
         }
-        (FourBet, Call, AceKing) => {
-            "Suited ace-king has enough equity to call a 4-bet, but going all in risks the big pairs that beat it."
-        }
-        (FourBet, Fold, AceKing) => {
-            "Offsuit ace-king is behind the big pairs that 4-bet here and has no flush draw to help it, so fold."
-        }
+        (FourBet, Fold, AceKing) => "Ace-king is behind the big pairs that 4-bet here, so fold and wait for aces or kings.",
         (FourBet, Fold, Jacks) => "Jacks are behind the big pairs that 4-bet here and only slightly ahead of ace-king.",
         (FourBet, Fold, AceQueen) => "Ace-queen is dominated by the ace-kings that 4-bet here and behind the big pairs.",
         (FourBet, Fold, _) => "A 4-bet here is almost always a big pair or ace-king, and this hand is behind that.",
@@ -632,6 +596,21 @@ impl Range {
     /// Share of all 1,326 starting combinations, 0 to 100.
     pub fn percent_of_hands(&self) -> f64 {
         f64::from(self.combo_count()) * 100.0 / 1326.0
+    }
+
+    /// A range from card notation such as `TT+ AJs+ KQs`.
+    pub fn parse(text: &str) -> Range {
+        parse_range(text.as_bytes(), 0, text.len())
+    }
+
+    /// The hands in both ranges.
+    pub fn intersect(&self, other: &Range) -> Range {
+        Range { grid: core::array::from_fn(|row| self.grid[row] & other.grid[row]) }
+    }
+
+    /// The hands in this range and not in `other`.
+    pub fn without(&self, other: &Range) -> Range {
+        Range { grid: core::array::from_fn(|row| self.grid[row] & !other.grid[row]) }
     }
 
     pub fn union(&self, other: &Range) -> Range {

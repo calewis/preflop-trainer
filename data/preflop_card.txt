@@ -36,18 +36,20 @@ face_callers.call = 22 33 44 55 66 77 88 99 TT JJ A2s A3s A4s A5s A6s A7s A8s A9
 # Closing the action from the big blind, these also call.
 face_callers.big_blind.call = ATo KJo KTo QJo QTo JTo
 # You opened and were 3-bet. In position means you did not open the small blind and the 3-bettor is in a blind.
+# In these games a 3-bet is usually aces, kings or ace-king, so only kings or aces continue, in or out of
+# position. Queens and ace-king fold too, and nothing calls: the call lines are left empty on purpose.
 three_bet.ip.fourbet = KK+
-three_bet.ip.call = 22 33 44 55 66 77 88 99 TT JJ QQ AKs AKo AQs AJs KQs
+three_bet.ip.call =
 three_bet.oop.fourbet = KK+
-three_bet.oop.call = 66 77 88 99 TT JJ QQ AKs AKo AQs
-# You 3-bet and got 4-bet.
+three_bet.oop.call =
+# You 3-bet and got 4-bet: all in with kings or aces, fold everything else, queens and ace-king included.
 four_bet.allin = KK+
-four_bet.call = QQ AKs
+four_bet.call =
 note.seats = Count the players still to act behind you: 5 or more is early, 4 is middle, 3 is cutoff, 2 is button, 1 is small blind. At 5 players the first to act is middle. At 4 players the first to act is cutoff.
 note.open = Folded to you: raise to 3bb with your seat's range, otherwise fold.
 note.iso = One or more limpers: raise to 4bb plus 1bb per limper with iso.raise, and from the cutoff or button also with iso.late.raise. Limp along with the rest of iso.limp only from the cutoff, button or small blind, or when two or more have limped. Fold the rest.
 note.face_raise = One raise and no callers: early and middle seats have the tightest lists, the cutoff and button 3-bet and call wider, and the blinds have their own lists. From the big blind, also call more suited hands and every offsuit hand with two cards ten or higher. 3-bet to about 3 times the raise, call or fold.
 note.callers = A raise and at least one caller: use the callers chart. Fewer hands 3-bet here, and hands that make big hands multiway get better. 3-bet to 3 times the raise plus one more raise per caller. From the big blind, also call the other offsuit hands with two cards ten or higher.
-note.three_bet = You opened and got 3-bet: use the in-position chart if you did not open the small blind and the 3-bettor is in a blind, otherwise the out-of-position chart. 4-bet to about 2.5 times the 3-bet, call or fold.
-note.four_bet = You 3-bet and got 4-bet: go all in with kings or aces, call queens and ace-king suited, fold everything else.
+note.three_bet = You opened and got 3-bet: use the in-position chart if you did not open the small blind and the 3-bettor is in a blind, otherwise the out-of-position chart. Both charts are the same: 4-bet kings or aces to about 2.5 times the 3-bet and fold everything else, queens and ace-king included.
+note.four_bet = You 3-bet and got 4-bet: go all in with kings or aces and fold everything else, queens and ace-king included.
 note.big_blind = In the big blind with no raise, check. With limpers, raise iso.raise hands and check the rest.

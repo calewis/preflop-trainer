@@ -9,17 +9,20 @@ use crate::table::TableQuestion;
 
 /// Bump whenever a generator's output for a given seed changes, and add the
 /// bump to [`GENERATOR_CHANGES`].
-pub const GEN_VERSION: u32 = 4;
+pub const GEN_VERSION: u32 = 5;
 
 /// Which skills' generators changed at each [`GEN_VERSION`], so a bump for one skill
 /// doesn't void another skill's unfinished checkups or queued reviews. `chain` and
 /// `beats_me` first appeared in version 2 and `read_price` in version 3, so they have no
 /// earlier rows to compare. At version 4 the preflop card's wider 3-bets change which
 /// hands face a 4-bet, and the big blind's extra calls join the hands dealt against a raise.
-pub const GENERATOR_CHANGES: [(u32, &[Skill]); 3] = [
+/// At version 5 only kings or aces continue against a 3-bet or a 4-bet, so those spots are
+/// dealt rarely and with hands close to that line.
+pub const GENERATOR_CHANGES: [(u32, &[Skill]); 4] = [
     (2, &[Skill::Spot, Skill::SpotMw, Skill::Equity]),
     (3, &[Skill::Preflop]),
     (4, &[Skill::Preflop]),
+    (5, &[Skill::Preflop]),
 ];
 
 /// Which of `skill`'s generators wrote a row marked `version`: the number of times

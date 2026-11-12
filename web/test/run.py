@@ -2450,6 +2450,9 @@ def check_card_charts(page, inspector):
         check(page.eval(seat_group_visible) == seat_visible, f"seat tabs at situation {k}")
         check(page.eval(f"[...document.querySelectorAll('.legend li')].some(l => l.textContent.includes({json.dumps(word)}))"),
               f"legend misses {word} at situation {k}")
+        # Facing a 3-bet or a 4-bet nothing calls, so the chart shows only its raise line.
+        if k >= 4:
+            check(page.eval("document.querySelectorAll('.range-lines h3').length") == 1, f"empty call line shown at situation {k}")
         inspector.snapshot(f"card-chart-{k}")
     # The callers chart adds two calls in the big blind.
     page.eval("document.querySelectorAll('.tabs')[1].children[3].click(); document.querySelectorAll('.tabs')[0].children[5].click();")
@@ -3174,7 +3177,8 @@ def run_preflop_spots():
         open_limited_drill(page, "preflop")
         wanted = {"callers": "called", "three_bet": "got 3-bet", "four_bet": "got 4-bet"}
         seen = set()
-        for step in range(120):
+        # 3-bet and 4-bet spots are rare (about 4% and 1.5% of preflop items), so allow many items.
+        for step in range(400):
             page.wait(READY, 30)
             current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
             situation = current["bundle"]["question"]["situation"]
