@@ -50,10 +50,10 @@ fn answer(item: &Item, text: &str) -> Outcome {
 
 #[test]
 fn card_parses_to_expected_combo_counts() {
-    assert_eq!(CARD.open_range(Seat::Early).unwrap().range.combo_count(), 142);
-    assert_eq!(CARD.open_range(Seat::Middle).unwrap().range.combo_count(), 190);
-    assert_eq!(CARD.open_range(Seat::Cutoff).unwrap().range.combo_count(), 254);
-    assert_eq!(CARD.open_range(Seat::Button).unwrap().range.combo_count(), 326);
+    assert_eq!(CARD.open_range(Seat::Early).unwrap().range.combo_count(), 206);
+    assert_eq!(CARD.open_range(Seat::Middle).unwrap().range.combo_count(), 282);
+    assert_eq!(CARD.open_range(Seat::Cutoff).unwrap().range.combo_count(), 358);
+    assert_eq!(CARD.open_range(Seat::Button).unwrap().range.combo_count(), 578);
     assert_eq!(CARD.open_range(Seat::SmallBlind).unwrap().range.combo_count(), 258);
     assert!(CARD.open_range(Seat::BigBlind).is_none());
     assert_eq!(CARD.notes().len(), 8);
@@ -182,7 +182,7 @@ fn pf(seat: Seat, situation: Situation, text: &str) -> Action {
 #[test]
 fn folded_to_uses_the_seat_range() {
     assert_eq!(pf(Seat::Early, Situation::FoldedTo, "AhKd"), Action::Raise);
-    assert_eq!(pf(Seat::Early, Situation::FoldedTo, "AhJd"), Action::Fold);
+    assert_eq!(pf(Seat::Early, Situation::FoldedTo, "AhTd"), Action::Fold);
     assert_eq!(pf(Seat::Middle, Situation::FoldedTo, "KhQd"), Action::Raise);
     assert_eq!(pf(Seat::Cutoff, Situation::FoldedTo, "9h7h"), Action::Raise);
     assert_eq!(pf(Seat::Button, Situation::FoldedTo, "7h2d"), Action::Fold);
@@ -220,8 +220,8 @@ fn facing_a_raise_agrees_on_the_clear_hands_in_every_seat() {
         assert_eq!(pf(seat, Situation::Raised, "AhKd"), Action::Raise);
         assert_eq!(pf(seat, Situation::Raised, "ThTd"), Action::Call);
         // Against the wide late openers the button and blinds face, king-queen 3-bets for value;
-        // a middle seat still has players behind it and only calls the suited one.
-        let (kqo, kqs) = if seat == Seat::Middle { (Action::Fold, Action::Call) } else { (Action::Raise, Action::Raise) };
+        // a middle seat still has players behind it and 3-bets only the suited one.
+        let (kqo, kqs) = if seat == Seat::Middle { (Action::Fold, Action::Raise) } else { (Action::Raise, Action::Raise) };
         assert_eq!(pf(seat, Situation::Raised, "KhQd"), kqo);
         assert_eq!(pf(seat, Situation::Raised, "KhQh"), kqs);
         assert_eq!(pf(seat, Situation::Raised, "7h2d"), Action::Fold);

@@ -258,8 +258,16 @@ fn relevant_range(seat: Seat, situation: Situation) -> Range {
             let chart = chart_for(seat, situation).expect("this situation has a chart");
             let (raise, call) = chart.lines();
             let extra = chart.extra_call().map_or(Range::EMPTY, |line| line.range);
-            // Also the hands a player opens with but folds here, so the folds are real decisions.
-            let open = CARD.open_range(Seat::Button).expect("the button has an open range").range;
+            // Also hands a player opens with but folds here, so the folds are real decisions.
+            // The button opens so wide that mixing its range in everywhere would make most
+            // spots plain folds, so only the big blind, which defends widest, gets it.
+            let opener = match (situation, seat) {
+                (Situation::Raised | Situation::RaisedCalled(_), Seat::Early | Seat::Middle) => seat,
+                (Situation::Raised | Situation::RaisedCalled(_), Seat::BigBlind) => Seat::Button,
+                (Situation::Raised | Situation::RaisedCalled(_), _) => Seat::Cutoff,
+                _ => Seat::Button,
+            };
+            let open = CARD.open_range(opener).expect("this seat has an open range").range;
             raise.range.union(&call.range).union(&extra).union(&open)
         }
     }

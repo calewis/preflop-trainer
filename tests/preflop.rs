@@ -231,13 +231,19 @@ fn hand_written_spots_get_the_right_answer() {
         (Seat::Early, Situation::Raised, "JhJd", Raise),
         (Seat::Early, Situation::Raised, "9h9d", Call),
         (Seat::Early, Situation::Raised, "6h6d", Fold),
-        (Seat::Middle, Situation::Raised, "Ah5h", Fold),
+        (Seat::Middle, Situation::Raised, "Ah5h", Raise),
+        (Seat::Middle, Situation::Raised, "Ah9h", Fold),
         (Seat::Middle, Situation::Raised, "6h5h", Fold),
         (Seat::Middle, Situation::Raised, "KhTh", Fold),
-        (Seat::Cutoff, Situation::Raised, "Ah5h", Call),
-        (Seat::Button, Situation::Raised, "6h5h", Call),
+        (Seat::Cutoff, Situation::Raised, "Ah5h", Raise),
+        (Seat::Cutoff, Situation::Raised, "Ah6h", Call),
+        (Seat::Button, Situation::Raised, "AhTh", Raise),
+        (Seat::Button, Situation::Raised, "AhJh", Call),
+        (Seat::Button, Situation::Raised, "6h5h", Raise),
+        (Seat::Button, Situation::Raised, "9h8h", Call),
         (Seat::Middle, Situation::Raised, "KhQd", Fold),
-        (Seat::Middle, Situation::Raised, "AhQd", Call),
+        (Seat::Middle, Situation::Raised, "AhQd", Fold),
+        (Seat::Early, Situation::Raised, "AhQd", Fold),
         (Seat::Button, Situation::Raised, "KhQd", Raise),
         (Seat::Button, Situation::Raised, "AhQd", Raise),
         (Seat::Button, Situation::Raised, "KhQh", Raise),
@@ -248,13 +254,17 @@ fn hand_written_spots_get_the_right_answer() {
         (Seat::SmallBlind, Situation::Raised, "7h6h", Fold),
         (Seat::BigBlind, Situation::Raised, "7h6h", Call),
         (Seat::BigBlind, Situation::Raised, "Kh2h", Call),
-        (Seat::BigBlind, Situation::Raised, "Qh4h", Fold),
-        (Seat::BigBlind, Situation::Raised, "4h3h", Fold),
+        (Seat::BigBlind, Situation::Raised, "Qh2h", Call),
+        (Seat::BigBlind, Situation::Raised, "Jh5h", Fold),
+        (Seat::BigBlind, Situation::Raised, "4h3h", Call),
+        (Seat::BigBlind, Situation::Raised, "3h2h", Fold),
+        (Seat::BigBlind, Situation::Raised, "Jh9d", Call),
+        (Seat::BigBlind, Situation::Raised, "Kh9d", Fold),
         (Seat::BigBlind, Situation::Raised, "AhJd", Call),
         (Seat::BigBlind, Situation::Raised, "KhQd", Raise),
         (Seat::BigBlind, Situation::Raised, "JhTd", Call),
-        (Seat::BigBlind, Situation::Raised, "Ah9d", Fold),
-        (Seat::BigBlind, Situation::Raised, "Kh9d", Fold),
+        (Seat::BigBlind, Situation::Raised, "Ah8d", Call),
+        (Seat::BigBlind, Situation::Raised, "Ah7d", Fold),
         (Seat::SmallBlind, Situation::Raised, "AhJd", Call),
         (Seat::SmallBlind, Situation::Raised, "KhJd", Fold),
         (Seat::BigBlind, Situation::Raised, "KhJd", Call),
@@ -340,7 +350,7 @@ fn three_bets_are_linear_where_king_queen_three_bets() {
     }
     assert_eq!(charts_with_kqo, 3, "the cutoff and button, the small blind and the big blind");
     assert_eq!(Chart::PositionEarly.action(hand("KhQd")), Action::Fold, "early seats keep the tight 3-bets");
-    assert_eq!(Chart::PositionEarly.action(hand("AhQd")), Action::Call);
+    assert_eq!(Chart::PositionEarly.action(hand("AhQd")), Action::Fold, "ace-queen offsuit folds from early seats");
 }
 
 /// The cutoff and button raise over limpers only with hands they would open.
@@ -406,7 +416,9 @@ fn an_early_seat_never_calls_a_raise_with_what_it_folds_cheaper() {
             if preflop_answer(seat, Situation::Raised, holding).0 == Action::Fold {
                 continue;
             }
-            for cheaper in [Situation::FoldedTo, Situation::Limpers(1)] {
+            // Behind two limpers, since a lone limper is isolated only with the iso.raise hands,
+            // and a semi-bluff 3-bet such as A5s would not limp along behind just one.
+            for cheaper in [Situation::FoldedTo, Situation::Limpers(2)] {
                 assert_ne!(
                     preflop_answer(seat, cheaper, holding).0,
                     Action::Fold,
@@ -436,8 +448,12 @@ fn level(chart: Chart, holding: Holding) -> u8 {
     }
 }
 
+/// Some 3-bets are semi-bluffs below hands that only call or fold (A5s 3-bets while A6s
+/// calls, or folds from an early seat), so a 3-bet can sit alone. A call cannot: every
+/// better kicker of a hand that calls continues, and a bigger pair always does at least as much.
 #[test]
 fn charts_have_no_holes() {
+    let calls = |chart: Chart, holding: Holding| level(chart, holding) == 1;
     for chart in Chart::ALL {
         for high in 0..13u8 {
             for low in 0..high {
@@ -447,8 +463,8 @@ fn charts_have_no_holes() {
                 if low + 1 < high {
                     let better_s = [Card::new(high, 0), Card::new(low + 1, 0)];
                     let better_o = [Card::new(high, 0), Card::new(low + 1, 1)];
-                    assert!(level(chart, better_s) >= level(chart, suited), "{chart:?} suited {high} {low}");
-                    assert!(level(chart, better_o) >= level(chart, offsuit), "{chart:?} offsuit {high} {low}");
+                    assert!(level(chart, better_s) > 0 || !calls(chart, suited), "{chart:?} suited {high} {low}");
+                    assert!(level(chart, better_o) > 0 || !calls(chart, offsuit), "{chart:?} offsuit {high} {low}");
                 }
             }
             if high > 0 {
@@ -517,7 +533,6 @@ enum V {
     Raises,
     Calls,
     RaisesCalls,
-    ThreeBets,
     FourBets,
     BigPairs,
     /// Aces, kings or ace-king: what a 3-bet against your open usually is in these games.
@@ -532,7 +547,6 @@ fn villain_labels(v: V) -> BTreeSet<String> {
         V::Raises => card_line("open.middle"),
         V::Calls => card_line("face_raise.call"),
         V::RaisesCalls => card_line("open.middle").union(&card_line("face_raise.call")).cloned().collect(),
-        V::ThreeBets => card_line("face_raise.reraise"),
         V::FourBets => expand("QQ+ AKs AKo"),
         V::BigPairs => expand("KK+"),
         V::Premiums => expand("KK+ AKs AKo"),
@@ -586,23 +600,28 @@ fn checks(chart: Chart, action: Action, kind: HandKind) -> &'static [Check] {
         (Position | PositionEarly | Blinds | BlindsBb, Raise, Jacks) => &[Ahead(V::RaisesCalls, 0.6), OftenOvercard],
         (Position | PositionEarly | Blinds | BlindsBb, Raise, AceKing) => &[Dominates(V::Calls, 0.4)],
         (Position | PositionEarly | Blinds | BlindsBb, Raise, AceQueen) => &[Dominates(V::Calls, 0.3)],
-        (Position | Blinds | BlindsBb, Raise, SuitedBroadway | OffsuitBroadway) => {
+        (Position | Blinds | BlindsBb, Raise, OffsuitBroadway) => {
             &[Dominates(V::CutoffOpens, 0.1), Dominates(V::ButtonOpens, 0.1)]
         }
+        // "Still plays well when called": a third of the pot against an opening range.
+        (Position | PositionEarly | Blinds | BlindsBb, Raise, SuitedBroadway | SuitedAce) => &[Equity(V::Raises, 33.0)],
+        (Position | Blinds | BlindsBb, Raise, SuitedConnector) => &[Equity(V::Raises, 33.0)],
         // On the button facing 3bb: 3 to call into 4.5. In the small blind: 2.5 into 4.5.
         (Position, Call, OffsuitBroadway) => &[PriceAgainst(40.0, &[V::Raises, V::CutoffOpens])],
         (Blinds, Call, OffsuitBroadway) => &[PriceAgainst(250.0 / 7.0, &[V::CutoffOpens, V::ButtonOpens])],
-        (BlindsBb, Call, OtherSuited) => &[BigBlindPrice],
+        (BlindsBb, Call, OtherSuited | OffsuitAce | OtherOffsuit) => &[BigBlindPrice],
         (Position, Fold, OffsuitBroadway) => &[Kicker(V::Raises, 0.1), Kicker(V::CutoffOpens, 0.1)],
+        // The wide button range dominates too few of these, so the line names the tighter raisers.
+        (Blinds, Fold, OffsuitBroadway) => &[Kicker(V::Raises, 0.1), Kicker(V::CutoffOpens, 0.1)],
         (Blinds | BlindsBb, Fold, OffsuitBroadway | OffsuitAce) => &[Kicker(V::CutoffOpens, 0.1), Kicker(V::ButtonOpens, 0.1)],
         (Position | Blinds | BlindsBb | Callers | CallersBb, Fold, SuitedConnector) => &[UsuallyOnePairOrLess, BiggerOfKindPlays],
         (Position | PositionEarly | Blinds | BlindsBb, Call, Tens) => &[OftenOvercard],
         (Position | PositionEarly | Blinds | BlindsBb, Call, MiddlePair | SmallPair) => &[Set],
-        (Position | PositionEarly | Blinds | BlindsBb, Call, AceQueen) => &[Equity(V::Raises, 40.0), Behind(V::ThreeBets)],
         (Position | PositionEarly | Blinds | BlindsBb, Call, SuitedAce | SuitedBroadway | SuitedConnector) => &[],
         (PositionEarly, Fold, SmallPair) => &[Set],
         (PositionEarly, Fold, SuitedAce | SuitedBroadway) => &[DominatedBy(V::Raises, 0.1)],
         (PositionEarly, Fold, SuitedConnector) => &[Behind(V::Raises)],
+        (PositionEarly, Fold, AceQueen) => &[Behind(V::FourBets)],
 
         (Callers | CallersBb, Raise, KingsOrAces) => &[Ahead(V::RaisesCalls, 0.9)],
         (Callers | CallersBb, Raise, Queens) => &[Ahead(V::RaisesCalls, 0.85)],
@@ -979,13 +998,10 @@ fn reason_lines_are_plain_single_sentences() {
 fn lines_that_name_a_hand_describe_only_that_hand() {
     let cases = [
         (Chart::Position, Action::Raise, HandKind::AceQueen, vec!["AQo", "AQs"]),
-        (Chart::PositionEarly, Action::Call, HandKind::AceQueen, vec!["AQo"]),
+        (Chart::PositionEarly, Action::Fold, HandKind::AceQueen, vec!["AQo"]),
         (Chart::Blinds, Action::Raise, HandKind::AceQueen, vec!["AQo", "AQs"]),
-        (Chart::Position, Action::Raise, HandKind::SuitedBroadway, vec!["KQs"]),
         (Chart::Position, Action::Raise, HandKind::OffsuitBroadway, vec!["KQo"]),
-        (Chart::Blinds, Action::Raise, HandKind::SuitedBroadway, vec!["KQs"]),
         (Chart::Blinds, Action::Raise, HandKind::OffsuitBroadway, vec!["KQo"]),
-        (Chart::BlindsBb, Action::Raise, HandKind::SuitedBroadway, vec!["KQs"]),
         (Chart::BlindsBb, Action::Raise, HandKind::OffsuitBroadway, vec!["KQo"]),
         (Chart::Position, Action::Call, HandKind::OffsuitBroadway, vec!["AJo"]),
         (Chart::Blinds, Action::Call, HandKind::OffsuitBroadway, vec!["AJo"]),
@@ -1223,7 +1239,8 @@ fn the_big_blind_extra_calls_are_dealt() {
     let button = card_line("open.button");
     let extra = card_line("face_raise.big_blind.call");
     let outside: BTreeSet<String> = extra.difference(&button).cloned().collect();
-    assert!(outside.contains("K2s") && outside.contains("Q5s"), "{outside:?}");
+    // The button now opens nearly all of them; 43s is the one left outside.
+    assert!(outside.contains("43s"), "{outside:?}");
     let mut seen = BTreeSet::new();
     for item in all_preflop(60_000) {
         let (seat, situation, holding) = situation_of(&item);
@@ -1295,7 +1312,8 @@ fn most_of_the_new_spots_are_real_decisions() {
         // almost every hand. These spots are kept honest by being rare and by dealing kings or
         // aces a third of the time and tempting hands (queens, ace-king and the like) otherwise,
         // so about two thirds are folds by design; 0.70 leaves room for sampling noise.
-        let most = if matches!(name, "three_bet" | "four_bet") { 0.70 } else { 0.66 };
+        // Elsewhere the folds come from hands a nearby seat opens, and stay under half.
+        let most = if matches!(name, "three_bet" | "four_bet") { 0.70 } else { 0.50 };
         assert!(share < most, "{name}: {share} folds");
         assert!(share > 0.08, "{name}: {share} folds, always continuing would win");
     }

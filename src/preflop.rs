@@ -51,9 +51,10 @@ impl Seat {
     }
 
     /// The seat whose opening range is the next one looser than this seat's.
-    /// On the card the small blind (258 combos) is looser than the cutoff (254)
-    /// and tighter only than the button. The button is already the loosest, and
-    /// the big blind has no opening range, so both stay where they are.
+    /// The small blind (258 combos) opens tighter than the middle seat (282) and the
+    /// cutoff (358) but is paired with the button, the seat that acts just before it,
+    /// so its folds include hands an opener one seat earlier plays. The button is
+    /// already the loosest, and the big blind has no opening range, so both stay put.
     pub fn next_looser(self) -> Seat {
         match self {
             Seat::Early => Seat::Middle,
@@ -384,9 +385,19 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
         (Position | PositionEarly | Blinds | BlindsBb, Raise, AceQueen) => {
             "Ace-queen dominates the weaker aces that call, so 3-bet for value and make them pay."
         }
-        // Only the cutoff, button and blinds 3-bet king-queen: a lone raise there usually comes from a wide late opener.
-        (Position | Blinds | BlindsBb, Raise, SuitedBroadway | OffsuitBroadway) => {
+        // Only the cutoff, button and blinds 3-bet king-queen offsuit: a lone raise there usually comes from a wide late opener.
+        (Position | Blinds | BlindsBb, Raise, OffsuitBroadway) => {
             "King-queen dominates the weaker kings and queens a wide late opener plays, so 3-bet for value against players who call too much."
+        }
+        // The suited 3-bets below value: semi-bluffs that can win the pot at once and play on when called.
+        (Position | PositionEarly | Blinds | BlindsBb, Raise, SuitedBroadway) => {
+            "Two suited high cards make top pairs, straights and flushes, so a 3-bet can take the pot now and still plays well when called."
+        }
+        (Position | PositionEarly | Blinds | BlindsBb, Raise, SuitedAce) => {
+            "A suited ace holds one of the aces the raiser needs and makes the nut flush draw, so a 3-bet can take the pot now and still plays well when called."
+        }
+        (Position | Blinds | BlindsBb, Raise, SuitedConnector) => {
+            "Suited connectors make straights and flushes that win big pots with deep stacks, so a 3-bet can take the pot now and still plays well when called."
         }
         (Position | PositionEarly, Call, Tens) => {
             "Tens flop an overcard too often to build a big pot, so call and see the flop with position."
@@ -397,9 +408,6 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
         }
         (Blinds | BlindsBb, Call, MiddlePair | SmallPair) => {
             "A pair flops a set about one time in eight, and with deep stacks a set wins a big pot even from the blinds."
-        }
-        (Position | PositionEarly, Call, AceQueen) => {
-            "Ace-queen offsuit is strong enough to call in position, but it is behind the hands that 3-bet it."
         }
         (Position | PositionEarly, Call, SuitedAce) => {
             "A suited ace makes the nut flush draw, and position makes it easier to play."
@@ -427,19 +435,28 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
         (BlindsBb, Call, OtherSuited) => {
             "Closing the action, this suited hand has the equity to call at the big blind's price, and it can make a flush."
         }
+        (BlindsBb, Call, OffsuitAce) => {
+            "Closing the action, an ace with a middling kicker has the equity to call at the big blind's price."
+        }
+        (BlindsBb, Call, OtherOffsuit) => {
+            "Closing the action, these offsuit cards are high enough and close enough together to call at the big blind's price."
+        }
 
         // Folds facing one raise where the same seat plays stronger hands of the same kind.
         (Position, Fold, OffsuitBroadway) => {
             "Offsuit high cards other than ace-jack and king-queen are often dominated by a raiser's better kicker, so their pairs are hard to play."
         }
         (Blinds, Fold, OffsuitBroadway) => {
-            "From the small blind, offsuit high cards other than ace-jack and king-queen often run into a better kicker, and out of position they are hard to play."
+            "From the small blind, offsuit high cards other than ace-jack and king-queen are often outkicked by a middle or cutoff raiser, and out of position they are hard to play."
         }
         (Blinds | BlindsBb, Fold, OffsuitAce) => {
             "A weak offsuit ace often runs into a better ace, and out of position the pairs it makes are hard to play."
         }
         (Blinds, Fold, SuitedConnector) => {
             "From the small blind the big blind can still raise behind you, so only the bigger suited connectors call out of position."
+        }
+        (BlindsBb, Fold, OtherOffsuit) => {
+            "Even closing the action, this offsuit hand usually ends with one pair or less, and out of position that is too little to call with."
         }
         (BlindsBb, Fold, OtherSuited) => {
             "Even closing the action, this suited hand is too weak to call out of position: it rarely makes a strong hand, and its draws are easy to beat."
@@ -453,7 +470,10 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
             "With players still to act behind you, a weak suited ace is dominated by the better aces that raise."
         }
         (PositionEarly, Fold, SuitedBroadway) => {
-            "With players still to act behind you, these suited cards are dominated by the bigger hands that raise."
+            "With players still to act behind you, these suited cards are often dominated by a raiser's bigger cards."
+        }
+        (PositionEarly, Fold, AceQueen) => {
+            "With players still to act behind you, ace-queen offsuit too often ends up in a big pot against ace-king or a big pair, which have it badly beaten."
         }
         (PositionEarly, Fold, SuitedConnector) => {
             "With players still to act behind you, a suited connector is usually behind the raiser."

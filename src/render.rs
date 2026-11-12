@@ -1102,8 +1102,8 @@ mod tests {
         for chart in Chart::ALL {
             assert!(text.contains(chart.title()), "{text}");
         }
-        // 142 of 1,326 combinations.
-        assert!(text.contains("142 combos (10.7% of hands)"), "{text}");
+        // The early seat's opening range: 206 of 1,326 combinations.
+        assert!(text.contains("206 combos (15.5% of hands)"), "{text}");
         assert!(text.contains("raise hands in the raise-over-limpers range"), "{text}");
     }
 

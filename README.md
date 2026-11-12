@@ -83,9 +83,13 @@ limpers (where the cutoff and button also raise some limp-along hands) it covers
 an early or middle seat, from the cutoff or button, or from the blinds, with extra calls closing
 the action from the big blind), a raise with callers (again with extra big blind calls), being
 3-bet after you opened (in position or out of position) and being 4-bet after you 3-bet.
-Hands not listed fold. The ranges are rules of thumb for a loose game with few light
-3-bets, so raises are for value. You 3-bet, but against a 3-bet or a 4-bet only kings or
-aces continue (4-bet or all in) and everything else folds, queens and ace-king included.
+Hands not listed fold. The ranges are rules of thumb built for deep stacks (about 200bb),
+leaning toward standard deep-stack charts: wide opens (from about 16% of hands early to 44% on
+the button), more 3-bets and few flat calls against a lone raise, and a wide big blind defence.
+Some 3-bets are semi-bluffs (suited aces such as A5s, and suited connectors such as 76s), and
+ace-queen offsuit folds to a raise from an early or middle seat. You 3-bet, but against a 3-bet
+or a 4-bet only kings or aces continue (4-bet or all in) and everything else folds, queens and
+ace-king included.
 Drills deal hands you could really hold: after opening, the seat's open range; after
 3-betting, the hands the chart 3-bets. Facing a 3-bet or a 4-bet, a third of the hands are
 kings or aces and the rest are tempting folds (tens or better, ace-king, ace-queen, ace-jack

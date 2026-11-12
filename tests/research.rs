@@ -1625,7 +1625,11 @@ mod beats_me {
         // The preflop bump to version 3 leaves every other skill's rows alone.
         assert!(stale(Skill::Preflop, 2) && !due(Skill::Preflop, 2));
         assert!(!stale(Skill::Made, 2) && due(Skill::Made, 2));
-        assert!(!stale(Skill::Spot, 2) && due(Skill::Spot, 2));
+        assert!(!stale(Skill::Outs, 2) && due(Skill::Outs, 2));
+        // The wider card at version 6 also changes the drills that deal only hands the card plays.
+        assert!(stale(Skill::Spot, 5) && !due(Skill::Spot, 5));
+        assert!(stale(Skill::Chain, 5) && !due(Skill::Chain, 5));
+        assert!(!stale(Skill::Made, 5) && due(Skill::Made, 5));
         // Version 1 rows are only void for the generators that changed at version 2.
         assert!(!stale(Skill::Made, 1) && due(Skill::Made, 1));
         assert!(stale(Skill::Spot, 1) && !due(Skill::Spot, 1));
@@ -1671,6 +1675,8 @@ mod beats_me {
             assert_eq!(generator_changed(skill, 2, 4), skill == Skill::Preflop, "{skill:?} v2 to v4");
             assert_eq!(generator_changed(skill, 1, 4), to_v2.contains(&skill) || skill == Skill::Preflop, "{skill:?} v1 to v4");
             assert_eq!(generator_changed(skill, 4, 5), skill == Skill::Preflop, "{skill:?} v4 to v5");
+            let to_v6 = [Skill::Preflop, Skill::Spot, Skill::SpotMw, Skill::Equity, Skill::Chain];
+            assert_eq!(generator_changed(skill, 5, 6), to_v6.contains(&skill), "{skill:?} v5 to v6");
             assert!(!generator_changed(skill, GEN_VERSION, GEN_VERSION), "{skill:?}: a version is itself");
             assert!(generator_changed(skill, GEN_VERSION + 1, GEN_VERSION), "{skill:?}: an unknown version is a change");
             assert!(generator_changed(skill, GEN_VERSION, GEN_VERSION + 1));
