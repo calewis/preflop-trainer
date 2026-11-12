@@ -6,14 +6,13 @@ use std::sync::OnceLock;
 
 use crate::grade::{hit_chance, pot_with_bet, PERCENT_TOLERANCE};
 use crate::item::{read_price_rung_of_seed, HitStreet, PriceHand, ReadPriceAsk, ReadPriceQuestion, Skill, READ_PRICE_RUNGS};
+use crate::ladder::{right_wrong_points, right_wrong_rung, RIGHT_WRONG_GATE};
 use crate::log::{Attempt, ItemRef, Mode};
 use crate::money;
 use crate::rng::Rng;
 
-/// Attempts at a rung considered for promotion.
-pub const READ_PRICE_PROMOTE_WINDOW: usize = 20;
-/// Promote once [`READ_PRICE_PROMOTE_WINDOW`] straight attempts at a rung reach this.
-pub const READ_PRICE_PROMOTE_PCT: f64 = 85.0;
+/// Attempts at the player's rung that Progress reports accuracy over.
+pub const READ_PRICE_RECENT_WINDOW: usize = 20;
 /// Rung 0: a price under this share is cheap, in percent.
 pub const CHEAP_BELOW_PCT: f64 = 20.0;
 /// Rung 0: a price of [`CHEAP_BELOW_PCT`] up to this share is fair, in percent.
@@ -288,45 +287,34 @@ fn rung_of(attempt: &Attempt) -> Option<u8> {
     }
 }
 
-/// The player's rung: promoted past a rung once any [`READ_PRICE_PROMOTE_WINDOW`]
-/// straight drill attempts there were at least [`READ_PRICE_PROMOTE_PCT`] correct.
+/// The player's rung, by the shared points rule in [`crate::ladder`]: each
+/// first-time drill answer at a rung moves its points, and reaching the goal
+/// moves the player up for good.
 pub fn read_price_rung(attempts: &[Attempt]) -> u8 {
-    let mut rung = 0;
-    while rung + 1 < READ_PRICE_RUNGS {
-        let results = rung_results(attempts, rung);
-        let promoted = results.windows(READ_PRICE_PROMOTE_WINDOW).any(|window| {
-            100.0 * window.iter().filter(|&&right| right).count() as f64 / window.len() as f64 >= READ_PRICE_PROMOTE_PCT
-        });
-        if !promoted {
-            break;
-        }
-        rung += 1;
-    }
-    rung
+    right_wrong_rung(READ_PRICE_RUNGS, |rung| rung_attempts(attempts, rung))
 }
 
-fn rung_results(attempts: &[Attempt], rung: u8) -> Vec<bool> {
-    attempts
-        .iter()
-        .filter(|a| a.skill == Skill::ReadPrice && a.mode == Mode::Drill && rung_of(a) == Some(rung))
-        .map(|a| a.correct)
-        .collect()
+fn rung_attempts(attempts: &[Attempt], rung: u8) -> impl Iterator<Item = &Attempt> {
+    attempts.iter().filter(move |a| a.skill == Skill::ReadPrice && a.mode == Mode::Drill && rung_of(a) == Some(rung))
 }
 
-/// Where a player stands: the rung, and how many of the recent attempts there
-/// (at most [`READ_PRICE_PROMOTE_WINDOW`]) were right.
+/// Where a player stands: the rung, its points toward the next one, and how
+/// many of the recent attempts there (at most [`READ_PRICE_RECENT_WINDOW`]) were right.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ReadPriceStatus {
     pub rung: u8,
+    /// Points at this rung, out of [`RIGHT_WRONG_GATE`]'s goal. Not meaningful at the top rung.
+    pub points: i32,
     pub recent_right: usize,
     pub recent_total: usize,
 }
 
 pub fn read_price_status(attempts: &[Attempt]) -> ReadPriceStatus {
     let rung = read_price_rung(attempts);
-    let results = rung_results(attempts, rung);
-    let recent = &results[results.len().saturating_sub(READ_PRICE_PROMOTE_WINDOW)..];
-    ReadPriceStatus { rung, recent_right: recent.iter().filter(|&&right| right).count(), recent_total: recent.len() }
+    let results: Vec<bool> = rung_attempts(attempts, rung).map(|a| a.correct).collect();
+    let points = RIGHT_WRONG_GATE.status(results.iter().map(|&right| right_wrong_points(right))).points;
+    let recent = &results[results.len().saturating_sub(READ_PRICE_RECENT_WINDOW)..];
+    ReadPriceStatus { rung, points, recent_right: recent.iter().filter(|&&right| right).count(), recent_total: recent.len() }
 }
 
 /// True for the attempts that count toward the pass mark: rungs 2-4, the skill

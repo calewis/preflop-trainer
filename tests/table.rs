@@ -13,7 +13,8 @@ use poker_trainer::item::{is_held_out, Item, Question, Skill, GEN_VERSION, HELD_
 use poker_trainer::log::{
     format_attempt, parse_log, Attempt, AttemptExtra, CheckRef, ItemRef, Mode, CHECKUP_LOG_HEADER, LOG_HEADER,
 };
-use poker_trainer::progress::{baseline_runs, pass_mark, skill_stats, step_passed, all_stats, STEPS};
+use poker_trainer::groups::{group_of, weight_in_group, Group};
+use poker_trainer::progress::{baseline_runs, baseline_step, pass_mark, skill_stats};
 use poker_trainer::rng::Rng;
 use poker_trainer::schedule::{due_families, Origin, Planned, Session, DAY_MS};
 use poker_trainer::table::{
@@ -780,16 +781,18 @@ fn table_checkup(run: u32, form: u32, loss: f64, count: usize) -> Vec<Attempt> {
 }
 
 #[test]
-fn the_latest_checkup_must_meet_the_same_standard_to_pass() {
+fn a_checkup_is_still_scored_against_the_mark_but_no_longer_gates_the_pass() {
+    assert!(skill_stats(Skill::Table, &forty(0.5)).passed, "the drill mark alone passes");
     let mut log = forty(0.5);
     log.extend(table_checkup(1, 0, 0.5, CHECKUP_LEN));
     let score = latest_checkup(Skill::Table, &log).unwrap();
     assert_eq!(score.metric, CheckupMetric::MeanEvLoss);
     assert!(score.passed && score.complete);
     assert!(skill_stats(Skill::Table, &log).passed);
-    // A failing checkup afterwards blocks the pass even though the drill mark holds.
+    // A failing checkup afterwards is history only: the pass stands.
     log.extend(table_checkup(2, 1, 4.0, CHECKUP_LEN));
-    assert!(!skill_stats(Skill::Table, &log).passed);
+    assert_eq!(skill_stats(Skill::Table, &log).checkup_passed, Some(false));
+    assert!(skill_stats(Skill::Table, &log).passed);
     assert!(skill_stats(Skill::Table, &log).drill_passed);
     // Passing the checkup but not the drill mark is not a pass.
     let mut drills_bad = forty(5.0);
@@ -798,14 +801,14 @@ fn the_latest_checkup_must_meet_the_same_standard_to_pass() {
 }
 
 #[test]
-fn table_counts_as_step_four_and_does_not_disturb_the_baseline_steps() {
-    assert_eq!(Skill::Table.step(), Some(4));
-    assert_eq!(STEPS.len(), 4);
-    assert_eq!(STEPS[3], &[Skill::Table]);
+fn table_is_dealt_lightly_in_spots_and_does_not_disturb_the_baseline_steps() {
+    assert_eq!(group_of(Skill::Table), Some(Group::Spots));
+    assert!(weight_in_group(Skill::Table) < weight_in_group(Skill::Spot));
+    assert_eq!(baseline_step(Skill::Table), None);
     assert_eq!(Skill::Table as u64, 13, "added last so existing seeds don't shift");
     assert_eq!(Skill::ALL.last(), Some(&Skill::ReadPrice), "new skills go last");
     assert_eq!(Skill::Chain as u64, 14);
-    assert!(!step_passed(4, &all_stats(&forty(0.5))));
+    assert!(!skill_stats(Skill::Table, &forty(5.0)).passed);
     let log = vec![baseline_row(1, "b01", Skill::Nuts), baseline_row(1, "b02", Skill::Price), baseline_row(1, "b03", Skill::Spot)];
     let runs = baseline_runs(&log, poker_trainer::baseline::BASELINE_SIZE);
     assert_eq!(runs[0].steps.len(), 3, "the baseline only has three steps");

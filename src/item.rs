@@ -9,15 +9,17 @@ use crate::table::TableQuestion;
 
 /// Bump whenever a generator's output for a given seed changes, and add the
 /// bump to [`GENERATOR_CHANGES`].
-pub const GEN_VERSION: u32 = 3;
+pub const GEN_VERSION: u32 = 4;
 
 /// Which skills' generators changed at each [`GEN_VERSION`], so a bump for one skill
 /// doesn't void another skill's unfinished checkups or queued reviews. `chain` and
 /// `beats_me` first appeared in version 2 and `read_price` in version 3, so they have no
-/// earlier rows to compare.
-pub const GENERATOR_CHANGES: [(u32, &[Skill]); 2] = [
+/// earlier rows to compare. At version 4 the preflop card's wider 3-bets change which
+/// hands face a 4-bet, and the big blind's extra calls join the hands dealt against a raise.
+pub const GENERATOR_CHANGES: [(u32, &[Skill]); 3] = [
     (2, &[Skill::Spot, Skill::SpotMw, Skill::Equity]),
     (3, &[Skill::Preflop]),
+    (4, &[Skill::Preflop]),
 ];
 
 /// Which of `skill`'s generators wrote a row marked `version`: the number of times
@@ -165,17 +167,6 @@ impl Skill {
 
     pub fn from_name(name: &str) -> Option<Skill> {
         Skill::ALL.into_iter().find(|s| s.name() == name)
-    }
-
-    /// The training step a skill belongs to. `preflop` is outside the steps.
-    pub fn step(self) -> Option<u8> {
-        match self {
-            Skill::Preflop | Skill::ReadPrice => None,
-            Skill::Nuts | Skill::Possible | Skill::Made | Skill::Beats | Skill::BoardType | Skill::BeatsMe => Some(1),
-            Skill::Outs | Skill::Price | Skill::Hit | Skill::Equity | Skill::Anchor => Some(2),
-            Skill::Spot | Skill::SpotMw | Skill::Chain => Some(3),
-            Skill::Table => Some(4),
-        }
     }
 }
 

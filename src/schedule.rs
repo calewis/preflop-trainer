@@ -10,6 +10,7 @@ use crate::beats_me::beats_me_rung;
 use crate::equity_skill::{equity_band, equity_rung, next_band};
 use crate::family::{family_of, find_sibling};
 use crate::generate::generate;
+use crate::groups::{group_of, mixed_skills, weight_in_group, Group};
 use crate::item::{
     beats_me_seed_with_rung, chain_seed_for_stage, equity_rung_of_seed, generator_changed, CHAIN_STAGES, equity_seed_with_rung, is_held_out, read_price_seed_with_rung, ChainStage, Item, Question, Skill,
     GEN_VERSION, HELD_OUT_BIT,
@@ -271,23 +272,18 @@ struct SiblingSearch {
 
 type SiblingMemo = Rc<RefCell<HashMap<(Skill, String, u64), SiblingSearch>>>;
 
-/// `beats` stays in drills at this share of a skill's normal weight, per mille.
-pub const BEATS_WEIGHT_PER_MILLE: u64 = 500;
+/// In the default drill, `preflop` is at least this share of the items dealt:
+/// its group's share, kept as a floor so it is never squeezed out.
+pub const MIN_PREFLOP_PERCENT: u64 = Group::Preflop.share_pct();
 
-/// In the default drill, `preflop` is at least this share of the items dealt.
-pub const MIN_PREFLOP_PERCENT: u64 = 25;
-
-/// In the default drill, while `read_price` is under its share and `preflop` isn't
-/// owed, it is dealt at this rate per mille. It takes no part in the weighted
-/// choice, so its share doesn't depend on how many skills are in rotation.
-pub const READ_PRICE_DEAL_PER_MILLE: u64 = 300;
 /// Later-day reviews take at most one `read_price` slot in this many, so new
 /// items at the player's rung keep coming in a session. Starting guess.
 pub const READ_PRICE_REVIEW_SHARE_DIVISOR: u64 = 2;
-/// No new `read_price` item once it has reached this share of the items dealt;
-/// retries and reviews of it count toward the share. Starting guesses, chosen
-/// to hold it at about 12-15% of the deal.
-pub const READ_PRICE_MAX_PERCENT: u64 = 14;
+
+/// In the default drill a group may run at most this many items ahead of its
+/// share before it stops being picked. A little slack keeps the order from
+/// becoming a fixed rotation; the shares still hold over any long session.
+pub const SHARE_SLACK_ITEMS: u64 = 1;
 
 /// One drill session's dealing state. Cloning is cheap: a copy can look ahead
 /// without changing the real session.
@@ -305,6 +301,11 @@ pub struct Session {
     chain: Option<(u64, ChainStage)>,
     /// True for the default drill: `preflop` keeps its minimum share.
     preflop_floor: bool,
+    /// True for the default drill: each group is dealt at its fixed share.
+    group_shares: bool,
+    /// True when skills are weighted inside their group (a one-group drill, and
+    /// the choice inside a group in the default drill).
+    group_weights: bool,
     /// A `chain` was picked but wouldn't have left `preflop` its share, so it
     /// starts right after the next `preflop` item instead of being dropped.
     chain_waiting: bool,
@@ -363,6 +364,8 @@ impl Session {
             sibling_memo: Rc::new(RefCell::new(HashMap::new())),
             chain: None,
             preflop_floor: false,
+            group_shares: false,
+            group_weights: false,
             chain_waiting: false,
             searches_siblings: true,
             skipped_search: false,
@@ -377,6 +380,27 @@ impl Session {
             board_dealer: CategoryDealer::new(attempts),
             table_recent: table_recent_from(attempts),
         }
+    }
+
+    /// The default mixed drill: every group, each at its fixed share, with
+    /// `preflop` keeping its floor. `price` and `beats` are not dealt.
+    pub fn mixed(attempts: &[Attempt], now_ms: u64, seed: u64) -> Session {
+        Session::new(mixed_skills(), attempts, now_ms, seed).with_preflop_floor().with_group_shares()
+    }
+
+    /// A drill of one group only, its skills weighted as in the default drill.
+    pub fn for_group(group: Group, attempts: &[Attempt], now_ms: u64, seed: u64) -> Session {
+        let mut session = Session::new(group.skills(), attempts, now_ms, seed);
+        session.group_weights = true;
+        session
+    }
+
+    /// Deals the allowed skills' groups at their fixed shares (see [`Group::share_pct`]),
+    /// renormalised over the groups that have an allowed skill.
+    pub fn with_group_shares(mut self) -> Session {
+        self.group_shares = true;
+        self.group_weights = true;
+        self
     }
 
     /// A look-ahead copy: it uses sibling searches already done and starts none.
@@ -410,13 +434,6 @@ impl Session {
         preflop * 100 >= (self.dealt.len() as u64 + CHAIN_STAGES) * MIN_PREFLOP_PERCENT
     }
 
-    /// True when `read_price` is dealt by its own share in this session: the
-    /// default drill, where the weighted choice would let its share follow how
-    /// many other skills are in rotation.
-    fn read_price_by_share(&self, skill: Skill) -> bool {
-        skill == Skill::ReadPrice && self.preflop_floor && self.allowed.contains(&Skill::ReadPrice)
-    }
-
     /// False when `read_price` has given reviews enough of its slots already, so
     /// the next slot goes to a new item at the player's rung.
     fn review_slot_open(&self, skill: Skill) -> bool {
@@ -425,18 +442,6 @@ impl Session {
         }
         let slots = self.dealt.iter().filter(|s| **s == Skill::ReadPrice).count() as u64 + 1;
         (self.read_price_reviews + 1) * READ_PRICE_REVIEW_SHARE_DIVISOR <= slots
-    }
-
-    /// True when this item should be `read_price`, by its roll and share limit.
-    fn read_price_turn(&mut self, blocked: Option<Skill>) -> bool {
-        if !self.read_price_by_share(Skill::ReadPrice) || blocked == Some(Skill::ReadPrice) {
-            return false;
-        }
-        let dealt = self.dealt.iter().filter(|s| **s == Skill::ReadPrice).count() as u64;
-        if dealt * 100 >= (self.dealt.len() as u64 + 1) * READ_PRICE_MAX_PERCENT {
-            return false;
-        }
-        self.rng.below(1000) < READ_PRICE_DEAL_PER_MILLE
     }
 
     /// True while a picked `chain` is waiting for the next `preflop` item.
@@ -515,20 +520,14 @@ impl Session {
         }
         // The no-three-in-a-row rule can't apply with one dealable skill.
         let blocked = blocked.filter(|_| eligible.len() >= 2);
-        let mut skill = if preflop_owed {
-            Skill::Preflop
-        } else if self.read_price_turn(blocked) {
-            Skill::ReadPrice
-        } else {
-            self.choose_skill(&eligible, blocked)
-        };
+        let mut skill = if preflop_owed { Skill::Preflop } else { self.choose(&eligible, blocked) };
         // A chain's stages come in a row, so it only starts if the floor survives them
         // all. Otherwise it waits for the next `preflop` item instead of being lost.
         if skill == Skill::Chain && !self.chain_fits_preflop_floor() {
             self.chain_waiting = true;
             if blocked == Some(Skill::Preflop) {
                 let others: Vec<Skill> = eligible.iter().copied().filter(|&s| s != Skill::Chain).collect();
-                skill = self.choose_skill(&others, blocked);
+                skill = self.choose(&others, blocked);
             } else {
                 skill = Skill::Preflop;
             }
@@ -626,17 +625,62 @@ impl Session {
         Planned { skill, seed, origin }
     }
 
+    /// The next new item's skill: by group share in the default drill, else by weight.
+    fn choose(&mut self, eligible: &[Skill], blocked: Option<Skill>) -> Skill {
+        if self.group_shares {
+            self.choose_by_share(eligible, blocked)
+        } else {
+            self.choose_skill(eligible, blocked)
+        }
+    }
+
+    /// Picks a group, weighted by how far it is behind its share of the items
+    /// dealt so far (retries, reviews and chain stages included) plus
+    /// [`SHARE_SLACK_ITEMS`], then a skill inside it. A group that can't be dealt
+    /// now waits and catches up later.
+    fn choose_by_share(&mut self, eligible: &[Skill], blocked: Option<Skill>) -> Skill {
+        let in_rotation = |g: &Group| g.skills().iter().any(|s| self.allowed.contains(s));
+        let total: u64 = Group::ALL.iter().filter(|g| in_rotation(g)).map(|g| g.share_pct()).sum();
+        let next = self.dealt.len() as u64 + 1;
+        let choices: Vec<(Vec<Skill>, u64)> = Group::ALL
+            .iter()
+            .filter_map(|&g| {
+                let members: Vec<Skill> =
+                    eligible.iter().copied().filter(|&s| group_of(s) == Some(g) && Some(s) != blocked).collect();
+                if members.is_empty() {
+                    return None;
+                }
+                let dealt = self.dealt.iter().filter(|&&s| group_of(s) == Some(g)).count() as u64;
+                let weight = (g.share_pct() * next + SHARE_SLACK_ITEMS * total).saturating_sub(dealt * total);
+                Some((members, weight))
+            })
+            .collect();
+        let total_weight: u64 = choices.iter().map(|(_, w)| w).sum();
+        if total_weight == 0 {
+            // Every dealable group is ahead of its share: the plain weighted choice.
+            return self.choose_skill(eligible, blocked);
+        }
+        let mut roll = self.rng.below(total_weight);
+        for (members, weight) in &choices {
+            if roll < *weight {
+                return self.choose_skill(members, blocked);
+            }
+            roll -= weight;
+        }
+        unreachable!("the roll is below the total weight")
+    }
+
     fn choose_skill(&mut self, eligible: &[Skill], blocked: Option<Skill>) -> Skill {
         let choices: Vec<(Skill, u64)> = eligible
             .iter()
-            .filter(|&&s| Some(s) != blocked && !self.read_price_by_share(s))
+            .filter(|&&s| Some(s) != blocked)
             .map(|&s| {
                 let recent: Vec<bool> = self
                     .recent
                     .get(&s)
                     .map_or_else(Vec::new, |w| w.iter().copied().collect());
                 let weight = skill_weight(&recent);
-                (s, if s == Skill::Beats { weight * BEATS_WEIGHT_PER_MILLE / 1000 } else { weight })
+                (s, if self.group_weights { weight * weight_in_group(s) } else { weight })
             })
             .collect();
         let total: u64 = choices.iter().map(|&(_, w)| w).sum();

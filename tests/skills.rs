@@ -21,10 +21,9 @@ use poker_trainer::item::{HitStreet, Item, Question, Skill, SpotMode, SpotQuesti
 use poker_trainer::log::{format_attempt, parse_log, Attempt, CheckRef, ItemRef, Mode};
 use poker_trainer::money;
 use poker_trainer::preflop::{action_label, preflop_answer, Action, Seat, Situation, CARD};
+use poker_trainer::groups::{group_of, mixed_skills};
 use poker_trainer::progress::{
-    all_stats, baseline_runs, current_step, current_step_for, drill_skills, has_baseline, next_baseline_run, pass_mark,
-    skill_stats,
-    skills_up_to_step, step_passed,
+    all_stats, baseline_runs, drill_skills, has_baseline, next_baseline_run, pass_mark, skill_stats,
 };
 use poker_trainer::rng::Rng;
 use poker_trainer::schedule::{
@@ -196,7 +195,10 @@ fn limper_rules_for_non_blind_seats() {
     assert_eq!(pf(Seat::Middle, Situation::Limpers(1), "AhJd"), Action::Raise);
     assert_eq!(pf(Seat::Middle, Situation::Limpers(1), "Ah2h"), Action::Fold);
     assert_eq!(pf(Seat::Middle, Situation::Limpers(2), "Ah2h"), Action::Call);
-    assert_eq!(pf(Seat::Cutoff, Situation::Limpers(1), "Ah2h"), Action::Call);
+    assert_eq!(pf(Seat::Cutoff, Situation::Limpers(1), "2h2d"), Action::Call);
+    // From the cutoff or button the suited aces in the limp-along range raise instead.
+    assert_eq!(pf(Seat::Cutoff, Situation::Limpers(1), "Ah2h"), Action::Raise);
+    assert_eq!(pf(Seat::SmallBlind, Situation::Limpers(1), "Ah2h"), Action::Call);
     assert_eq!(pf(Seat::Button, Situation::Limpers(1), "6h5h"), Action::Call);
     assert_eq!(pf(Seat::SmallBlind, Situation::Limpers(1), "2h2d"), Action::Call);
     assert_eq!(pf(Seat::Cutoff, Situation::Limpers(2), "7h2d"), Action::Fold);
@@ -217,10 +219,11 @@ fn facing_a_raise_agrees_on_the_clear_hands_in_every_seat() {
         assert_eq!(pf(seat, Situation::Raised, "JhJd"), Action::Raise);
         assert_eq!(pf(seat, Situation::Raised, "AhKd"), Action::Raise);
         assert_eq!(pf(seat, Situation::Raised, "ThTd"), Action::Call);
-        // The big blind closes the action at a price that also calls KQo.
-        let kqo = if seat == Seat::BigBlind { Action::Call } else { Action::Fold };
+        // Against the wide late openers the button and blinds face, king-queen 3-bets for value;
+        // a middle seat still has players behind it and only calls the suited one.
+        let (kqo, kqs) = if seat == Seat::Middle { (Action::Fold, Action::Call) } else { (Action::Raise, Action::Raise) };
         assert_eq!(pf(seat, Situation::Raised, "KhQd"), kqo);
-        assert_eq!(pf(seat, Situation::Raised, "KhQh"), Action::Call);
+        assert_eq!(pf(seat, Situation::Raised, "KhQh"), kqs);
         assert_eq!(pf(seat, Situation::Raised, "7h2d"), Action::Fold);
     }
 }
@@ -1030,11 +1033,12 @@ fn session_limits_default_and_finish() {
 }
 
 #[test]
-fn drill_skills_are_only_those_requested_or_the_step_rotation() {
-    assert_eq!(drill_skills(&[Skill::Nuts, Skill::Nuts, Skill::Hit], &[]), vec![Skill::Nuts, Skill::Hit]);
-    let rotation = drill_skills(&[], &[]);
-    assert_eq!(rotation, skills_up_to_step(1));
-    assert!(rotation.contains(&Skill::Preflop));
+fn drill_skills_are_only_those_requested_or_every_group() {
+    assert_eq!(drill_skills(&[Skill::Nuts, Skill::Nuts, Skill::Hit]), vec![Skill::Nuts, Skill::Hit]);
+    let rotation = drill_skills(&[]);
+    assert_eq!(rotation, mixed_skills());
+    assert!(rotation.contains(&Skill::Preflop) && rotation.contains(&Skill::Table) && rotation.contains(&Skill::Chain));
+    assert!(!rotation.contains(&Skill::Beats) && !rotation.contains(&Skill::Price));
 }
 
 #[test]
@@ -1623,28 +1627,22 @@ fn same_session_retries_do_not_count() {
 }
 
 #[test]
-fn steps_unlock_in_order() {
-    assert_eq!(current_step(&all_stats(&[])), 1);
-    assert_eq!(
-        skills_up_to_step(1),
-        vec![Skill::Preflop, Skill::Beats, Skill::ReadPrice, Skill::Nuts, Skill::Possible, Skill::Made, Skill::BeatsMe, Skill::BoardType]
-    );
-    let step_one = [Skill::Nuts, Skill::Possible, Skill::Made, Skill::BeatsMe, Skill::BoardType];
-    let mut log = Vec::new();
-    for skill in step_one {
-        log.extend(filled(skill, 40, true, 1000));
-    }
-    // Meeting the drill marks is no longer enough: each skill needs a checkup.
-    assert!(!step_passed(1, &all_stats(&log)));
-    assert_eq!(current_step(&all_stats(&log)), 1);
-    for (run, skill) in step_one.into_iter().enumerate() {
-        log.extend(completed_checkup(skill, run as u32 + 1, 0, true));
-    }
-    let stats = all_stats(&log);
-    assert!(step_passed(1, &stats));
-    assert!(!step_passed(2, &stats));
-    assert_eq!(current_step(&stats), 2);
-    assert_eq!(skills_up_to_step(2).len(), 13);
+fn a_pass_once_reached_is_never_taken_back() {
+    let mut log = filled(Skill::Nuts, 40, true, 1000);
+    let reached = skill_stats(Skill::Nuts, &log);
+    assert!(reached.drill_passed && reached.passed);
+    // A bad run afterwards drops the current window below the mark, not the pass.
+    log.extend(filled(Skill::Nuts, 40, false, 1000).into_iter().map(|mut a| {
+        a.timestamp_ms += 1_000_000;
+        a
+    }));
+    let after = skill_stats(Skill::Nuts, &log);
+    assert!(!after.drill_passed, "the latest 40 are all misses");
+    assert!(after.passed, "a reached mark stays reached");
+    // Never meeting the mark over any 40 in a row is not a pass.
+    let mut mixed = filled(Skill::Nuts, 30, true, 1000);
+    mixed.extend(filled(Skill::Nuts, 30, false, 1000));
+    assert!(!skill_stats(Skill::Nuts, &mixed).passed);
 }
 
 /// Rows that passed one skill, logged under the old generator.
@@ -1658,48 +1656,38 @@ fn passed_under_old_gates(skill: Skill, run: u32) -> Vec<Attempt> {
 }
 
 #[test]
-fn a_step_earned_under_the_old_gates_is_kept() {
+fn passes_earned_under_the_old_gates_are_kept_and_every_group_is_dealt() {
     let mut log = Vec::new();
     for (run, skill) in [Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats, Skill::BoardType].into_iter().enumerate() {
         log.extend(passed_under_old_gates(skill, run as u32 + 1));
     }
-    assert_eq!(current_step(&all_stats(&log)), 1, "today's gates alone would send this player back");
-    assert_eq!(current_step_for(&log), 2);
-    let dealt = drill_skills(&[], &log);
-    assert!([Skill::Outs, Skill::Price, Skill::Hit, Skill::Equity, Skill::Anchor].iter().all(|s| dealt.contains(s)), "{dealt:?}");
-}
-
-#[test]
-fn passing_beats_now_does_not_skip_beats_me() {
-    let mut log = Vec::new();
-    for (run, skill) in [Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats, Skill::BoardType].into_iter().enumerate() {
-        let mut rows = passed_under_old_gates(skill, run as u32 + 1);
-        for row in &mut rows {
-            row.gen_version = GEN_VERSION;
-        }
-        log.extend(rows);
+    let stats = all_stats(&log);
+    for skill in [Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats, Skill::BoardType] {
+        assert!(stats.iter().any(|s| s.skill == skill && s.passed), "{skill:?}");
     }
-    assert_eq!(current_step_for(&log), 1, "beats no longer gates step 1 for rows logged today");
+    let dealt = drill_skills(&[]);
+    assert!(dealt.iter().all(|s| group_of(*s).is_some()), "{dealt:?}");
+    assert!([Skill::Outs, Skill::Hit, Skill::Equity, Skill::Anchor, Skill::Chain, Skill::Table].iter().all(|s| dealt.contains(s)), "{dealt:?}");
 }
 
 #[test]
-fn a_failed_latest_checkup_blocks_the_pass_and_a_passing_one_restores_it() {
+fn an_old_per_skill_checkup_is_history_and_no_longer_gates_the_pass() {
     let mut log = filled(Skill::Nuts, 40, true, 1000);
     assert_eq!(skill_stats(Skill::Nuts, &log).checkup_passed, None);
-    assert!(!skill_stats(Skill::Nuts, &log).passed);
+    assert!(skill_stats(Skill::Nuts, &log).passed, "the drill mark alone passes");
 
     log.extend(completed_checkup(Skill::Nuts, 1, 0, false));
     let failed = skill_stats(Skill::Nuts, &log);
     assert!(failed.drill_passed);
     assert_eq!(failed.checkup_passed, Some(false));
-    assert!(!failed.passed);
+    assert!(failed.passed, "a missed checkup takes nothing away");
 
     log.extend(completed_checkup(Skill::Nuts, 2, 1, true));
-    assert!(skill_stats(Skill::Nuts, &log).passed);
-
-    // Only the most recent checkup counts, so a later failure undoes the pass.
+    assert_eq!(skill_stats(Skill::Nuts, &log).checkup_passed, Some(true));
+    // The latest checkup is still the one reported.
     log.extend(completed_checkup(Skill::Nuts, 3, 2, false));
-    assert!(!skill_stats(Skill::Nuts, &log).passed);
+    assert_eq!(skill_stats(Skill::Nuts, &log).checkup_passed, Some(false));
+    assert!(skill_stats(Skill::Nuts, &log).passed);
 }
 
 #[test]

@@ -10,14 +10,12 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use poker_trainer::anchors;
 use poker_trainer::baseline;
-use poker_trainer::checkup::{checkup_plan, checkup_runs, next_checkup_form, next_checkup_run};
+use poker_trainer::checkup::{checkup_runs, next_checkup_run, next_form, plan_for, CheckupKind};
 use poker_trainer::equity_skill::equity_bias;
 use poker_trainer::grade::{grade_timed, Outcome};
 use poker_trainer::item::{Item, Skill};
 use poker_trainer::log::{format_attempt, parse_log, Attempt, CheckRef, LOG_HEADER};
-use poker_trainer::progress::{
-    all_stats, baseline_runs, current_step_for, drill_skills, has_baseline, next_baseline_run,
-};
+use poker_trainer::progress::{all_stats, baseline_runs, drill_skills, has_baseline, next_baseline_run};
 use poker_trainer::rng::Rng;
 use poker_trainer::schedule::{Origin, Session, SessionLimits};
 use poker_trainer::table;
@@ -29,9 +27,11 @@ Usage:
   poker-trainer baseline    take the frozen 32-question test
   poker-trainer card        print the preflop card
   poker-trainer drill [--skill NAME]... [--minutes N] [--items N] [--seed N]
-                            run a drill (10 minutes by default)
-  poker-trainer check --skill NAME
-                            take a held-out checkup for one skill
+                            run a drill (10 minutes by default); with no
+                            --skill it mixes every practice group
+  poker-trainer check [--skill NAME]
+                            take the mixed held-out checkup, or the older
+                            one for a single skill
   poker-trainer progress    show results against the pass marks
 
 Skills: preflop, nuts, possible, made, beats, board_type, outs, price, hit, equity,
@@ -82,10 +82,11 @@ fn parse_skill(name: &str) -> Result<Skill, String> {
     })
 }
 
-fn parse_check_args(args: &[String]) -> Result<Skill, String> {
+fn parse_check_args(args: &[String]) -> Result<CheckupKind, String> {
     match args {
-        [flag, name] if flag == "--skill" => parse_skill(name),
-        _ => Err(format!("check needs --skill NAME\n\n{USAGE}")),
+        [] => Ok(CheckupKind::Mixed),
+        [flag, name] if flag == "--skill" => parse_skill(name).map(CheckupKind::Skill),
+        _ => Err(format!("check takes no options or --skill NAME\n\n{USAGE}")),
     }
 }
 
@@ -242,14 +243,14 @@ fn run_drill(args: DrillArgs) -> Result<(), String> {
     if !has_baseline(&attempts) {
         println!("No baseline on record. Consider taking one first with: poker-trainer baseline");
     }
-    let allowed = drill_skills(&args.skills, &attempts);
     let limits = SessionLimits::resolve(args.minutes, args.items);
     let started = Instant::now();
     let seed = args.seed.unwrap_or_else(clock_seed);
-    let mut session = Session::new(allowed, &attempts, now_ms(), seed);
-    if args.skills.is_empty() {
-        session = session.with_preflop_floor();
-    }
+    let mut session = if args.skills.is_empty() {
+        Session::mixed(&attempts, now_ms(), seed)
+    } else {
+        Session::new(drill_skills(&args.skills), &attempts, now_ms(), seed)
+    };
     let style = style();
     let stdin = io::stdin();
     let mut input = stdin.lock();
@@ -320,14 +321,14 @@ fn run_baseline() -> Result<(), String> {
     Ok(())
 }
 
-fn run_check(skill: Skill) -> Result<(), String> {
+fn run_check(kind: CheckupKind) -> Result<(), String> {
     let store = Store::open()?;
     let attempts = store.load();
-    let (form, run) = (next_checkup_form(skill, &attempts), next_checkup_run(&attempts));
-    let plan = checkup_plan(skill, form);
+    let (form, run) = (next_form(kind, &attempts), next_checkup_run(&attempts));
+    let plan = plan_for(kind, form);
     let total = plan.slots.len();
-    println!("Checkup for {}: {total} questions, form {form}, no feedback until the end. Type q to stop early.", skill.name());
-    if skill == Skill::Table && table::checkup_form_reuses_spots(form) {
+    println!("Checkup ({}): {total} questions, form {form}, no feedback until the end. Type q to stop early.", kind.code());
+    if kind == CheckupKind::Skill(Skill::Table) && table::checkup_form_reuses_spots(form) {
         println!("{}", table::REUSE_NOTE);
     }
     let style = style();
@@ -344,7 +345,8 @@ fn run_check(skill: Skill) -> Result<(), String> {
             Asked::Answered { outcome, response_ms } => (outcome, response_ms),
         };
         let check = CheckRef { run, form, slot: index as u32 };
-        store.append(&Attempt::from_check(check, skill, plan.slots[index].seed, &outcome, now_ms(), response_ms));
+        let slot = plan.slots[index];
+        store.append(&Attempt::from_check(check, slot.skill, slot.seed, &outcome, now_ms(), response_ms));
     }
 
     match checkup_runs(&store.load()).into_iter().find(|s| s.run == run) {
@@ -361,6 +363,6 @@ fn run_progress() -> Result<(), String> {
     let runs = baseline_runs(&attempts, baseline::BASELINE_SIZE);
     let checkups = checkup_runs(&attempts);
     let bias = equity_bias(&attempts);
-    print!("{}", render::progress_text(&stats, current_step_for(&attempts), &runs, &checkups, &bias));
+    print!("{}", render::progress_text(&stats, &runs, &checkups, &bias));
     Ok(())
 }

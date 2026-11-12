@@ -14,22 +14,27 @@ open.button = 22+ A2s+ K8s+ Q9s+ J9s+ T8s+ 97s+ 86s+ 75s+ 65s 54s ATo+ KTo+ QTo+
 open.small_blind = 22+ A2s+ K9s+ Q9s+ J9s+ T9s 98s 87s ATo+ KJo+ QJo
 iso.raise = 77+ ATs+ KJs+ QJs AJo+ KQo
 iso.limp = 22 33 44 55 66 A2s A3s A4s A5s A6s A7s A8s A9s KTs QTs JTs T9s 98s 87s 76s 65s 54s
+# From the cutoff or button, these limp-along hands raise instead.
+iso.late.raise = A2s A3s A4s A5s A6s A7s A8s A9s KTs QTs JTs T9s 98s 87s
 # Facing one raise and no callers. The reraise and call lines are for the cutoff and button.
-face_raise.reraise = JJ+ AQs+ AKo
-face_raise.call = 22 33 44 55 66 77 88 99 TT A2s A3s A4s A5s A6s A7s A8s A9s ATs AJs KTs+ QTs+ JTs T9s 98s 87s 76s 65s AQo
-# From the small or big blind you play out of position, so the speculative calls shrink.
-# Early and middle seats call far less, using the same reraise line.
+# A lone raise usually comes from a wide late opener who calls too much, so king-queen 3-bets for value.
+face_raise.reraise = JJ+ AQs+ AQo+ KQs KQo
+face_raise.call = 22 33 44 55 66 77 88 99 TT A2s A3s A4s A5s A6s A7s A8s A9s ATs AJs KTs KJs QTs+ JTs T9s 98s 87s 76s 65s AJo
+# Early and middle seats raise and call far less: players are still to act behind them.
+face_raise.early.reraise = JJ+ AQs+ AKo
 face_raise.early.call = 77 88 99 TT ATs AJs KQs KJs QJs AQo
-face_raise.blinds.reraise = JJ+ AQs+ AKo
-face_raise.blinds.call = 22 33 44 55 66 77 88 99 TT A2s A3s A4s A5s A6s A7s A8s A9s ATs AJs KTs+ QTs+ JTs T9s 98s 87s AQo
-# Closing the action from the big blind against one raise, these also call.
-face_raise.big_blind.call = AJo KQo
+# From the small or big blind you play out of position, so the speculative calls shrink.
+face_raise.blinds.reraise = JJ+ AQs+ AQo+ KQs KQo
+face_raise.blinds.call = 22 33 44 55 66 77 88 99 TT A2s A3s A4s A5s A6s A7s A8s A9s ATs AJs KTs KJs QTs+ JTs T9s 98s 87s AJo
+# Closing the action from the big blind against one raise, these also call: every suited king,
+# more suited queens and jacks, small suited connectors and one-gappers, and offsuit cards ten or higher.
+face_raise.big_blind.call = K2s K3s K4s K5s K6s K7s K8s K9s Q5s Q6s Q7s Q8s Q9s J7s J8s J9s T8s 97s 86s 76s 75s 65s 54s ATo KJo KTo QJo QTo JTo
 # The callers chart ignores your seat on purpose: multiway prices justify a few suited calls a middle seat would not open.
 # Facing a raise and one or more callers: thin 3-bets become calls, and suited hands that make big hands get better.
 face_callers.reraise = QQ+ AKs AKo
-face_callers.call = 22 33 44 55 66 77 88 99 TT JJ A2s A3s A4s A5s A6s A7s A8s A9s ATs AJs AQs KTs+ QTs+ JTs T9s 98s 87s 76s 65s 54s AQo
+face_callers.call = 22 33 44 55 66 77 88 99 TT JJ A2s A3s A4s A5s A6s A7s A8s A9s ATs AJs AQs KTs+ QTs+ JTs T9s 98s 87s 76s 65s 54s AJo AQo KQo
 # Closing the action from the big blind, these also call.
-face_callers.big_blind.call = AJo KQo
+face_callers.big_blind.call = ATo KJo KTo QJo QTo JTo
 # You opened and were 3-bet. In position means you did not open the small blind and the 3-bettor is in a blind.
 three_bet.ip.fourbet = KK+
 three_bet.ip.call = 22 33 44 55 66 77 88 99 TT JJ QQ AKs AKo AQs AJs KQs
@@ -40,9 +45,9 @@ four_bet.allin = KK+
 four_bet.call = QQ AKs
 note.seats = Count the players still to act behind you: 5 or more is early, 4 is middle, 3 is cutoff, 2 is button, 1 is small blind. At 5 players the first to act is middle. At 4 players the first to act is cutoff.
 note.open = Folded to you: raise to 3bb with your seat's range, otherwise fold.
-note.iso = One or more limpers: raise to 4bb plus 1bb per limper with iso.raise. Limp along with iso.limp only from the cutoff, button or small blind, or when two or more have limped. Fold the rest.
-note.face_raise = One raise and no callers: early and middle seats have the tightest calling list, the cutoff and button call wider, and the blinds have their own list. From the big blind, also call AJo and KQo. 3-bet to about 3 times the raise, call or fold.
-note.callers = A raise and at least one caller: use the callers chart. Fewer hands 3-bet here, and hands that make big hands multiway get better. 3-bet to 3 times the raise plus one more raise per caller. From the big blind, also call AJo and KQo.
+note.iso = One or more limpers: raise to 4bb plus 1bb per limper with iso.raise, and from the cutoff or button also with iso.late.raise. Limp along with the rest of iso.limp only from the cutoff, button or small blind, or when two or more have limped. Fold the rest.
+note.face_raise = One raise and no callers: early and middle seats have the tightest lists, the cutoff and button 3-bet and call wider, and the blinds have their own lists. From the big blind, also call more suited hands and every offsuit hand with two cards ten or higher. 3-bet to about 3 times the raise, call or fold.
+note.callers = A raise and at least one caller: use the callers chart. Fewer hands 3-bet here, and hands that make big hands multiway get better. 3-bet to 3 times the raise plus one more raise per caller. From the big blind, also call the other offsuit hands with two cards ten or higher.
 note.three_bet = You opened and got 3-bet: use the in-position chart if you did not open the small blind and the 3-bettor is in a blind, otherwise the out-of-position chart. 4-bet to about 2.5 times the 3-bet, call or fold.
 note.four_bet = You 3-bet and got 4-bet: go all in with kings or aces, call queens and ace-king suited, fold everything else.
 note.big_blind = In the big blind with no raise, check. With limpers, raise iso.raise hands and check the rest.

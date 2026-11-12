@@ -7,13 +7,10 @@ use crate::eval::{Category, HandRank};
 use crate::generate::{deal_board, deal_holding, MIN_CLASS_COMBOS};
 use crate::item::{beats_me_rung_of_seed, BeatsMeAsk, BeatsMeQuestion, Skill, BEATS_ME_RUNGS};
 use crate::grade::nuts_analysis;
+use crate::ladder::right_wrong_rung;
 use crate::log::{Attempt, ItemRef, Mode};
 use crate::rng::Rng;
 
-/// Attempts at a rung considered for promotion.
-pub const BEATS_ME_PROMOTE_WINDOW: usize = 20;
-/// Promote once [`BEATS_ME_PROMOTE_WINDOW`] straight attempts at a rung reach this.
-pub const BEATS_ME_PROMOTE_PCT: f64 = 85.0;
 /// Rung 3: above this share of the pot the hand is usually ahead, in percent.
 pub const MIX_AHEAD_PCT: f64 = 60.0;
 /// Rung 3: below this share of the pot the hand is usually behind, in percent.
@@ -31,26 +28,12 @@ fn rung_of(attempt: &Attempt) -> Option<u8> {
     }
 }
 
-/// The player's rung: promoted past a rung once any [`BEATS_ME_PROMOTE_WINDOW`]
-/// straight drill attempts there were at least [`BEATS_ME_PROMOTE_PCT`] correct.
-/// A review of an old item cannot demote the player.
+/// The player's rung, by the shared points rule in [`crate::ladder`]. Reaching a
+/// rung is permanent, so a review of an old item cannot demote the player.
 pub fn beats_me_rung(attempts: &[Attempt]) -> u8 {
-    let mut rung = 0;
-    while rung + 1 < BEATS_ME_RUNGS {
-        let results: Vec<bool> = attempts
-            .iter()
-            .filter(|a| a.skill == Skill::BeatsMe && a.mode == Mode::Drill && rung_of(a) == Some(rung))
-            .map(|a| a.correct)
-            .collect();
-        let promoted = results.windows(BEATS_ME_PROMOTE_WINDOW).any(|window| {
-            100.0 * window.iter().filter(|&&right| right).count() as f64 / window.len() as f64 >= BEATS_ME_PROMOTE_PCT
-        });
-        if !promoted {
-            break;
-        }
-        rung += 1;
-    }
-    rung
+    right_wrong_rung(BEATS_ME_RUNGS, |rung| {
+        attempts.iter().filter(move |a| a.skill == Skill::BeatsMe && a.mode == Mode::Drill && rung_of(a) == Some(rung))
+    })
 }
 
 /// True for the attempts that count toward the `beats_me` pass mark: rungs 2-3.

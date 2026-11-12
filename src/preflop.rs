@@ -120,6 +120,8 @@ pub enum PreflopReason {
     /// The big blind is never folded to in a dealt item; with no raise it checks.
     BigBlindNoRaise,
     IsoRaise,
+    /// From the cutoff or button, a limp-along hand that raises instead.
+    IsoLateRaise,
     IsoLimp,
     IsoLimpNeedsLateOrTwoLimpers,
     NotInIso,
@@ -162,8 +164,11 @@ pub fn preflop_answer(seat: Seat, situation: Situation, hand: Holding) -> (Actio
             }
         }
         Situation::Limpers(limpers) => {
+            let late = matches!(seat, Seat::Cutoff | Seat::Button);
             if card.iso_raise.range.contains_holding(hand) {
                 (Action::Raise, PreflopReason::IsoRaise)
+            } else if late && card.iso_late_raise.range.contains_holding(hand) {
+                (Action::Raise, PreflopReason::IsoLateRaise)
             } else if card.iso_limp.range.contains_holding(hand) {
                 if limpers >= 2 || matches!(seat, Seat::Cutoff | Seat::Button | Seat::SmallBlind) {
                     (Action::Call, PreflopReason::IsoLimp)
@@ -186,13 +191,13 @@ pub fn preflop_answer(seat: Seat, situation: Situation, hand: Holding) -> (Actio
 pub enum Chart {
     /// One raise, from the cutoff or button.
     Position,
-    /// One raise, from an early or middle seat: a much tighter call list.
+    /// One raise, from an early or middle seat: a tighter raise list and a much tighter call list.
     PositionEarly,
     Blinds,
-    /// One raise, closing the action from the big blind: two more calls.
+    /// One raise, closing the action from the big blind: an extra call line.
     BlindsBb,
     Callers,
-    /// Callers, closing the action from the big blind: two more calls.
+    /// Callers, closing the action from the big blind: an extra call line.
     CallersBb,
     ThreeBetIp,
     ThreeBetOop,
@@ -217,7 +222,7 @@ impl Chart {
         let card = &CARD;
         match self {
             Chart::Position => (&card.reraise, &card.call),
-            Chart::PositionEarly => (&card.reraise, &card.early_call),
+            Chart::PositionEarly => (&card.early_reraise, &card.early_call),
             Chart::Blinds | Chart::BlindsBb => (&card.blinds_reraise, &card.blinds_call),
             Chart::Callers | Chart::CallersBb => (&card.callers_reraise, &card.callers_call),
             Chart::ThreeBetIp => (&card.three_bet_ip_raise, &card.three_bet_ip_call),
@@ -373,7 +378,11 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
             "Ace-king dominates the aces and kings that call, so 3-bet and build a pot you flop top pair in."
         }
         (Position | PositionEarly | Blinds | BlindsBb, Raise, AceQueen) => {
-            "Ace-queen suited dominates the weaker aces that call, so 3-bet and make them pay."
+            "Ace-queen dominates the weaker aces that call, so 3-bet for value and make them pay."
+        }
+        // Only the cutoff, button and blinds 3-bet king-queen: a lone raise there usually comes from a wide late opener.
+        (Position | Blinds | BlindsBb, Raise, SuitedBroadway | OffsuitBroadway) => {
+            "King-queen dominates the weaker kings and queens a wide late opener plays, so 3-bet for value against players who call too much."
         }
         (Position | PositionEarly, Call, Tens) => {
             "Tens flop an overcard too often to build a big pot, so call and see the flop with position."
@@ -387,9 +396,6 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
         }
         (Position | PositionEarly, Call, AceQueen) => {
             "Ace-queen offsuit is strong enough to call in position, but it is behind the hands that 3-bet it."
-        }
-        (Blinds | BlindsBb, Call, AceQueen) => {
-            "Ace-queen offsuit is strong enough to call, but it is behind the hands that 3-bet it."
         }
         (Position | PositionEarly, Call, SuitedAce) => {
             "A suited ace makes the nut flush draw, and position makes it easier to play."
@@ -407,6 +413,33 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
         (Blinds | BlindsBb, Call, SuitedConnector) => {
             "Suited connectors make straights and flushes that get paid, and you already have money in the pot."
         }
+        (Position, Call, OffsuitBroadway) => {
+            "Ace-jack offsuit has the equity to call a raise, and position makes its top pairs easier to play."
+        }
+        (Blinds, Call, OffsuitBroadway) => "Ace-jack offsuit has the equity to call from the small blind, even out of position.",
+        (BlindsBb, Call, OffsuitBroadway) => {
+            "Closing the action, two offsuit cards ten or higher have the equity to call at the big blind's price."
+        }
+        (BlindsBb, Call, OtherSuited) => {
+            "Closing the action, this suited hand has the equity to call at the big blind's price, and it can make a flush."
+        }
+
+        // Folds facing one raise where the same seat plays stronger hands of the same kind.
+        (Position, Fold, OffsuitBroadway) => {
+            "Offsuit high cards other than ace-jack and king-queen are often dominated by a raiser's better kicker, so their pairs are hard to play."
+        }
+        (Blinds, Fold, OffsuitBroadway) => {
+            "From the small blind, offsuit high cards other than ace-jack and king-queen often run into a better kicker, and out of position they are hard to play."
+        }
+        (Blinds | BlindsBb, Fold, OffsuitAce) => {
+            "A weak offsuit ace often runs into a better ace, and out of position the pairs it makes are hard to play."
+        }
+        (Blinds, Fold, SuitedConnector) => {
+            "From the small blind the big blind can still raise behind you, so only the bigger suited connectors call out of position."
+        }
+        (BlindsBb, Fold, OtherSuited) => {
+            "Even closing the action, this suited hand is too weak to call out of position: it rarely makes a strong hand, and its draws are easy to beat."
+        }
 
         // An early seat folds hands the cutoff and button call: players are still to act behind you.
         (PositionEarly, Fold, SmallPair) => {
@@ -423,9 +456,6 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
         }
 
         // Facing a raise and callers.
-        (BlindsBb, Call, OffsuitBroadway) => {
-            "Ace-jack and king-queen offsuit have the equity to call at the big blind's price."
-        }
 
         (Callers | CallersBb, Raise, KingsOrAces) => {
             "Aces or kings are strong enough to 3-bet even with callers, and you want more money in while they are ahead."
@@ -457,11 +487,17 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
         (Callers | CallersBb, Call, SuitedConnector) => {
             "Suited connectors make straights and flushes that win a bigger pot with callers in."
         }
-        (CallersBb, Call, OffsuitBroadway) => {
-            "Ace-jack and king-queen offsuit have the equity to close the action at the big blind's price."
+        (Callers, Call, OffsuitBroadway) => {
+            "With callers in, the price is good enough for ace-jack and king-queen offsuit, though weaker offsuit hands are dominated."
         }
-        (Callers | CallersBb, Fold, OffsuitBroadway | OffsuitAce) => {
-            "Offsuit high cards are dominated with this many hands in, so top pair is often second best."
+        (CallersBb, Call, OffsuitBroadway) => {
+            "Two offsuit cards ten or higher have the equity to close the action at the big blind's price."
+        }
+        (Callers, Fold, OffsuitBroadway | OffsuitAce) => {
+            "Below ace-jack and king-queen, offsuit high cards are dominated with this many hands in, so top pair is often second best."
+        }
+        (CallersBb, Fold, OffsuitAce) => {
+            "A weak offsuit ace is dominated with this many hands in, so top pair is often second best."
         }
 
         // You opened and got 3-bet.
@@ -531,13 +567,12 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
             "Offsuit ace-king is behind the big pairs that 4-bet here and has no flush draw to help it, so fold."
         }
         (FourBet, Fold, Jacks) => "Jacks are behind the big pairs that 4-bet here and only slightly ahead of ace-king.",
-        (FourBet, Fold, AceQueen) => "Ace-queen suited is dominated by the ace-kings that 4-bet here and behind the big pairs.",
+        (FourBet, Fold, AceQueen) => "Ace-queen is dominated by the ace-kings that 4-bet here and behind the big pairs.",
         (FourBet, Fold, _) => "A 4-bet here is almost always a big pair or ace-king, and this hand is behind that.",
 
         // Shared folds for every other cell.
-        (_, Fold, SuitedConnector) => "A small suited connector usually ends with one pair or less, and that is not enough to call a raise with.",
-        (Blinds | BlindsBb, Fold, OffsuitBroadway | OffsuitAce) => {
-            "Out of position, an offsuit hand like this usually ends with one pair or less, and that is hard to play against a raise."
+        (_, Fold, SuitedConnector) => {
+            "A suited connector this small usually ends with one pair or less, and its straights and flushes are the lowest ones."
         }
         (_, Fold, OffsuitBroadway) => "Offsuit high cards usually end with one pair or less, and that is not enough to call a raise with.",
         (_, Fold, OffsuitAce) => "A weak offsuit ace usually ends with one pair or less, and that is not enough to call a raise with.",
@@ -641,10 +676,13 @@ pub struct PreflopCard {
     pub open: [CardLine; 5],
     pub iso_raise: CardLine,
     pub iso_limp: CardLine,
-    /// Facing one raise, acting after the raiser and not in a blind.
+    /// From the cutoff or button, limp-along hands that raise over limpers instead.
+    pub iso_late_raise: CardLine,
+    /// Facing one raise from the cutoff or button.
     pub reraise: CardLine,
     pub call: CardLine,
     /// Facing one raise from an early or middle seat.
+    pub early_reraise: CardLine,
     pub early_call: CardLine,
     pub blinds_reraise: CardLine,
     pub blinds_call: CardLine,
@@ -786,8 +824,10 @@ pub const fn parse_card(text: &'static str) -> PreflopCard {
         open: [CardLine::EMPTY; 5],
         iso_raise: CardLine::EMPTY,
         iso_limp: CardLine::EMPTY,
+        iso_late_raise: CardLine::EMPTY,
         reraise: CardLine::EMPTY,
         call: CardLine::EMPTY,
+        early_reraise: CardLine::EMPTY,
         early_call: CardLine::EMPTY,
         blinds_reraise: CardLine::EMPTY,
         blinds_call: CardLine::EMPTY,
@@ -895,6 +935,12 @@ pub const fn parse_card(text: &'static str) -> PreflopCard {
         } else if key_is(bytes, start, key_end, b"face_raise.blinds.call") {
             slot = 10;
             card.blinds_call = line;
+        } else if key_is(bytes, start, key_end, b"iso.late.raise") {
+            slot = 23;
+            card.iso_late_raise = line;
+        } else if key_is(bytes, start, key_end, b"face_raise.early.reraise") {
+            slot = 22;
+            card.early_reraise = line;
         } else if key_is(bytes, start, key_end, b"face_raise.early.call") {
             slot = 19;
             card.early_call = line;
@@ -933,7 +979,7 @@ pub const fn parse_card(text: &'static str) -> PreflopCard {
         }
         seen |= 1 << slot;
     }
-    if seen != (1 << 22) - 1 {
+    if seen != (1 << 24) - 1 {
         panic!("preflop card is missing a line");
     }
     card.header = sub_str(bytes, 0, header_end);

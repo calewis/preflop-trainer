@@ -12,10 +12,14 @@ use poker_trainer::item::{
     is_held_out, read_price_rung_of_seed, read_price_seed_with_rung, HitStreet, Item, PriceHand, Question, ReadPriceAsk,
     ReadPriceQuestion, Skill, GEN_VERSION, HELD_OUT_BIT, READ_PRICE_RUNGS,
 };
+use poker_trainer::ladder::{
+    old_rule_passed, right_wrong_points, PointsGate, MISS_POINTS, OLD_RULE_CUTOFF_MS, RIGHT_POINTS, RIGHT_WRONG_GATE,
+};
 use poker_trainer::log::{asks_confidence, Attempt};
-use poker_trainer::progress::{skill_stats, skills_up_to_step, STEPS};
+use poker_trainer::groups::{group_of, mixed_skills, Group};
+use poker_trainer::progress::skill_stats;
 use poker_trainer::read_price::{
-    context_lines, read_price_rung, read_price_status, DrawKind, PriceBand, PriceCall, ReadPriceReveal, READ_PRICE_PROMOTE_WINDOW,
+    context_lines, read_price_rung, read_price_status, DrawKind, PriceBand, PriceCall, ReadPriceReveal, READ_PRICE_RECENT_WINDOW,
 };
 use poker_trainer::reflection::{reflection_eligible, reflection_form};
 use poker_trainer::rng::Rng;
@@ -111,7 +115,8 @@ fn a_seed_carries_its_rung_and_the_extra_values_wrap() {
 
 #[test]
 fn existing_skills_keep_their_positions_and_the_generator_version() {
-    assert_eq!(GEN_VERSION, 3, "read_price adds a skill without changing an existing generator");
+    // read_price arrived at version 3 without changing an existing generator, and later bumps left it alone.
+    assert!(!poker_trainer::item::generator_changed(Skill::ReadPrice, 3, GEN_VERSION), "read_price items are unchanged since version 3");
     assert_eq!(Skill::BeatsMe as u64, 15, "existing positions seed their generators");
     assert_eq!(Skill::ReadPrice as u64, 16);
     assert_eq!(Skill::ALL.last(), Some(&Skill::ReadPrice));
@@ -517,9 +522,16 @@ fn families_are_rung_plus_answer_class_or_draw_and_siblings_match() {
 
 fn logged(item: &Item, t: u64, correct: bool) -> Attempt {
     let planned = Planned { skill: Skill::ReadPrice, seed: item.seed, origin: Origin::New };
-    let AnswerFormat::Choice(options) = answer_format(&item.question) else { panic!("use a choice rung") };
-    let code = options.iter().find(|o| grade(item, o.code).unwrap().correct == correct).expect("an answer").code;
-    Attempt::from_drill(planned, &grade(item, code).unwrap(), t, 1500)
+    let outcome = match answer_format(&item.question) {
+        AnswerFormat::Choice(options) => {
+            let code = options.iter().find(|o| grade(item, o.code).unwrap().correct == correct).expect("an answer").code;
+            grade(item, code).unwrap()
+        }
+        // Rung 1 asks for the percent: the price itself, or one far from any price.
+        _ => grade(item, &if correct { format!("{}", price(q(item))) } else { "99".to_string() }).unwrap(),
+    };
+    assert_eq!(outcome.correct, correct);
+    Attempt::from_drill(planned, &outcome, t, 1500)
 }
 
 fn rung_log(rung: u8, count: u64, right_every: u64, offset: u64) -> Vec<Attempt> {
@@ -539,47 +551,186 @@ fn retries_do_not_count_toward_promotion() {
     assert_eq!(read_price_rung(&log), 0, "only first-time answers promote");
 }
 
+/// The same rows, logged after the old rule stopped applying.
+fn after_cutoff(mut log: Vec<Attempt>) -> Vec<Attempt> {
+    for row in &mut log {
+        row.timestamp_ms += OLD_RULE_CUTOFF_MS;
+    }
+    log
+}
+
+/// Rows at `rung` after the cutoff, right or wrong as `pattern` says.
+fn pattern_log(rung: u8, offset: u64, pattern: &[bool]) -> Vec<Attempt> {
+    let rows = pattern.iter().enumerate().map(|(i, &right)| logged(&at_rung(offset + i as u64, rung), offset + i as u64, right));
+    after_cutoff(rows.collect())
+}
+
 #[test]
-fn the_rung_rises_at_85_percent_of_twenty_and_stays_up() {
+fn the_gate_starts_at_ten_adds_one_takes_four_and_passes_at_thirty_two() {
+    assert_eq!(RIGHT_WRONG_GATE, PointsGate { start: 10, goal: 32 });
+    assert_eq!((RIGHT_POINTS, MISS_POINTS), (1, 4));
+    assert_eq!((right_wrong_points(true), right_wrong_points(false)), (1, -4));
     assert_eq!(read_price_rung(&[]), 0);
-    // 17 of 20 is exactly 85%.
-    let passing: Vec<Attempt> = (0..20u64).map(|i| logged(&at_rung(i, 0), i, i >= 3)).collect();
-    assert_eq!(read_price_rung(&passing), 1);
-    let failing: Vec<Attempt> = (0..20u64).map(|i| logged(&at_rung(i, 0), i, i >= 4)).collect();
-    assert_eq!(read_price_rung(&failing), 0, "16 of 20 is not enough");
-    let mut log = rung_log(0, 19, 1000, 0);
-    assert_eq!(read_price_rung(&log), 0, "needs a full window");
-    log.push(logged(&at_rung(19, 0), 19, true));
+    assert_eq!(read_price_status(&[]).points, 10, "a new rung starts at 10");
+    // 21 straight right is 31 points; the 22nd reaches 32.
+    let log = pattern_log(0, 0, &[true; 21]);
+    assert_eq!(read_price_rung(&log), 0);
+    assert_eq!(read_price_status(&log).points, 31);
+    let log = pattern_log(0, 0, &[true; 22]);
     assert_eq!(read_price_rung(&log), 1);
+    // A miss takes off four: 10 + 21 - 4 = 27.
+    let mut pattern = vec![true; 21];
+    pattern.insert(10, false);
+    let log = pattern_log(0, 0, &pattern);
+    assert_eq!(read_price_status(&log).points, 27);
+    assert_eq!(read_price_rung(&log), 0);
+    // The count never goes below 0: three misses leave 0, not -2, so 31 more right
+    // is 31 and the 32nd passes.
+    let mut pattern = vec![false; 3];
+    pattern.extend([true; 31]);
+    assert_eq!(read_price_status(&pattern_log(0, 0, &pattern)).points, 31);
+    pattern.push(true);
+    assert_eq!(read_price_rung(&pattern_log(0, 0, &pattern)), 1);
+    // 17 of 20 met the old rule; after the cutoff it's 10 + 17 - 12 = 15 points.
+    let mut pattern = vec![true; 17];
+    pattern.extend([false; 3]);
+    let log = pattern_log(0, 0, &pattern);
+    assert_eq!(read_price_rung(&log), 0, "17 of 20 is not enough any more");
+    assert_eq!(read_price_status(&log).points, 15);
+}
+
+#[test]
+fn passing_is_permanent_and_only_first_time_drill_answers_count() {
+    let mut log = pattern_log(0, 0, &[true; 22]);
     // A later bad run at a passed rung doesn't demote.
-    log.extend(rung_log(0, 20, 1, 100));
+    log.extend(pattern_log(0, 100, &[false; 30]));
     assert_eq!(read_price_rung(&log), 1);
     let status = read_price_status(&log);
-    assert_eq!(status.rung, 1);
+    assert_eq!((status.rung, status.points), (1, 10));
     assert_eq!((status.recent_right, status.recent_total), (0, 0));
+    // Retries move nothing.
+    let mut retries = pattern_log(0, 0, &[true; 40]);
+    for row in &mut retries {
+        row.mode = poker_trainer::log::Mode::DrillRetry;
+    }
+    assert_eq!(read_price_rung(&retries), 0);
+    assert_eq!(read_price_status(&retries).points, 10);
+    // Answers at another rung don't count toward this one.
+    assert_eq!(read_price_rung(&pattern_log(1, 0, &[true; 40])), 0);
+}
+
+#[test]
+fn the_old_rule_keeps_every_rung_it_gave_before_the_cutoff() {
+    // 17 of 20 met the old rule.
+    let mut pattern = vec![true; 17];
+    pattern.extend([false; 3]);
+    let ending_at = |last: u64| -> Vec<Attempt> {
+        let first = last - 19;
+        pattern.iter().enumerate().map(|(i, &right)| logged(&at_rung(i as u64, 0), first + i as u64, right)).collect()
+    };
+    let before = ending_at(OLD_RULE_CUTOFF_MS - 1);
+    assert_eq!(read_price_rung(&before[..19]), 0, "the old rule needed 20");
+    assert_eq!(read_price_rung(&before), 1, "all 20 before the cutoff");
+    assert_eq!(read_price_rung(&ending_at(OLD_RULE_CUTOFF_MS)), 0, "the 20th came at the cutoff");
+    // A phone still running the old build from its cache promotes by the old rule after the cutoff.
+    let cached: Vec<Attempt> =
+        ending_at(OLD_RULE_CUTOFF_MS + 1_000_000).into_iter().map(|a| Attempt { gen_version: 3, ..a }).collect();
+    assert_eq!(read_price_rung(&cached), 1, "rows the old build wrote keep the rung it showed");
+    // Later misses at the old rung change nothing, and the next rung climbs by points.
+    let mut log = before.clone();
+    log.extend(pattern_log(0, 500, &[false; 10]));
+    assert_eq!(read_price_rung(&log), 1);
+    log.extend(pattern_log(1, 600, &[true; 21]));
+    assert_eq!(read_price_rung(&log), 1);
+    assert_eq!(read_price_status(&log).points, 31);
+    log.extend(pattern_log(1, 700, &[true; 1]));
+    assert_eq!(read_price_rung(&log), 2);
+    // Old-rule rungs carry the player up several at once, but never past the top.
+    let mut climbed = Vec::new();
+    for rung in 0..READ_PRICE_RUNGS {
+        let rows = (0..20u64).map(|i| logged(&at_rung(i + u64::from(rung) * 1000, rung), u64::from(rung) * 1000 + i, true));
+        climbed.extend(rows);
+    }
+    assert_eq!(read_price_rung(&climbed), READ_PRICE_RUNGS - 1);
+}
+
+#[test]
+fn the_rung_follows_the_gate_on_random_logs() {
+    // The rung from the log is the gate replayed over each rung's answers.
+    let mut rng = Rng::new(17);
+    for case in 0..60u64 {
+        let accuracy = 700 + rng.below(300);
+        let pattern: Vec<bool> = (0..60).map(|_| rng.below(1000) < accuracy).collect();
+        let log = pattern_log(0, case * 100, &pattern);
+        let gate = RIGHT_WRONG_GATE.status(pattern.iter().map(|&right| right_wrong_points(right)));
+        assert_eq!(read_price_rung(&log), u8::from(gate.passed), "case {case}");
+        if !gate.passed {
+            assert_eq!(read_price_status(&log).points, gate.points, "case {case}");
+        }
+    }
+}
+
+/// How often players right `accuracy` per mille of the time move up within 60 and
+/// within 100 attempts at a rung, by `passed` over their answers so far.
+fn promotion_rates(accuracy: u64, passed: impl Fn(&[bool]) -> bool) -> (f64, f64) {
+    const PLAYERS: u64 = 20_000;
+    let mut rng = Rng::new(0x5EED ^ accuracy);
+    let (mut by_60, mut by_100) = (0u64, 0u64);
+    for _ in 0..PLAYERS {
+        let answers: Vec<bool> = (0..100).map(|_| rng.below(1000) < accuracy).collect();
+        // Promotion is checked after every answer, and never undone.
+        if let Some(at) = (1..=100).find(|&n| passed(&answers[..n])) {
+            by_100 += 1;
+            by_60 += u64::from(at <= 60);
+        }
+    }
+    (by_60 as f64 / PLAYERS as f64, by_100 as f64 / PLAYERS as f64)
+}
+
+#[test]
+fn luck_rarely_passes_the_gate_and_skill_passes_it_soon() {
+    let gate = |answers: &[bool]| RIGHT_WRONG_GATE.passed(answers.iter().map(|&right| right_wrong_points(right)));
+    let mut previous = (0.0, 0.0);
+    for accuracy in [700, 760, 800, 850, 900, 950] {
+        let (by_60, by_100) = promotion_rates(accuracy, gate);
+        println!("{}%: within 60 {:.1}%, within 100 {:.1}%", accuracy / 10, 100.0 * by_60, 100.0 * by_100);
+        assert!(by_60 >= previous.0 && by_100 >= previous.1, "better players move up more often");
+        previous = (by_60, by_100);
+        match accuracy {
+            700 => assert!(by_100 <= 0.02, "{by_100}"),
+            760 => assert!(by_100 <= 0.10, "a 76% player moved up within 100 attempts {by_100}"),
+            900 => assert!(by_60 >= 0.80, "a 90% player moved up within 60 attempts only {by_60}"),
+            950 => assert!(by_60 >= 0.97, "{by_60}"),
+            _ => {}
+        }
+    }
+    // The old rule, any 20 straight at 85%, let luck through.
+    let (_, old_by_100) = promotion_rates(760, old_rule_passed);
+    println!("old rule, 76%: within 100 {:.1}%", 100.0 * old_by_100);
+    assert!(old_by_100 > 0.9, "{old_by_100}");
 }
 
 #[test]
 fn the_ladder_stops_at_the_top_rung_and_reports_recent_accuracy() {
     let mut log = Vec::new();
     for rung in [0u8, 2, 3] {
-        log.extend(rung_log(rung, 20, 1000, u64::from(rung) * 1000));
+        log.extend(pattern_log(rung, u64::from(rung) * 1000, &[true; 22]));
     }
-    // Rung 1 isn't a choice item, so log it by hand: 20 right answers.
-    for i in 0..20u64 {
+    // Rung 1 isn't a choice item, so log it by hand: 22 right answers.
+    for i in 0..22u64 {
         let item = at_rung(i + 5000, 1);
         let answer = format!("{}", price(q(&item)));
         let planned = Planned { skill: Skill::ReadPrice, seed: item.seed, origin: Origin::New };
-        log.push(Attempt::from_drill(planned, &grade(&item, &answer).unwrap(), 5000 + i, 1500));
+        log.push(Attempt::from_drill(planned, &grade(&item, &answer).unwrap(), OLD_RULE_CUTOFF_MS + 5000 + i, 1500));
     }
     log.sort_by_key(|a| a.timestamp_ms);
     assert_eq!(read_price_rung(&log), 4);
     assert_eq!(read_price_status(&log).recent_total, 0);
-    let more: Vec<Attempt> = (0..READ_PRICE_PROMOTE_WINDOW as u64 + 3).map(|i| logged(&at_rung(i, 4), 9000 + i, i % 4 != 0)).collect();
-    log.extend(more);
+    let more: Vec<bool> = (0..READ_PRICE_RECENT_WINDOW as u64 + 3).map(|i| i % 4 != 0).collect();
+    log.extend(pattern_log(4, 9000, &more));
     assert_eq!(read_price_rung(&log), 4, "there is no rung past the top");
     let status = read_price_status(&log);
-    assert_eq!(status.recent_total, READ_PRICE_PROMOTE_WINDOW, "only the last window");
+    assert_eq!(status.recent_total, READ_PRICE_RECENT_WINDOW, "only the last window");
     assert_eq!(status.recent_right, 15);
 }
 
@@ -619,12 +770,10 @@ fn checkups_take_eight_of_each_rung_from_held_out_seeds() {
 }
 
 #[test]
-fn it_is_dealt_from_day_one_outside_the_steps_and_asks_confidence() {
-    assert_eq!(Skill::ReadPrice.step(), None);
-    assert!(STEPS.iter().all(|step| !step.contains(&Skill::ReadPrice)));
-    for step in 1..=STEPS.len() {
-        assert!(skills_up_to_step(step).contains(&Skill::ReadPrice), "step {step}");
-    }
+fn it_is_dealt_from_day_one_as_its_own_group_and_asks_confidence() {
+    assert_eq!(group_of(Skill::ReadPrice), Some(Group::ReadPrice));
+    assert_eq!(Group::ReadPrice.skills(), vec![Skill::ReadPrice]);
+    assert!(mixed_skills().contains(&Skill::ReadPrice));
     assert!(asks_confidence(Skill::ReadPrice));
     assert_eq!(Skill::from_name("read_price"), Some(Skill::ReadPrice));
 }
@@ -675,10 +824,10 @@ fn reflection_is_offered_on_a_missed_decision_with_true_cues() {
 }
 
 /// (read_price share, preflop share) over many default drills, in percent.
-fn default_shares(step: usize, sessions: u64, items: u64, miss_one_in: u64) -> (f64, f64) {
+fn default_shares(sessions: u64, items: u64, miss_one_in: u64) -> (f64, f64) {
     let (mut read_price, mut preflop, mut total) = (0u64, 0u64, 0u64);
     for seed in 0..sessions {
-        let mut session = Session::new(skills_up_to_step(step), &[], 0, seed * 7919 + 1).with_preflop_floor();
+        let mut session = Session::mixed(&[], 0, seed * 7919 + 1);
         let mut misses = Rng::new(seed);
         for _ in 0..items {
             let planned = session.try_next_item().expect("always an item");
@@ -693,22 +842,22 @@ fn default_shares(step: usize, sessions: u64, items: u64, miss_one_in: u64) -> (
 }
 
 #[test]
-fn the_default_drill_deals_it_at_12_to_15_percent_without_hurting_preflop() {
-    for (label, step, miss) in [("step 1 perfect", 1, 0), ("step 1 misses", 1, 4), ("step 3", 3, 0), ("step 4", 4, 0)] {
-        let (share, preflop) = default_shares(step, 200, 150, miss);
+fn the_default_drill_deals_it_at_its_15_percent_share_without_hurting_preflop() {
+    for (label, miss) in [("perfect", 0), ("misses", 4), ("many misses", 2)] {
+        let (share, preflop) = default_shares(200, 150, miss);
         println!("{label}: read_price {share:.1}%, preflop {preflop:.1}%");
-        assert!((12.0..=15.5).contains(&share), "{label}: read_price at {share:.1}%");
+        assert!((13.5..=16.5).contains(&share), "{label}: read_price at {share:.1}%");
         assert!(preflop >= MIN_PREFLOP_PERCENT as f64 - 0.5, "{label}: preflop at {preflop:.1}%");
     }
 }
 
 /// Dealing the next item when preflop is owed must deal preflop, so its share
-/// holds at every point in a session, not just on average. Step 1 has no chain,
-/// whose stages are dealt straight after each other.
+/// holds at every point in a session, not just on average. A chain only starts
+/// when the floor survives all its stages.
 #[test]
 fn preflop_never_falls_below_its_floor_at_any_point() {
     for seed in 0..300u64 {
-        let mut session = Session::new(skills_up_to_step(1), &[], 0, seed * 104_729 + 3).with_preflop_floor();
+        let mut session = Session::mixed(&[], 0, seed * 104_729 + 3);
         let mut misses = Rng::new(seed);
         let (mut preflop, mut dealt) = (0u64, 0u64);
         for _ in 0..80 {
@@ -819,7 +968,7 @@ fn leaving_callers_out_changes_the_answer_on_most_caller_items() {
 #[test]
 fn no_skill_is_dealt_three_times_running() {
     for seed in 0..300u64 {
-        let mut session = Session::new(skills_up_to_step(1), &[], 0, seed * 15_485_863 + 11).with_preflop_floor();
+        let mut session = Session::mixed(&[], 0, seed * 15_485_863 + 11);
         let mut misses = Rng::new(seed ^ 77);
         let mut last = Vec::new();
         for _ in 0..80 {
@@ -827,7 +976,9 @@ fn no_skill_is_dealt_three_times_running() {
             last.push(planned.skill);
             if last.len() >= 3 {
                 let tail = &last[last.len() - 3..];
-                assert!(!(tail[0] == tail[1] && tail[1] == tail[2]), "seed {seed}: three of {:?} in a row", tail[0]);
+                // A whole hand's stages come in a row by design.
+                let rule_applies = tail[0] != Skill::Chain;
+                assert!(!(rule_applies && tail[0] == tail[1] && tail[1] == tail[2]), "seed {seed}: three of {:?} in a row", tail[0]);
             }
             session.record(planned, !misses.chance(1, 5));
         }
@@ -1004,7 +1155,7 @@ fn a_drill_that_asks_for_named_skills_uses_the_normal_weights() {
 
 #[test]
 fn a_new_item_is_dealt_at_the_players_rung() {
-    let log = rung_log(0, 20, 1000, 0);
+    let log = pattern_log(0, 0, &[true; 22]);
     let mut session = Session::new(vec![Skill::ReadPrice], &log, 1, 42);
     for _ in 0..40 {
         let planned = session.try_next_item().unwrap();

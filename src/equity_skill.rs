@@ -3,6 +3,7 @@
 //! thresholds are starting guesses, to be tuned with real data.
 
 use crate::item::{equity_rung_of_seed, Skill};
+use crate::ladder::{before_old_rule_cutoff, GateStatus, PointsGate};
 use crate::log::{Attempt, ItemRef, Mode};
 
 /// Starting tolerance, in points either side of the true equity.
@@ -15,10 +16,23 @@ pub const EQUITY_BAND_TIGHTEN: u8 = 1;
 /// 6 hits for every miss, about 86% hits.
 pub const EQUITY_BAND_LOOSEN: u8 = 6;
 
-/// Rung-0 attempts considered for promotion.
-pub const PROMOTE_WINDOW: usize = 30;
-/// Promote when the mean absolute error over [`PROMOTE_WINDOW`] is at or under this.
-pub const PROMOTE_MAX_MAE: f64 = 8.0;
+/// Each rung-0 estimate adds this many points less its error, in whole points...
+pub const PROMOTE_PAR_POINTS: i32 = 8;
+/// ...counting an error over this as this, so one wild guess costs at most 12.
+pub const PROMOTE_ERROR_CAP: i32 = 20;
+/// The points gate from rung 0 to rung 1, shared in shape with the other
+/// ladders (see [`crate::ladder`]). Points rise on average while the mean error
+/// is under [`PROMOTE_PAR_POINTS`], the old mark. Simulated over 20,000 players
+/// each, with errors spread like a half-normal or an exponential: a mean error of
+/// 6 moves up within 60 attempts about 90% of the time, a mean error of 10 within
+/// 100 attempts under 5%. The old rule, any 30 straight attempts averaging 8 or
+/// less, moved a mean error of 10 up within 100 attempts about half the time.
+pub const EQUITY_GATE: PointsGate = PointsGate { start: 30, goal: 110 };
+/// The old rule, for attempts before [`crate::ladder::OLD_RULE_CUTOFF_MS`]: any this many
+/// straight rung-0 attempts...
+pub const OLD_PROMOTE_WINDOW: usize = 30;
+/// ...with a mean absolute error at or under this.
+pub const OLD_PROMOTE_MAX_MAE: f64 = 8.0;
 
 /// Attempts needed before [`equity_bias`] is worth showing.
 pub const BIAS_MIN_ATTEMPTS: usize = 30;
@@ -54,18 +68,36 @@ pub fn equity_band(attempts: &[Attempt], rung: u8) -> u8 {
         .fold(EQUITY_BAND_START, |band, a| next_band(band, a.correct))
 }
 
-/// The player's ladder rung: 1 once any [`PROMOTE_WINDOW`] consecutive rung-0
-/// drill attempts have reached the promotion mark. Promotion is permanent, so
-/// an old rung-0 item coming back for review cannot demote the player.
+/// One rung-0 estimate's points: [`PROMOTE_PAR_POINTS`] less the error rounded
+/// to whole points and capped at [`PROMOTE_ERROR_CAP`].
+pub fn estimate_points(error: f64) -> i32 {
+    // The cap comes first, so the cast never sees a huge value.
+    let off = error.abs().min(f64::from(PROMOTE_ERROR_CAP)).round() as i32;
+    PROMOTE_PAR_POINTS - off
+}
+
+fn rung_zero(attempts: &[Attempt]) -> impl Iterator<Item = &Attempt> {
+    drill_equity(attempts).filter(|a| rung_of(a) == Some(0)).filter(|a| a.extra.signed_error.is_some())
+}
+
+/// Points toward rung 1 from the log, and whether they have reached the goal.
+pub fn equity_points(attempts: &[Attempt]) -> GateStatus {
+    EQUITY_GATE.status(rung_zero(attempts).filter_map(|a| a.extra.signed_error).map(estimate_points))
+}
+
+/// The player's ladder rung: 1 once the rung-0 points reach [`EQUITY_GATE`]'s
+/// goal, or once the old rule passed on attempts before [`crate::ladder::OLD_RULE_CUTOFF_MS`].
+/// Promotion is permanent, so an old rung-0 item coming back for review cannot
+/// demote the player.
 pub fn equity_rung(attempts: &[Attempt]) -> u8 {
-    let errors: Vec<f64> = drill_equity(attempts)
-        .filter(|a| rung_of(a) == Some(0))
+    let old: Vec<f64> = rung_zero(attempts)
+        .filter(|a| before_old_rule_cutoff(a))
         .filter_map(|a| a.extra.signed_error.map(f64::abs))
         .collect();
-    let promoted = errors.windows(PROMOTE_WINDOW).any(|window| {
-        window.iter().sum::<f64>() / window.len() as f64 <= PROMOTE_MAX_MAE
+    let old_passed = old.windows(OLD_PROMOTE_WINDOW).any(|window| {
+        window.iter().sum::<f64>() / window.len() as f64 <= OLD_PROMOTE_MAX_MAE
     });
-    u8::from(promoted)
+    u8::from(old_passed || equity_points(attempts).passed)
 }
 
 /// Mean signed error (estimate minus truth, in points) for one group of attempts.

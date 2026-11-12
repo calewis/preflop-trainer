@@ -6,7 +6,7 @@ use poker_trainer::anchors::{self, AnchorCard, AnchorKind};
 use poker_trainer::answer::{answer_format, AnswerFormat, AnswerOption};
 use poker_trainer::board_type::{BoardCategory, RankPattern, SuitPattern, BOARD_TYPE_MISS_MS, BOARD_TYPE_TARGET_MS};
 use poker_trainer::cards::{Card, Holding};
-use poker_trainer::checkup::{CheckupMetric, CheckupScore, RepeatAgreement};
+use poker_trainer::checkup::{CheckupKind, CheckupMetric, CheckupScore, RepeatAgreement};
 use poker_trainer::equity_skill::BiasBucket;
 use poker_trainer::eval::HandRank;
 use poker_trainer::beats_me::{mix_method, prompt_text, ways_method, Standing};
@@ -988,7 +988,7 @@ fn capitalized(text: &str) -> String {
 
 /// A checkup score in its own measure.
 pub fn checkup_score(s: &CheckupScore) -> String {
-    if s.skill == Skill::Chain {
+    if s.kind == CheckupKind::Skill(Skill::Chain) {
         return format!("{:.0}% of stages right", s.score);
     }
     match s.metric {
@@ -996,6 +996,15 @@ pub fn checkup_score(s: &CheckupScore) -> String {
         CheckupMetric::PercentWithinOne => format!("{:.0}% within one out", s.score),
         CheckupMetric::MeanEvLoss => format!("{:.1}% of the pot lost on average", s.score),
         CheckupMetric::MeanAbsError => format!("average error {:.1} points", s.score),
+        CheckupMetric::PercentOk => format!("{:.0}% right", s.score),
+    }
+}
+
+/// A checkup's name: the skill's title, or the mixed checkup's.
+pub fn checkup_title(kind: CheckupKind) -> &'static str {
+    match kind {
+        CheckupKind::Skill(skill) => skill_title(skill),
+        CheckupKind::Mixed => "Monthly checkup",
     }
 }
 
@@ -1010,7 +1019,7 @@ pub fn checkup_margin(s: &CheckupScore) -> String {
         return "margin of error too small to show".to_string();
     }
     match s.metric {
-        CheckupMetric::PercentCorrect | CheckupMetric::PercentWithinOne => {
+        CheckupMetric::PercentCorrect | CheckupMetric::PercentWithinOne | CheckupMetric::PercentOk => {
             format!("about plus or minus {} points", points_number(margin.round()))
         }
         CheckupMetric::MeanEvLoss => format!("about plus or minus {:.1}% of the pot", margin),
@@ -1174,6 +1183,7 @@ fn ahead_kind(kind: &AheadKind) -> V {
 
 const RAISE_ISO_NAME: &str = "the raise-over-limpers range";
 const LIMP_NAME: &str = "the limp-along range";
+const LATE_ISO_NAME: &str = "the cutoff-and-button raise-over-limpers range";
 
 fn opening_range_name(seat: Seat) -> &'static str {
     match seat {
@@ -1188,7 +1198,8 @@ fn opening_range_name(seat: Seat) -> &'static str {
 
 /// A card note with the file's internal keys replaced by plain range names.
 pub fn plain_note(text: &str) -> String {
-    text.replace("raise iso.raise hands", &format!("raise hands in {RAISE_ISO_NAME}"))
+    text.replace("iso.late.raise", LATE_ISO_NAME)
+        .replace("raise iso.raise hands", &format!("raise hands in {RAISE_ISO_NAME}"))
         .replace("iso.raise", RAISE_ISO_NAME)
         .replace("iso.limp", LIMP_NAME)
 }
@@ -1210,6 +1221,10 @@ fn preflop_why(seat: Seat, action: Action, reason: PreflopReason) -> String {
         PreflopReason::NotInOpen => format!("The hand is not in {open_name}: {open_line}."),
         PreflopReason::BigBlindNoRaise => plain_note(CARD.note("note.big_blind")),
         PreflopReason::IsoRaise => format!("With limpers, raise hands in {RAISE_ISO_NAME}: {raise_iso}."),
+        PreflopReason::IsoLateRaise => format!(
+            "From the cutoff or button with limpers, also raise hands in {LATE_ISO_NAME}: {}.",
+            CARD.iso_late_raise.text
+        ),
         PreflopReason::IsoLimp => format!(
             "The hand is in {LIMP_NAME}: {limp}. You may limp along from the cutoff, button or small blind, or when two or more have limped."
         ),

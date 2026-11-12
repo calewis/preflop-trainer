@@ -3,13 +3,13 @@
 use poker_trainer::anchors;
 use poker_trainer::answer::{answer_format, AnswerFormat, AnswerOption};
 use poker_trainer::cards::{rank_char, Card, Holding};
-use poker_trainer::checkup::{CheckupMetric, CheckupScore};
+use poker_trainer::checkup::{CheckupKind, CheckupMetric, CheckupScore, MIXED_CHECKUP_LEN};
 use poker_trainer::equity_skill::{EquityBias, BIAS_MIN_ATTEMPTS};
 use poker_trainer::beats_me::{mix_method, prompt_text, ways_method, Standing};
 use poker_trainer::grade::{any_of_suit_text, BeatsMeReveal, EquityAnalysis, EvBand, FlipFacts, Outcome, Reveal, BEATS_RANDOM_NOTE};
 use poker_trainer::item::{BeatsMeAsk, BeatsMeQuestion, ChainHand, ChainQuestion, ChainStage, EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question, Skill, SpotMode, SpotQuestion};
 use poker_trainer::preflop::{action_label, why_line, Action, CardLine, Chart, PreflopReason, Seat, Range, Situation, CARD};
-use poker_trainer::progress::{pass_mark, BaselineRun, SkillStats, PASS_ATTEMPTS, STEPS};
+use poker_trainer::progress::{pass_mark, BaselineRun, SkillStats, PASS_ATTEMPTS};
 use poker_trainer::table::{bb_text, checkup_form_reuses_spots, ev_bb_text, REUSE_NOTE, TableAction, TableActionKind, TableGrade, TableQuestion, TableSeat, TableStreetName, Verdict, ASSUMPTION_NOTE};
 
 #[derive(Clone, Copy)]
@@ -696,6 +696,10 @@ fn preflop_reveal(lines: &mut Vec<String>, seat: Seat, situation: Situation, act
         PreflopReason::NotInOpen => format!("The hand is not in {open_name}: {open_line}."),
         PreflopReason::BigBlindNoRaise => plain_note(CARD.note("note.big_blind")),
         PreflopReason::IsoRaise => format!("With limpers, raise hands in {RAISE_ISO_NAME}: {raise_iso}."),
+        PreflopReason::IsoLateRaise => format!(
+            "From the cutoff or button with limpers, also raise hands in {LATE_ISO_NAME}: {}.",
+            CARD.iso_late_raise.text
+        ),
         PreflopReason::IsoLimp => format!(
             "The hand is in {LIMP_NAME}: {limp}. You may limp along from the cutoff, button or small blind, or when two or more have limped."
         ),
@@ -722,6 +726,7 @@ fn preflop_reveal(lines: &mut Vec<String>, seat: Seat, situation: Situation, act
 
 const RAISE_ISO_NAME: &str = "the raise-over-limpers range";
 const LIMP_NAME: &str = "the limp-along range";
+const LATE_ISO_NAME: &str = "the cutoff-and-button raise-over-limpers range";
 
 fn opening_range_name(seat: Seat) -> &'static str {
     match seat {
@@ -747,7 +752,8 @@ fn seat_title(seat: Seat) -> &'static str {
 
 /// A card note with the file's internal keys replaced by plain range names.
 fn plain_note(text: &str) -> String {
-    text.replace("raise iso.raise hands", &format!("raise hands in {RAISE_ISO_NAME}"))
+    text.replace("iso.late.raise", LATE_ISO_NAME)
+        .replace("raise iso.raise hands", &format!("raise hands in {RAISE_ISO_NAME}"))
         .replace("iso.raise", RAISE_ISO_NAME)
         .replace("iso.limp", LIMP_NAME)
 }
@@ -777,7 +783,11 @@ pub fn card_text() -> String {
     }
     let mut rows: Vec<(String, Vec<(String, &CardLine)>)> = vec![(
         "One or more limpers".to_string(),
-        vec![("Raise-over-limpers range".to_string(), &CARD.iso_raise), ("Limp-along range".to_string(), &CARD.iso_limp)],
+        vec![
+            ("Raise-over-limpers range".to_string(), &CARD.iso_raise),
+            ("Also raise, cutoff or button".to_string(), &CARD.iso_late_raise),
+            ("Limp-along range".to_string(), &CARD.iso_limp),
+        ],
     )];
     for chart in Chart::ALL {
         let (raise, call) = chart.lines();
@@ -832,20 +842,18 @@ fn mark_text(stats: &SkillStats) -> String {
 }
 
 fn pass_status(stats: &SkillStats) -> String {
-    if stats.passed {
+    if stats.drill_passed {
         "Passed.".to_string()
+    } else if stats.passed {
+        "Passed before; below the mark over the latest attempts.".to_string()
     } else if stats.total_attempts < PASS_ATTEMPTS {
         if stats.skill == Skill::BeatsMe {
             format!("Not passed yet: counts levels 3 and 4 only, needs {PASS_ATTEMPTS} attempts there, has {}.", stats.total_attempts)
         } else {
             format!("Not passed yet: needs {PASS_ATTEMPTS} attempts, has {}.", stats.total_attempts)
         }
-    } else if !stats.drill_passed {
-        "Not passed yet.".to_string()
-    } else if stats.checkup_passed.is_none() {
-        format!("Drill mark met. Take a checkup to pass: poker-trainer check --skill {}", stats.skill.name())
     } else {
-        "Drill mark met, but the latest checkup missed it.".to_string()
+        "Not passed yet.".to_string()
     }
 }
 
@@ -879,11 +887,17 @@ fn metric_text(score: &CheckupScore) -> String {
         CheckupMetric::PercentWithinOne => format!("{:.0}% within 1", score.score),
         CheckupMetric::MeanEvLoss => format!("mean EV loss {:.1}% of pot", score.score),
         CheckupMetric::MeanAbsError => format!("mean absolute error {:.1} points", score.score),
+        CheckupMetric::PercentOk => format!("{:.0}% right", score.score),
     }
 }
 
 /// One line per checkup, for history lists.
 pub fn checkup_line(s: &CheckupScore) -> String {
+    let name = s.kind.code();
+    if s.kind == CheckupKind::Mixed {
+        let status = if s.complete { String::new() } else { "; unfinished".to_string() };
+        return format!("  {name} form {} (run {}): {}, standard error {:.1}{status}", s.form, s.run, metric_text(s), s.standard_error);
+    }
     let status = if !s.complete {
         "unfinished".to_string()
     } else if s.passed {
@@ -892,10 +906,9 @@ pub fn checkup_line(s: &CheckupScore) -> String {
         "not passed".to_string()
     };
     let diff = s.agreement.mean_abs_diff.map_or(String::new(), |d| format!(", mean gap {d:.1}"));
-    let older = if s.skill == Skill::Table && !s.in_current_library { " (older spot library)" } else { "" };
+    let older = if s.kind == CheckupKind::Skill(Skill::Table) && !s.in_current_library { " (older spot library)" } else { "" };
     format!(
-        "  {}{older} form {} (run {}): {}, standard error {:.1}; repeats agreed {} of {}{diff}; {status}",
-        s.skill.name(),
+        "  {name}{older} form {} (run {}): {}, standard error {:.1}; repeats agreed {} of {}{diff}; {status}",
         s.form,
         s.run,
         metric_text(s),
@@ -907,7 +920,15 @@ pub fn checkup_line(s: &CheckupScore) -> String {
 
 /// The end-of-checkup report.
 pub fn checkup_report(score: &CheckupScore) -> String {
-    let reused = if score.skill == Skill::Table && score.in_current_library && checkup_form_reuses_spots(score.form) {
+    if score.kind == CheckupKind::Mixed {
+        let groups: String = score
+            .groups
+            .iter()
+            .map(|g| format!("  {:<15} {} of {}\n", g.group.title(), g.ok, g.answered))
+            .collect();
+        return format!("\nCHECKUP RESULT\n\n{}\n\nBy group\n{groups}Scored on all {MIXED_CHECKUP_LEN} questions.\n", checkup_line(score));
+    }
+    let reused = if score.kind == CheckupKind::Skill(Skill::Table) && score.in_current_library && checkup_form_reuses_spots(score.form) {
         format!("{REUSE_NOTE}\n")
     } else {
         String::new()
@@ -936,11 +957,9 @@ fn bias_section(bias: &EquityBias) -> String {
     out
 }
 
-/// The `progress` report: per-skill stats, the current step, and baseline and
-/// checkup history.
+/// The `progress` report: per-skill stats, and baseline and checkup history.
 pub fn progress_text(
     stats: &[SkillStats],
-    step: usize,
     runs: &[BaselineRun],
     checkups: &[CheckupScore],
     bias: &EquityBias,
@@ -963,9 +982,7 @@ pub fn progress_text(
             ));
         }
     }
-    let names: Vec<&str> = STEPS[step - 1].iter().map(|s| s.name()).collect();
-    out.push_str(&format!("\nCurrent step: {step} of {} ({}).\n", STEPS.len(), names.join(", ")));
-    out.push_str("Pass marks are starting guesses.\n\nBaseline history\n");
+    out.push_str("\nEvery drill is open. Pass marks are starting guesses.\n\nBaseline history\n");
     if runs.is_empty() {
         out.push_str("  No baseline yet. Take one with: poker-trainer baseline\n");
     }
@@ -975,7 +992,7 @@ pub fn progress_text(
     }
     out.push_str("\nCheckup history\n");
     if checkups.is_empty() {
-        out.push_str("  No checkups yet. Take one with: poker-trainer check --skill NAME\n");
+        out.push_str("  No checkups yet. Take one with: poker-trainer check\n");
     }
     for score in checkups {
         out.push_str(&checkup_line(score));
@@ -989,7 +1006,7 @@ pub fn progress_text(
 
 /// One line per run, for history lists.
 pub fn run_summary_line(run: &BaselineRun) -> String {
-    let steps: Vec<String> = run.steps.iter().map(|s| format!("step {} {}/{}", s.step, s.ok, s.answered)).collect();
+    let steps: Vec<String> = run.steps.iter().map(|s| format!("part {} {}/{}", s.step, s.ok, s.answered)).collect();
     format!(
         "  Run {}: {} of {} ({}{})",
         run.run,
@@ -1010,9 +1027,9 @@ pub fn baseline_report(run: &BaselineRun, earlier: &[BaselineRun]) -> String {
         }
         out.push('\n');
     }
-    out.push_str("\nBy step\n");
+    out.push_str("\nBy part\n");
     for step in &run.steps {
-        out.push_str(&format!("  Step {}: {} of {}\n", step.step, step.ok, step.answered));
+        out.push_str(&format!("  Part {}: {} of {}\n", step.step, step.ok, step.answered));
     }
     out.push_str(&format!("\nTotal: {} of {}", run.ok, run.answered));
     if !run.complete {
@@ -1108,7 +1125,8 @@ mod tests {
         };
         assert!(revealed(&item(4, Situation::FoldedTo, "KhQd"), "r").contains("your middle-position opening range"));
         assert!(revealed(&item(3, Situation::Limpers(1), "AhJd"), "r").contains("the raise-over-limpers range"));
-        assert!(revealed(&item(3, Situation::Limpers(1), "Ah2h"), "c").contains("the limp-along range"));
+        assert!(revealed(&item(3, Situation::Limpers(1), "2h2d"), "c").contains("the limp-along range"));
+        assert!(revealed(&item(2, Situation::Limpers(1), "Th9h"), "r").contains("the cutoff-and-button raise-over-limpers range"));
         // The new charts give one line about the hand and the chart itself.
         let reraise = revealed(&item(3, Situation::Raised, "JhJd"), "r");
         assert!(reraise.contains("Answer: 3-bet."), "{reraise}");

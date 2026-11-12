@@ -10,21 +10,25 @@ use poker_trainer::baseline::{self, BaselineItem, BASELINE_SIZE};
 use poker_trainer::board_type::board_type_status;
 use poker_trainer::cards::Card;
 use poker_trainer::checkup::{
-    checkup_plan, checkup_runs, next_checkup_form, next_checkup_run, CheckupScore, CHECKUP_LEN,
-    CHECKUP_ORIGINALS, CHECKUP_REPEATS,
+    checkup_runs, mixed_checkup_offer, next_checkup_run, next_form, plan_for, unfinished_run, CheckupKind, CheckupOffer,
+    CheckupScore, CHECKUP_LEN, CHECKUP_ORIGINALS, CHECKUP_REPEATS, MIXED_CHECKUP_EVERY_DAYS, MIXED_CHECKUP_LEN,
 };
-use poker_trainer::equity_skill::{equity_band, equity_bias, equity_rung, BIAS_MIN_ATTEMPTS};
+use poker_trainer::equity_skill::{
+    equity_band, equity_bias, equity_points, equity_rung, BIAS_MIN_ATTEMPTS, EQUITY_GATE, PROMOTE_ERROR_CAP, PROMOTE_PAR_POINTS,
+};
 use poker_trainer::generate::generate;
 use poker_trainer::grade::{grade_choices, grade_timed};
 use poker_trainer::item::{Item, Skill};
 use poker_trainer::log::{asks_confidence, format_attempt, parse_log, Attempt, CheckRef, Confidence, ItemRef, Mode, LOG_HEADER};
 use poker_trainer::preflop::{chart_for, preflop_answer, Action, Seat, Situation, CARD};
+use poker_trainer::groups::{group_of, Group};
 use poker_trainer::progress::{
-    all_stats, baseline_runs, current_step_for, drill_skills, has_baseline, next_baseline_run,
-    pass_mark, reliability_table, BaselineRun, SkillStats, WindowMetrics, MIN_ATTEMPTS, PASS_ATTEMPTS, STEPS,
+    all_stats, baseline_runs, drill_skills, has_baseline, next_baseline_run, pass_mark, reliability_table, BaselineRun,
+    SkillStats, WindowMetrics, MIN_ATTEMPTS, PASS_ATTEMPTS,
 };
 use poker_trainer::reflection::{reflection_comparison, reflection_form, reflection_row, reflection_state, ReflectState};
-use poker_trainer::read_price::{read_price_status, READ_PRICE_PROMOTE_PCT, READ_PRICE_PROMOTE_WINDOW};
+use poker_trainer::ladder::{MISS_POINTS, RIGHT_POINTS, RIGHT_WRONG_GATE};
+use poker_trainer::read_price::read_price_status;
 use poker_trainer::rng::Rng;
 use poker_trainer::table;
 use poker_trainer::schedule::{
@@ -163,7 +167,7 @@ impl Engine {
             "load" => self.load(arg(fields, 1)?),
             "export" => Ok(obj! { "text": self.log_text() }),
             "merge" => self.merge(arg(fields, 1)?),
-            "home" => Ok(self.home()),
+            "home" => Ok(self.home(fields)),
             "progress" => Ok(self.progress(fields)),
             "card_meta" => Ok(card_meta()),
             "card_view" => card_view(arg(fields, 1)?, arg(fields, 2)?),
@@ -286,22 +290,15 @@ impl Engine {
         map
     }
 
-    fn home(&self) -> V {
-        let stats = all_stats(&self.attempts);
-        let checkups = checkup_runs(&self.attempts);
-        let step = current_step_for(&self.attempts);
-        let rotation: Vec<&str> = drill_skills(&[], &self.attempts)
-            .into_iter()
-            .map(present::skill_title)
-            .collect();
+    /// Home: the practice groups to pick from and the monthly checkup, if offered.
+    /// The second field is the time now, which the checkup offer depends on.
+    fn home(&self, fields: &[&str]) -> V {
+        let now_ms = fields.get(1).and_then(|t| t.parse().ok()).unwrap_or(0);
         obj! {
             "has_baseline": has_baseline(&self.attempts),
             "baseline_size": BASELINE_SIZE,
-            "step": step,
-            "step_count": STEPS.len(),
-            "steps": steps_json(&stats, step),
-            "rotation": rotation,
-            "checkups": checkup_actions(&stats, &checkups),
+            "groups": groups_json(),
+            "checkup": checkup_offer_json(mixed_checkup_offer(&self.attempts, now_ms)),
         }
     }
 
@@ -309,16 +306,16 @@ impl Engine {
         let now_ms = fields.get(1).and_then(|t| t.parse().ok()).unwrap_or(0);
         let stats = all_stats(&self.attempts);
         let checkups = checkup_runs(&self.attempts);
-        let skills: Vec<V> = stats.iter().map(|s| stats_json(s, &checkups)).collect();
-        let step = current_step_for(&self.attempts);
+        // Every skill dealt today, and a retired one only while it has history to show.
+        let skills: Vec<V> = stats
+            .iter()
+            .filter(|s| group_of(s.skill).is_some() || s.total_attempts > 0)
+            .map(stats_json)
+            .collect();
         let runs = baseline_runs(&self.attempts, BASELINE_SIZE);
-        let names: Vec<&str> = STEPS[step - 1].iter().map(|&s| present::skill_title(s)).collect();
         obj! {
             "skills": skills,
-            "step": step,
-            "step_count": STEPS.len(),
-            "step_skills": names,
-            "steps": steps_json(&stats, step),
+            "checkup": checkup_offer_json(mixed_checkup_offer(&self.attempts, now_ms)),
             "runs": runs.iter().map(run_json).collect::<Vec<_>>(),
             "checkups": checkups.iter().map(checkup_json).collect::<Vec<_>>(),
             "board_types": self.board_types_json(),
@@ -359,15 +356,20 @@ impl Engine {
                 100.0 * status.recent_right as f64 / status.recent_total as f64
             )
         });
+        let top = status.rung + 1 == poker_trainer::item::READ_PRICE_RUNGS;
         obj! {
             "rung": u32::from(status.rung) + 1,
             "rungs": u32::from(poker_trainer::item::READ_PRICE_RUNGS),
             "label": poker_trainer::read_price::rung_label(status.rung),
             "recent": recent,
-            "rule": if status.rung + 1 == poker_trainer::item::READ_PRICE_RUNGS {
+            "points": (!top).then(|| format!("Points toward the next rung: {} of {}.", status.points, RIGHT_WRONG_GATE.goal)),
+            "rule": if top {
                 "This is the top rung.".to_string()
             } else {
-                format!("Moves up when {READ_PRICE_PROMOTE_WINDOW} straight attempts at this rung reach {READ_PRICE_PROMOTE_PCT:.0}%.")
+                format!(
+                    "Every rung starts at {} points. Each first-try drill answer at this rung adds {RIGHT_POINTS} if right and takes off {MISS_POINTS} if wrong, never going below 0. Reaching {} moves you up.",
+                    RIGHT_WRONG_GATE.start, RIGHT_WRONG_GATE.goal
+                )
             },
         }
     }
@@ -377,9 +379,18 @@ impl Engine {
         let rung_label = |r: u8| if r == 0 { "exact hands" } else { "hand types" };
         let bias = equity_bias(&self.attempts);
         let enough = bias.count >= BIAS_MIN_ATTEMPTS;
+        let points = (rung == 0).then(|| {
+            format!(
+                "Points toward hand types: {} of {}, starting from {}. Each first-try drill estimate with exact hands adds {PROMOTE_PAR_POINTS} less how far off it was, rounded to whole points and counting at most {PROMOTE_ERROR_CAP}, never going below 0.",
+                equity_points(&self.attempts).points,
+                EQUITY_GATE.goal,
+                EQUITY_GATE.start
+            )
+        });
         obj! {
             "rung": u32::from(rung) + 1,
             "rung_label": rung_label(rung),
+            "points": points,
             "bands": vec![
                 format!("Exact hands: within {} points counts.", equity_band(&self.attempts, 0)),
                 format!("Hand types: within {} points counts.", equity_band(&self.attempts, 1)),
@@ -424,16 +435,19 @@ impl Engine {
     fn session_open(&mut self, fields: &[&str]) -> Reply {
         let seed = parse_u64(arg(fields, 1)?, "seed")?;
         let now_ms = parse_u64(arg(fields, 2)?, "now")?;
-        // An optional comma-separated list narrows the deal to those skills.
-        let requested: Vec<Skill> = match fields.get(3).copied().unwrap_or("") {
-            "" => Vec::new(),
-            list => list.split(',').map(skill_from).collect::<Result<_, _>>()?,
+        // Nothing is the default mixed drill; `group:CODE` deals one practice group;
+        // a comma-separated list of skills deals exactly those.
+        let real = match fields.get(3).copied().unwrap_or("") {
+            "" => Session::mixed(&self.attempts, now_ms, seed),
+            pick if pick.starts_with(GROUP_PREFIX) => {
+                let group = Group::from_code(&pick[GROUP_PREFIX.len()..]).ok_or("unknown group")?;
+                Session::for_group(group, &self.attempts, now_ms, seed)
+            }
+            list => {
+                let requested: Vec<Skill> = list.split(',').map(skill_from).collect::<Result<_, _>>()?;
+                Session::new(drill_skills(&requested), &self.attempts, now_ms, seed)
+            }
         };
-        let allowed = drill_skills(&requested, &self.attempts);
-        let mut real = Session::new(allowed, &self.attempts, now_ms, seed);
-        if requested.is_empty() {
-            real = real.with_preflop_floor();
-        }
         let limits = SessionLimits::resolve(None, None);
         self.session = Some(LiveSession {
             limits,
@@ -652,69 +666,79 @@ impl Engine {
     }
 
     fn prepare_check(&mut self, fields: &[&str]) -> Reply {
-        let (skill, form, slot, run) = check_fields(fields)?;
-        let plan = checkup_plan(skill, form);
-        let seed = plan.slots.get(slot).ok_or("no such slot")?.seed;
+        let (kind, form, slot, run) = check_fields(fields)?;
+        let plan = checked_plan(kind, form)?;
+        let entry = *plan.slots.get(slot).ok_or("no such slot")?;
         let item = plan.item(slot);
         let check = CheckRef { run, form, slot: slot as u32 };
-        Ok(bundle(&item, None, &|outcome| Attempt::from_check(check, skill, seed, outcome, 0, 0)))
+        Ok(bundle(&item, None, &|outcome| Attempt::from_check(check, entry.skill, entry.seed, outcome, 0, 0)))
     }
 
-    /// What a player can do about a skill's checkups, and how they went.
+    /// What a player can do about a checkup, and how earlier ones went. The kind
+    /// is `mixed` for the monthly checkup, or a skill's name for the older kind.
     fn check_info(&self, fields: &[&str]) -> Reply {
-        let skill = skill_from(arg(fields, 1)?)?;
+        let kind = kind_from(arg(fields, 1)?)?;
         let runs = checkup_runs(&self.attempts);
         // A run from an older generator or an earlier spot library can't be picked up.
-        let unfinished = unfinished_run(&runs, skill);
-        let upcoming_form = unfinished.map_or_else(|| next_checkup_form(skill, &self.attempts), |r| r.form);
+        let unfinished = unfinished_run(&runs, kind);
+        let upcoming_form = unfinished.map_or_else(|| next_form(kind, &self.attempts), |r| r.form);
+        let total = checkup_len(kind);
         let in_progress = unfinished.map(|r| {
-            obj! { "answered": r.answered, "total": CHECKUP_LEN }
+            obj! { "answered": r.answered, "total": total }
         });
-        let history: Vec<V> = runs.iter().filter(|r| r.skill == skill).map(checkup_json).collect();
+        let history: Vec<V> = runs.iter().filter(|r| r.kind == kind).map(checkup_json).collect();
         // Starting over deals a new form, which may be past the reserved spots.
-        let start_over_form = next_checkup_form(skill, &self.attempts);
+        let start_over_form = next_form(kind, &self.attempts);
+        let table = kind == CheckupKind::Skill(Skill::Table);
+        let intro = match kind {
+            CheckupKind::Mixed => format!(
+                "{MIXED_CHECKUP_LEN} new questions from all seven practice groups. No feedback until the end. It is optional, gates nothing, and comes round every {MIXED_CHECKUP_EVERY_DAYS} days."
+            ),
+            CheckupKind::Skill(_) => format!(
+                "{total} questions: {CHECKUP_ORIGINALS} new ones and {CHECKUP_REPEATS} repeats. No feedback until the end."
+            ),
+        };
         Ok(obj! {
-            "skill": skill.name(),
-            "title": present::skill_title(skill),
-            "total": CHECKUP_LEN,
-            "originals": CHECKUP_ORIGINALS,
-            "repeats": CHECKUP_REPEATS,
+            "skill": kind.code(),
+            "title": present::checkup_title(kind),
+            "intro": intro,
+            "total": total,
             "in_progress": in_progress,
             "history": history,
-            "reuse_note": (skill == Skill::Table && table::checkup_form_reuses_spots(upcoming_form)).then_some(table::REUSE_NOTE),
-            "start_over_note": (skill == Skill::Table && unfinished.is_some() && table::checkup_form_reuses_spots(start_over_form)).then_some(table::REUSE_NOTE),
+            "reuse_note": (table && table::checkup_form_reuses_spots(upcoming_form)).then_some(table::REUSE_NOTE),
+            "start_over_note": (table && unfinished.is_some() && table::checkup_form_reuses_spots(start_over_form)).then_some(table::REUSE_NOTE),
         })
     }
 
-    /// Starts a checkup, or picks up the skill's unfinished one when `resume` is 1.
+    /// Starts a checkup, or picks up the kind's unfinished one when `resume` is 1.
     fn check_begin(&mut self, fields: &[&str]) -> Reply {
-        let skill = skill_from(arg(fields, 1)?)?;
+        let kind = kind_from(arg(fields, 1)?)?;
         let resume = arg(fields, 2)? == "1";
         let runs = checkup_runs(&self.attempts);
-        let unfinished = unfinished_run(&runs, skill);
+        let unfinished = unfinished_run(&runs, kind);
         let (run, form) = match unfinished.filter(|_| resume) {
             Some(score) => (score.run, score.form),
             None => {
                 // After a run-number clash the page keeps its form, so its place holds.
                 let form = match fields.get(3) {
                     Some(text) => parse_u64(text, "form")? as u32,
-                    None => next_checkup_form(skill, &self.attempts),
+                    None => next_form(kind, &self.attempts),
                 };
                 (next_checkup_run(&self.attempts), form)
             }
         };
         Ok(obj! {
-            "skill": skill.name(),
-            "title": present::skill_title(skill),
+            "skill": kind.code(),
+            "title": present::checkup_title(kind),
             "run": run,
             "form": form,
-            "total": CHECKUP_LEN,
+            "total": checkup_len(kind),
         })
     }
 
-    fn answered_slots(&self, skill: Skill, run: u32) -> Vec<bool> {
-        let mut answered = vec![false; CHECKUP_LEN];
-        for attempt in self.attempts.iter().filter(|a| a.skill == skill && a.mode == Mode::Check) {
+    fn answered_slots(&self, kind: CheckupKind, run: u32) -> Vec<bool> {
+        let mut answered = vec![false; checkup_len(kind)];
+        for attempt in self.attempts.iter().filter(|a| a.mode == Mode::Check && CheckupKind::of_row(a) == Some(kind)) {
             if let Some(check) = attempt.extra.check.filter(|c| c.run == run) {
                 if let Some(slot) = answered.get_mut(check.slot as usize) {
                     *slot = true;
@@ -725,9 +749,10 @@ impl Engine {
     }
 
     fn check_next(&self, fields: &[&str]) -> Reply {
-        let skill = skill_from(arg(fields, 1)?)?;
+        let kind = kind_from(arg(fields, 1)?)?;
         let run = parse_u64(arg(fields, 2)?, "run")? as u32;
-        let answered = self.answered_slots(skill, run);
+        let answered = self.answered_slots(kind, run);
+        let total = answered.len();
         let done = answered.iter().filter(|a| **a).count();
         Ok(match answered.iter().position(|a| !a) {
             Some(slot) => obj! {
@@ -735,23 +760,23 @@ impl Engine {
                 "slot": slot,
                 "after": answered[slot + 1..].iter().position(|a| !a).map(|gap| slot + 1 + gap),
                 "number": done + 1,
-                "total": CHECKUP_LEN,
+                "total": total,
             },
-            None => obj! { "done": true, "total": CHECKUP_LEN },
+            None => obj! { "done": true, "total": total },
         })
     }
 
     fn check_grade(&self, fields: &[&str]) -> Reply {
-        let (skill, form, slot, run) = check_fields(fields)?;
+        let (kind, form, slot, run) = check_fields(fields)?;
         let raw = arg(fields, 5)?;
         let response = response_field(fields, 6)?;
-        let plan = checkup_plan(skill, form);
-        let seed = plan.slots.get(slot).ok_or("no such slot")?.seed;
+        let plan = checked_plan(kind, form)?;
+        let entry = *plan.slots.get(slot).ok_or("no such slot")?;
         let item = plan.item(slot);
         match grade_timed(&item, raw, response) {
             Ok(outcome) => {
                 let check = CheckRef { run, form, slot: slot as u32 };
-                let template = format_attempt(&Attempt::from_check(check, skill, seed, &outcome, 0, 0));
+                let template = format_attempt(&Attempt::from_check(check, entry.skill, entry.seed, &outcome, 0, 0));
                 Ok(obj! { "outcome": present::outcome(&item, &outcome, template, response, V::Null) })
             }
             Err(invalid) => Ok(obj! { "invalid": invalid.0 }),
@@ -768,14 +793,15 @@ impl Engine {
             check.run = parse_u64(text, "run")? as u32;
             attempt.extra.check = Some(check);
         }
+        let kind = CheckupKind::of_row(&attempt).ok_or("not a checkup answer")?;
         let taken = self.attempts.iter().any(|a| {
-            a.extra.check.is_some_and(|c| c.run == check.run && (a.skill != attempt.skill || c.form != check.form))
+            a.extra.check.is_some_and(|c| c.run == check.run && (CheckupKind::of_row(a) != Some(kind) || c.form != check.form))
         });
         if taken {
             // Another tab began a checkup under this number first, so nothing is logged.
             return Ok(obj! { "conflict": true });
         }
-        if self.answered_slots(attempt.skill, check.run).get(check.slot as usize).copied().unwrap_or(false) {
+        if self.answered_slots(kind, check.run).get(check.slot as usize).copied().unwrap_or(false) {
             // Another tab already answered this slot; keep only the first.
             return Ok(obj! { "duplicate": true });
         }
@@ -792,7 +818,7 @@ impl Engine {
         };
         let score = &runs[index];
         let earlier: Vec<&CheckupScore> =
-            runs[..index].iter().filter(|r| r.skill == score.skill && r.complete).collect();
+            runs[..index].iter().filter(|r| r.kind == score.kind && r.complete).collect();
         Ok(obj! {
             "report": checkup_report_json(score, &earlier),
             "earlier": earlier.iter().map(|r| checkup_json(r)).collect::<Vec<_>>(),
@@ -824,12 +850,66 @@ fn origin_from(text: &str) -> Origin {
     }
 }
 
-fn check_fields(fields: &[&str]) -> Result<(Skill, u32, usize, u32), String> {
-    let skill = skill_from(arg(fields, 1)?)?;
+fn check_fields(fields: &[&str]) -> Result<(CheckupKind, u32, usize, u32), String> {
+    let kind = kind_from(arg(fields, 1)?)?;
     let form = parse_u64(arg(fields, 2)?, "form")? as u32;
     let slot = parse_u64(arg(fields, 3)?, "slot")? as usize;
     let run = parse_u64(arg(fields, 4)?, "run")? as u32;
-    Ok((skill, form, slot, run))
+    Ok((kind, form, slot, run))
+}
+
+fn kind_from(text: &str) -> Result<CheckupKind, String> {
+    CheckupKind::from_code(text).ok_or_else(|| "unknown checkup".to_string())
+}
+
+/// Questions in a checkup of this kind.
+fn checkup_len(kind: CheckupKind) -> usize {
+    match kind {
+        CheckupKind::Skill(_) => CHECKUP_LEN,
+        CheckupKind::Mixed => MIXED_CHECKUP_LEN,
+    }
+}
+
+/// The plan for a form, refusing a form number that belongs to the other kind.
+fn checked_plan(kind: CheckupKind, form: u32) -> Result<poker_trainer::checkup::CheckupPlan, String> {
+    if poker_trainer::checkup::is_mixed_form(form) != (kind == CheckupKind::Mixed) {
+        return Err("that form belongs to another kind of checkup".to_string());
+    }
+    Ok(plan_for(kind, form))
+}
+
+/// The prefix on `session_open`'s fourth field that picks one practice group.
+const GROUP_PREFIX: &str = "group:";
+
+/// The seven practice groups, for the picker on Home.
+fn groups_json() -> Vec<V> {
+    Group::ALL
+        .iter()
+        .map(|g| {
+            let skills: Vec<&str> = g.skills().into_iter().map(present::skill_title).collect();
+            obj! { "code": g.code(), "title": g.title(), "share": g.share_pct() as u32, "skills": skills }
+        })
+        .collect()
+}
+
+/// The monthly checkup on offer, or null.
+fn checkup_offer_json(offer: Option<CheckupOffer>) -> V {
+    match offer {
+        None => V::Null,
+        Some(CheckupOffer::Take) => obj! {
+            "kind": CheckupKind::Mixed.code(),
+            "title": present::checkup_title(CheckupKind::Mixed),
+            "resume": false,
+            "total": MIXED_CHECKUP_LEN,
+        },
+        Some(CheckupOffer::Resume { answered, .. }) => obj! {
+            "kind": CheckupKind::Mixed.code(),
+            "title": present::checkup_title(CheckupKind::Mixed),
+            "resume": true,
+            "answered": answered,
+            "total": MIXED_CHECKUP_LEN,
+        },
+    }
 }
 
 fn response_field(fields: &[&str], index: usize) -> Result<u32, String> {
@@ -931,90 +1011,24 @@ fn attempts_needed(s: &SkillStats) -> String {
     }
 }
 
-/// Where a skill stands on its drill mark and its checkup, in words.
+/// Where a skill stands on its drill mark, in words. A mark once reached stays
+/// reached; the line says so when the latest attempts have dipped below it.
 fn skill_status(s: &SkillStats) -> String {
-    if s.passed {
-        "Passed: drill mark and checkup both met.".to_string()
-    } else if !s.drill_passed && s.total_attempts < PASS_ATTEMPTS {
+    if s.drill_passed {
+        "Pass mark met.".to_string()
+    } else if s.passed {
+        "Pass mark reached before; your latest attempts are below it for now.".to_string()
+    } else if s.total_attempts < PASS_ATTEMPTS {
         attempts_needed(s)
-    } else if !s.drill_passed {
-        "Drill mark not met yet.".to_string()
-    } else if s.checkup_passed.is_none() {
-        "Drill mark met. Checkup still to take.".to_string()
     } else {
-        "Drill mark met, but the latest checkup missed it.".to_string()
+        "Pass mark not met yet.".to_string()
     }
 }
 
-/// The player's latest run of `skill` this build can still deal, if it's unfinished.
-/// A run from an older generator or an earlier spot library can't be picked up, and
-/// it mustn't hide a newer run that can, as it would if an old tab wrote it later.
-fn unfinished_run(runs: &[CheckupScore], skill: Skill) -> Option<&CheckupScore> {
-    runs.iter().rfind(|r| r.skill == skill && r.in_current_library && !r.stale).filter(|r| !r.complete)
-}
-
-/// `None` when no checkup is offered for this skill.
-fn checkup_action(s: &SkillStats, checkups: &[CheckupScore]) -> V {
-    let unfinished = unfinished_run(checkups, s.skill);
-    if let Some(run) = unfinished {
-        return obj! {
-            "skill": s.skill.name(),
-            "title": present::skill_title(s.skill),
-            "resume": true,
-            "answered": run.answered,
-            "total": CHECKUP_LEN,
-        };
-    }
-    if s.drill_passed && s.checkup_passed != Some(true) {
-        return obj! { "skill": s.skill.name(), "title": present::skill_title(s.skill), "resume": false };
-    }
-    V::Null
-}
-
-fn steps_json(stats: &[SkillStats], step: usize) -> Vec<V> {
-    let of = |skill: Skill| stats.iter().find(|s| s.skill == skill).expect("every skill has stats");
-    STEPS
-        .iter()
-        .enumerate()
-        .map(|(i, skills)| {
-            let list: Vec<V> = skills
-                .iter()
-                .map(|&s| {
-                    let st = of(s);
-                    obj! {
-                        "title": present::skill_title(s),
-                        "passed": st.passed,
-                        "status": skill_status(st),
-                    }
-                })
-                .collect();
-            obj! {
-                "step": i + 1,
-                "current": i + 1 == step,
-                "unlocked": i < step,
-                "passed": skills.iter().all(|&s| of(s).passed),
-                "drill_passed": skills.iter().all(|&s| of(s).drill_passed),
-                "checkup_passed": skills.iter().all(|&s| of(s).checkup_passed == Some(true)),
-                "skills": list,
-            }
-        })
-        .collect()
-}
-
-fn checkup_actions(stats: &[SkillStats], checkups: &[CheckupScore]) -> V {
-    V::Arr(
-        stats
-            .iter()
-            .map(|s| checkup_action(s, checkups))
-            .filter(|action| !matches!(action, V::Null))
-            .collect(),
-    )
-}
-
-fn stats_json(s: &SkillStats, checkups: &[CheckupScore]) -> V {
+fn stats_json(s: &SkillStats) -> V {
     obj! {
         "title": present::skill_title(s.skill),
-        "step": s.skill.step().map(u32::from),
+        "group": group_of(s.skill).map(Group::title),
         "enough_data": s.enough_data,
         "total": s.total_attempts,
         "needed": MIN_ATTEMPTS,
@@ -1024,7 +1038,6 @@ fn stats_json(s: &SkillStats, checkups: &[CheckupScore]) -> V {
         "stats": stat_lines(s),
         "mark": mark_lines(s.skill),
         "status": skill_status(s),
-        "checkup": checkup_action(s, checkups),
     }
 }
 
@@ -1032,8 +1045,11 @@ fn stats_json(s: &SkillStats, checkups: &[CheckupScore]) -> V {
 const OLDER_LIBRARY_NOTE: &str = "older spot library";
 
 fn checkup_json(s: &CheckupScore) -> V {
+    let total = checkup_len(s.kind);
     let status = if !s.complete {
-        format!("Unfinished: {} of {CHECKUP_LEN} answered", s.answered)
+        format!("Unfinished: {} of {total} answered", s.answered)
+    } else if s.kind == CheckupKind::Mixed {
+        "Done".to_string()
     } else if s.passed {
         "Mark met".to_string()
     } else {
@@ -1041,7 +1057,7 @@ fn checkup_json(s: &CheckupScore) -> V {
     };
     obj! {
         "run": s.run,
-        "title": present::skill_title(s.skill),
+        "title": present::checkup_title(s.kind),
         "started_ms": V::Str(s.started_ms.to_string()),
         "complete": s.complete,
         "passed": s.passed,
@@ -1049,25 +1065,43 @@ fn checkup_json(s: &CheckupScore) -> V {
         "score": s.complete.then(|| present::checkup_score(s)),
         "margin": s.complete.then(|| present::checkup_margin(s)),
         "status": status,
-        "library_note": (s.skill == Skill::Table && !s.in_current_library).then_some(OLDER_LIBRARY_NOTE),
+        "library_note": (s.kind == CheckupKind::Skill(Skill::Table) && !s.in_current_library).then_some(OLDER_LIBRARY_NOTE),
     }
 }
 
 fn checkup_report_json(s: &CheckupScore, earlier: &[&CheckupScore]) -> V {
-    let mut json = vec![
-        ("summary".to_string(), checkup_json(s)),
-        ("repeats".to_string(), present::repeats_line(&s.agreement).into()),
-        ("mark".to_string(), mark_lines(s.skill).into()),
-        ("measures".to_string(), measure_lines(s.skill, &s.metrics).into()),
-    ];
+    let mut json = match s.kind {
+        CheckupKind::Skill(skill) => vec![
+            ("summary".to_string(), checkup_json(s)),
+            ("repeats".to_string(), present::repeats_line(&s.agreement).into()),
+            ("mark".to_string(), mark_lines(skill).into()),
+            ("measures".to_string(), measure_lines(skill, &s.metrics).into()),
+            ("groups".to_string(), V::Null),
+            ("scope".to_string(), format!("Scored on the {CHECKUP_ORIGINALS} new questions.").into()),
+        ],
+        CheckupKind::Mixed => {
+            let groups: Vec<V> = s
+                .groups
+                .iter()
+                .map(|g| obj! { "title": g.group.title(), "ok": g.ok, "answered": g.answered })
+                .collect();
+            vec![
+                ("summary".to_string(), checkup_json(s)),
+                ("repeats".to_string(), V::Null),
+                ("mark".to_string(), V::Null),
+                ("measures".to_string(), V::Null),
+                ("groups".to_string(), V::Arr(groups)),
+                ("scope".to_string(), format!("Scored on all {MIXED_CHECKUP_LEN} questions. Close answers count as right.").into()),
+            ]
+        }
+    };
     // Only a run on the same generator or spot library asked comparable questions.
     let prior = s.generator_key.and_then(|key| earlier.iter().rev().find(|r| r.generator_key == Some(key)));
     let compared = prior.map(|prior| present::comparison(prior, s));
     json.push(("comparison".to_string(), compared.into()));
-    let reused = (s.skill == Skill::Table && s.in_current_library && table::checkup_form_reuses_spots(s.form))
+    let reused = (s.kind == CheckupKind::Skill(Skill::Table) && s.in_current_library && table::checkup_form_reuses_spots(s.form))
         .then_some(table::REUSE_NOTE);
     json.push(("reused_note".to_string(), reused.into()));
-    json.push(("originals".to_string(), CHECKUP_ORIGINALS.into()));
     V::Obj(json)
 }
 
@@ -1231,6 +1265,11 @@ fn card_lines(seat: Seat, situation: Situation) -> Vec<V> {
             .open_range(seat)
             .map(|l| vec![line(format!("{} opening range", present::seat_title(seat)), l)])
             .unwrap_or_default(),
+        Situation::Limpers(_) if matches!(seat, Seat::Cutoff | Seat::Button) => vec![
+            line("Raise-over-limpers range".to_string(), &CARD.iso_raise),
+            line("Also raise from the cutoff or button".to_string(), &CARD.iso_late_raise),
+            line("Limp-along range".to_string(), &CARD.iso_limp),
+        ],
         Situation::Limpers(_) => vec![
             line("Raise-over-limpers range".to_string(), &CARD.iso_raise),
             line("Limp-along range".to_string(), &CARD.iso_limp),
@@ -1456,7 +1495,7 @@ mod tests {
     }
 
     #[test]
-    fn the_default_drill_keeps_preflop_at_a_quarter() {
+    fn the_default_drill_keeps_preflop_at_its_share() {
         load("");
         dispatch("session_open\x1f7\x1f1000000");
         dispatch("session_start\x1f15");
@@ -1466,7 +1505,144 @@ mod tests {
             let next = dispatch(&format!("session_next\x1f{}", step * 1000));
             preflop += u32::from(next.contains("\"skill\":\"preflop\""));
         }
-        assert!(preflop * 4 >= total, "{preflop} of {total}");
+        assert!(preflop * 5 >= total, "{preflop} of {total}");
+    }
+
+    /// The skill of each of the next `count` items of the open session.
+    fn dealt_skills(count: u64) -> Vec<String> {
+        (0..count)
+            .map(|step| {
+                let next = dispatch(&format!("session_next\x1f{}", step * 1000));
+                let needle = "\"skill\":\"";
+                let start = next.find(needle).unwrap_or_else(|| panic!("{next}")) + needle.len();
+                next[start..start + next[start..].find('"').unwrap()].to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn home_offers_every_group_and_no_steps() {
+        load("");
+        let home = dispatch("home\x1f1000000");
+        for code in ["preflop", "read_price", "equity", "hands", "board", "outs", "spots"] {
+            assert!(home.contains(&format!("\"code\":\"{code}\"")), "{code}: {home}");
+        }
+        assert!(home.contains("\"share\":20") && home.contains("\"share\":10"), "{home}");
+        assert!(!home.contains("step") && !home.contains("unlocked"), "{home}");
+        assert!(home.contains("\"checkup\":null"), "no checkup on day one: {home}");
+        let progress = dispatch("progress\x1f1000000");
+        assert!(!progress.contains("\"step"), "{progress}");
+        assert!(!progress.contains("Pot odds"), "a retired skill with no history is not listed: {progress}");
+    }
+
+    #[test]
+    fn a_new_players_default_drill_deals_from_every_group() {
+        load("");
+        dispatch("session_open\x1f11\x1f1000000");
+        dispatch("session_start\x1f15");
+        let dealt = dealt_skills(120);
+        for skill in ["preflop", "read_price", "equity", "chain", "outs"] {
+            assert!(dealt.iter().any(|s| s == skill), "{skill} never dealt: {dealt:?}");
+        }
+        assert!(dealt.iter().any(|s| ["spot", "spot_mw", "table"].contains(&s.as_str())), "{dealt:?}");
+        assert!(dealt.iter().any(|s| ["nuts", "possible", "made", "board_type", "beats_me"].contains(&s.as_str())), "{dealt:?}");
+        assert!(!dealt.iter().any(|s| s == "price" || s == "beats"), "{dealt:?}");
+    }
+
+    #[test]
+    fn a_group_session_deals_only_that_group() {
+        load("");
+        assert!(dispatch("session_open\x1f5\x1f1000000\x1fgroup:board").contains("first"));
+        dispatch("session_start\x1f15");
+        let dealt = dealt_skills(60);
+        assert!(dealt.iter().all(|s| ["nuts", "possible", "made", "board_type", "beats_me"].contains(&s.as_str())), "{dealt:?}");
+        assert!(dispatch("session_open\x1f5\x1f1000000\x1fgroup:outs").contains("first"));
+        dispatch("session_start\x1f15");
+        let dealt = dealt_skills(40);
+        assert!(dealt.iter().all(|s| s == "outs" || s == "hit"), "{dealt:?}");
+        assert!(dispatch("session_open\x1f5\x1f1000000\x1fgroup:nonsense").contains("unknown group"));
+    }
+
+    #[test]
+    fn a_live_release_log_loads_and_shows_its_history() {
+        let mut text = String::from("timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer\n");
+        for i in 0..30u64 {
+            text.push_str(&format!("{}\tdrill\t\tprice\t{i}\t1\t1\t0\t\t2000\t25\n", 1000 + i));
+            text.push_str(&format!("{}\tdrill\t\tbeats\t{i}\t3\t0\t0\t\t2000\t30\t\t\t\t\t\t\t\t\t\tb:pair\t\t\t\n", 2000 + i));
+        }
+        text.push_str(&check_line(5000, 1, 0));
+        let loaded = dispatch(&format!("load\x1f{text}"));
+        assert!(loaded.contains("\"count\":61") && loaded.contains("\"warnings\":[]"), "{loaded}");
+        let progress = dispatch("progress\x1f100000");
+        assert!(progress.contains("Pot odds") && progress.contains("How often you're beaten"), "history stays visible: {progress}");
+        assert!(progress.contains("Unfinished: 1 of 50 answered"), "{progress}");
+        let home = dispatch("home\x1f100000");
+        assert!(home.contains("\"groups\""), "{home}");
+        assert!(!home.contains("\"resume\":true"), "an old one-skill run isn't offered: {home}");
+        dispatch("session_open\x1f3\x1f100000000");
+        dispatch("session_start\x1f15");
+        let dealt = dealt_skills(80);
+        assert!(!dealt.iter().any(|s| s == "price" || s == "beats"), "{dealt:?}");
+    }
+
+    /// Answers one checkup slot through the bridge, as the page would, and commits it.
+    fn answer_check_slot(kind: &str, form: u32, slot: u32, run: u32, now: u64) -> String {
+        let bundle = dispatch(&format!("prepare_check\x1f{kind}\x1f{form}\x1f{slot}\x1f{run}"));
+        let template_line = if bundle.contains("\"attempt\":\"") {
+            template(&bundle)
+        } else {
+            let graded = ["5", "rp", "AsKs", "c", "f", "r", "a", "1", "50"]
+                .into_iter()
+                .map(|answer| grade_check(kind, form, slot, run, answer, 1500))
+                .find(|reply| reply.contains("\"outcome\""))
+                .unwrap_or_else(|| panic!("no answer fits slot {slot}: {bundle}"));
+            template(&graded)
+        };
+        dispatch(&format!("check_commit\x1f{template_line}\x1f{now}\x1f1500"))
+    }
+
+    #[test]
+    fn the_monthly_checkup_runs_through_the_bridge() {
+        const DAY: u64 = 86_400_000;
+        let start = 100 * DAY;
+        let practice: String =
+            (0..120u64).map(|i| format!("{}\tdrill\t\tnuts\t{i}\t4\t1\t0\t\t2000\tAsKs\n", start + i * 1000)).collect();
+        load(&practice);
+        assert!(dispatch(&format!("home\x1f{}", start + DAY)).contains("\"checkup\":null"), "not in the first week");
+        let now = start + 8 * DAY;
+        let home = dispatch(&format!("home\x1f{now}"));
+        assert!(home.contains("\"kind\":\"mixed\"") && home.contains("\"resume\":false"), "{home}");
+        let info = dispatch("check_info\x1fmixed");
+        assert!(info.contains("\"total\":40") && info.contains("all seven practice groups"), "{info}");
+        let begun = dispatch("check_begin\x1fmixed\x1f0");
+        let (run, form) = (number(&begun, "run"), number(&begun, "form"));
+        assert_eq!((run, form), (1, 1_000_000), "{begun}");
+        for slot in 0..40u32 {
+            let next = dispatch(&format!("check_next\x1fmixed\x1f{run}"));
+            assert_eq!(number(&next, "slot"), slot, "{next}");
+            let committed = answer_check_slot("mixed", form, slot, run, now + u64::from(slot));
+            assert!(committed.contains("\"line\""), "slot {slot}: {committed}");
+            if slot == 9 {
+                // Part way through, Home offers to resume it.
+                let home = dispatch(&format!("home\x1f{}", now + 100));
+                assert!(home.contains("\"resume\":true") && home.contains("\"answered\":10"), "{home}");
+            }
+        }
+        assert!(dispatch(&format!("check_next\x1fmixed\x1f{run}")).contains("\"done\":true"));
+        let report = dispatch(&format!("check_report\x1f{run}"));
+        assert!(report.contains("Monthly checkup") && report.contains("Scored on all 40 questions"), "{report}");
+        assert!(report.contains("Whole hands") && report.contains("\"answered\":4"), "{report}");
+        let finished = now + 39;
+        assert!(dispatch(&format!("home\x1f{}", finished + 29 * DAY)).contains("\"checkup\":null"), "not again within the month");
+        assert!(dispatch(&format!("home\x1f{}", finished + 30 * DAY)).contains("\"kind\":\"mixed\""), "offered again after 30 days");
+        // A one-skill checkup can't take a mixed run's number, and a slot is kept once.
+        let price = template(&grade_check("price", 0, 0, run, "25", 1500));
+        assert!(dispatch(&format!("check_commit\x1f{price}\x1f{}\x1f1500", finished + 1)).contains("\"conflict\":true"));
+        assert!(answer_check_slot("mixed", form, 0, run, finished + 2).contains("\"duplicate\":true"));
+        // The next one is a new form.
+        assert!(dispatch("check_begin\x1fmixed\x1f0").contains("\"form\":1000001"));
+        // A form of the other kind is refused.
+        assert!(dispatch("prepare_check\x1fmixed\x1f3\x1f0\x1f1").contains("another kind"));
     }
 
     #[test]
@@ -1479,6 +1655,27 @@ mod tests {
         // `hit` hasn't changed since version 1, so the same questions are still there.
         load("1\tcheck\t\thit\t7\t1\t1\t0\t\t1000\t20\t1\t5\t0\t\t\t\t\n");
         assert!(dispatch("check_info\x1fhit").contains("\"in_progress\":{\"answered\":1"), "a run nothing has changed can resume");
+    }
+
+    #[test]
+    fn progress_shows_the_points_toward_the_next_rung() {
+        let t = poker_trainer::ladder::OLD_RULE_CUTOFF_MS + 1;
+        // One right read_price answer at rung 0, and one equity estimate 1 point off.
+        load(&format!(
+            "{t}\tdrill\t\tread_price\t1000\t2\t1\t0\t\t1500\tc\n{}\tdrill\t\tequity\t1000\t2\t1\t0\t\t1500\t51\t\t\t\t8\t1.0000\t50.0000\t1\n",
+            t + 1
+        ));
+        let progress = dispatch(&format!("progress\x1f{t}"));
+        assert!(progress.contains("Points toward the next rung: 11 of 32."), "{progress}");
+        assert!(progress.contains("Points toward hand types: 37 of 110, starting from 30."), "{progress}");
+        // A miss takes off 4, and an estimate 20 or more off takes off 12; neither goes below 0.
+        load(&format!(
+            "{t}\tdrill\t\tread_price\t1000\t2\t0\t0\t\t1500\tc\n{}\tdrill\t\tequity\t1000\t2\t0\t0\t\t1500\t80\t\t\t\t8\t30.0000\t50.0000\t1\n",
+            t + 1
+        ));
+        let progress = dispatch(&format!("progress\x1f{t}"));
+        assert!(progress.contains("Points toward the next rung: 6 of 32."), "{progress}");
+        assert!(progress.contains("Points toward hand types: 18 of 110"), "{progress}");
     }
 
     #[test]
@@ -1605,8 +1802,6 @@ mod tests {
         load(&(line(100, 1003, 1) + &line(200, 2, 2)));
         let info = dispatch("check_info\x1ftable");
         assert!(info.contains("\"in_progress\":{\"answered\":1"), "the current run stays resumable: {info}");
-        let home = dispatch("home");
-        assert!(home.contains("\"resume\":true"), "{home}");
         let begun = dispatch("check_begin\x1ftable\x1f1");
         assert!(begun.contains("\"run\":1,"), "resumes run 1, not a new one: {begun}");
     }

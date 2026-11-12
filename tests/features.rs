@@ -16,18 +16,20 @@ use poker_trainer::classes::{combos_in_class, OppClass};
 use poker_trainer::equity::equity_all_in;
 use poker_trainer::equity_skill::{
     equity_band, equity_bias, equity_rung, next_band, BIAS_MIN_ATTEMPTS, EQUITY_BAND_MAX, EQUITY_BAND_MIN, EQUITY_BAND_START,
-    PROMOTE_MAX_MAE, PROMOTE_WINDOW,
+    estimate_points, equity_points, EQUITY_GATE, OLD_PROMOTE_MAX_MAE, OLD_PROMOTE_WINDOW, PROMOTE_ERROR_CAP, PROMOTE_PAR_POINTS,
 };
 use poker_trainer::generate::{generate, EQUITY_MAX_PCT, EQUITY_MIN_PCT};
 use poker_trainer::grade::{equity_analysis, grade, grade_timed, Outcome, Reveal};
 use poker_trainer::item::{
     equity_seed_with_rung, is_held_out, EquityOpponents, EquityQuestion, Item, Question, Skill, GEN_VERSION, HELD_OUT_BIT,
 };
+use poker_trainer::ladder::{GateStatus, PointsGate, OLD_RULE_CUTOFF_MS};
 use poker_trainer::log::{format_attempt, parse_log, Attempt, AttemptExtra, CheckRef, ItemRef, Mode, LEGACY_LOG_HEADER, LOG_HEADER};
 use poker_trainer::family::family_of;
 use poker_trainer::eval::evaluate;
 use poker_trainer::preflop::CARD;
-use poker_trainer::progress::{pass_mark, skill_stats, STEPS};
+use poker_trainer::groups::{group_of, Group};
+use poker_trainer::progress::{pass_mark, skill_stats};
 use poker_trainer::rng::Rng;
 use poker_trainer::schedule::{
     anchor_status, anchors_due, anchors_new, due_families, recent_results, Origin, Session, DAY_MS,
@@ -635,42 +637,77 @@ fn drill_attempts_log_the_band_and_signed_error() {
 }
 
 #[test]
-fn promotion_needs_thirty_rung_zero_attempts_at_or_under_eight_points() {
+fn promotion_is_a_points_gate_on_rung_zero_errors() {
+    assert_eq!(EQUITY_GATE, PointsGate { start: 30, goal: 110 });
+    assert_eq!((PROMOTE_PAR_POINTS, PROMOTE_ERROR_CAP), (8, 20));
+    // 8 less the error, rounded to whole points, counting at most 20.
+    assert_eq!(estimate_points(0.0), 8);
+    assert_eq!(estimate_points(-3.4), 5);
+    assert_eq!(estimate_points(3.5), 4);
+    assert_eq!(estimate_points(8.0), 0);
+    assert_eq!(estimate_points(-11.0), -3);
+    assert_eq!(estimate_points(20.0), -12);
+    assert_eq!(estimate_points(64.0), -12, "one wild guess costs at most 12");
+    assert_eq!(estimate_points(f64::NAN), -12);
     let seed = equity_seed_with_rung(10, 0);
     let build = |errors: &[f64]| -> Vec<Attempt> {
-        errors.iter().enumerate().map(|(i, &e)| equity_attempt(seed, i as u64, e, 50.0, 1, 10)).collect()
+        errors.iter().enumerate().map(|(i, &e)| equity_attempt(seed, OLD_RULE_CUTOFF_MS + i as u64, e, 50.0, 1, 10)).collect()
     };
-    assert_eq!(PROMOTE_WINDOW, 30);
-    assert_eq!(PROMOTE_MAX_MAE, 8.0);
-    assert_eq!(equity_rung(&build(&[1.0; 29])), 0, "29 attempts are not enough");
-    assert_eq!(equity_rung(&build(&[8.0; 30])), 1, "exactly 8 points promotes");
-    assert_eq!(equity_rung(&build(&[8.5; 30])), 0);
-    // A long bad stretch then 30 good attempts.
+    assert_eq!(equity_points(&[]), GateStatus { points: 30, passed: false });
+    // Error 1 adds 7: 11 of them is 107, the 12th reaches 114.
+    assert_eq!(equity_points(&build(&[1.0; 11])).points, 107);
+    assert_eq!(equity_rung(&build(&[1.0; 11])), 0);
+    assert_eq!(equity_rung(&build(&[1.0; 12])), 1);
+    // A mean error of exactly 8 never climbs; 30 of them met the old rule.
+    assert_eq!(equity_points(&build(&[8.0; 200])).points, 30);
+    assert_eq!(equity_rung(&build(&[8.0; 200])), 0);
+    // The count never goes below 0: a bad stretch then good estimates climb from 0.
     let mut mixed = vec![20.0; 50];
-    mixed.extend(vec![6.0; 30]);
+    mixed.extend(vec![1.0; 15]);
+    assert_eq!(equity_points(&build(&mixed)).points, 105);
+    mixed.push(1.0);
     assert_eq!(equity_rung(&build(&mixed)), 1);
-    // Signs cancel in signed error, but promotion uses the absolute error.
+    // Signs don't cancel: the gate uses the absolute error.
     let mut signs = vec![20.0; 15];
     signs.extend(vec![-20.0; 15]);
-    assert_eq!(equity_rung(&build(&signs)), 0);
+    assert_eq!(equity_points(&build(&signs)).points, 0);
+}
+
+#[test]
+fn the_old_equity_rule_keeps_a_rung_it_gave_before_the_cutoff() {
+    assert_eq!((OLD_PROMOTE_WINDOW, OLD_PROMOTE_MAX_MAE), (30, 8.0));
+    let seed = equity_seed_with_rung(10, 0);
+    let ending_at = |last: u64, count: u64, error: f64| -> Vec<Attempt> {
+        (0..count).map(|i| equity_attempt(seed, last + 1 - count + i, error, 50.0, 1, 10)).collect()
+    };
+    assert_eq!(equity_rung(&ending_at(OLD_RULE_CUTOFF_MS - 1, 30, 8.0)), 1, "exactly 8 points met the old rule");
+    assert_eq!(equity_rung(&ending_at(OLD_RULE_CUTOFF_MS - 1, 29, 8.0)), 0, "the old rule needed 30");
+    assert_eq!(equity_rung(&ending_at(OLD_RULE_CUTOFF_MS - 1, 30, 8.5)), 0);
+    assert_eq!(equity_rung(&ending_at(OLD_RULE_CUTOFF_MS, 30, 8.0)), 0, "the 30th came at the cutoff");
 }
 
 #[test]
 fn promotion_is_permanent_and_ignores_other_attempts() {
     let seed = equity_seed_with_rung(10, 0);
-    let mut log: Vec<Attempt> =
-        (0..30).map(|i| equity_attempt(seed, i, 2.0, 50.0, 1, 10)).collect();
-    log.extend((30..60).map(|i| equity_attempt(seed, i, 30.0, 50.0, 1, 10)));
+    let t = OLD_RULE_CUTOFF_MS;
+    let mut log: Vec<Attempt> = (0..12).map(|i| equity_attempt(seed, t + i, 1.0, 50.0, 1, 10)).collect();
+    log.extend((30..60).map(|i| equity_attempt(seed, t + i, 30.0, 50.0, 1, 10)));
     assert_eq!(equity_rung(&log), 1, "later rung-0 reviews cannot demote");
 
     let rung1 = equity_seed_with_rung(10, 1);
-    let mut other: Vec<Attempt> = (0..30).map(|i| equity_attempt(rung1, i, 1.0, 50.0, 1, 10)).collect();
-    let mut retries: Vec<Attempt> = (0..30).map(|i| equity_attempt(seed, i, 1.0, 50.0, 1, 10)).collect();
+    let mut other: Vec<Attempt> = (0..30).map(|i| equity_attempt(rung1, t + i, 1.0, 50.0, 1, 10)).collect();
+    let mut retries: Vec<Attempt> = (0..30).map(|i| equity_attempt(seed, t + i, 1.0, 50.0, 1, 10)).collect();
     for row in &mut retries {
         row.mode = Mode::DrillRetry;
     }
     other.extend(retries);
+    let mut checkups: Vec<Attempt> = (0..30).map(|i| equity_attempt(seed, t + 100 + i, 1.0, 50.0, 1, 10)).collect();
+    for row in &mut checkups {
+        row.mode = Mode::Check;
+    }
+    other.extend(checkups);
     assert_eq!(equity_rung(&other), 0, "only rung-0 first answers count");
+    assert_eq!(equity_points(&other).points, 30);
 }
 
 #[test]
@@ -1010,13 +1047,14 @@ fn an_anchor_only_session_always_serves_its_pending_retries() {
 }
 
 #[test]
-fn anchor_passes_at_ninety_percent_within_tolerance_and_is_step_two() {
+fn anchor_passes_at_ninety_percent_within_tolerance_and_is_dealt_with_equity() {
     let log: Vec<Attempt> = (0..40).map(|i| card_row(0, i, i < 36)).collect();
     assert!(skill_stats(Skill::Anchor, &log).drill_passed, "36 of 40");
     let log: Vec<Attempt> = (0..40).map(|i| card_row(0, i, i < 35)).collect();
     assert!(!skill_stats(Skill::Anchor, &log).drill_passed, "35 of 40");
-    assert!(STEPS[1].contains(&Skill::Anchor) && STEPS[1].contains(&Skill::Equity));
-    assert!(STEPS[0].contains(&Skill::BoardType));
+    assert_eq!(group_of(Skill::Anchor), Some(Group::Equity));
+    assert_eq!(group_of(Skill::Equity), Some(Group::Equity));
+    assert_eq!(group_of(Skill::BoardType), Some(Group::Board));
 }
 
 #[test]
@@ -1276,13 +1314,13 @@ fn existing_generators_are_unchanged_by_the_new_skills() {
 }
 
 #[test]
-fn every_new_skill_round_trips_its_name_and_step() {
+fn every_new_skill_round_trips_its_name_and_has_a_group() {
     assert_eq!(Skill::from_name("board_type"), Some(Skill::BoardType));
     assert_eq!(Skill::from_name("equity"), Some(Skill::Equity));
     assert_eq!(Skill::from_name("anchor"), Some(Skill::Anchor));
-    assert_eq!(Skill::BoardType.step(), Some(1));
-    assert_eq!(Skill::Equity.step(), Some(2));
-    assert_eq!(Skill::Anchor.step(), Some(2));
+    assert_eq!(group_of(Skill::BoardType), Some(Group::Board));
+    assert_eq!(group_of(Skill::Equity), Some(Group::Equity));
+    assert_eq!(group_of(Skill::Anchor), Some(Group::Equity));
     let held = generate(Skill::Nuts, HELD_OUT_BIT | 5);
     assert!(is_held_out(held.seed));
     let _: u64 = HELD_OUT_BIT;

@@ -55,7 +55,7 @@ let prepared = null;
 
 export async function showHome() {
   await syncFromStorage();
-  const home = await engine.call('home');
+  const home = await engine.call('home', Date.now());
   const opened = await engine.call('session_open', randomSeed(), Date.now());
   prepared = opened.first;
   if (prepared) prepareDrill(prepared, false);
@@ -93,13 +93,18 @@ export async function showHome() {
       h('div', { class: 'seg-group', role: 'group', 'aria-label': 'Drill length' }, lengthButtons),
       h('button', { class: 'btn primary', onclick: () => startDrill(minutes) }, 'Start drill'),
       confidenceBtn,
-      h('p', { class: 'hint' }, 'In rotation: ', home.rotation.join(', '), '.')),
-    home.checkups.length ? h('section', { class: 'panel', 'data-checkup-offers': '' },
-      h('h2', { class: 'panel-title' }, 'Checkups'),
-      home.checkups.map(checkupLink)) : null,
-    h('section', { class: 'panel' },
-      h('h2', { class: 'panel-title' }, `Step ${home.step} of ${home.step_count}`),
-      h('ul', { class: 'steps' }, home.steps.map(stepRow))),
+      h('p', { class: 'hint' }, 'Mixes all seven groups: ',
+        home.groups.map(g => `${g.title.toLowerCase()} ${g.share}%`).join(', '), '.')),
+    h('section', { class: 'panel', 'data-groups': '' },
+      h('h2', { class: 'panel-title' }, 'Practise one group'),
+      h('div', { class: 'group-list' }, home.groups.map(g => h('button', {
+        class: 'btn group', 'data-group': g.code, title: g.skills.join(', '),
+        onclick: () => startDrill(minutes, g.code),
+      }, g.title)))),
+    home.checkup ? h('section', { class: 'panel', 'data-checkup-offers': '' },
+      h('h2', { class: 'panel-title' }, 'Monthly checkup'),
+      h('p', { class: 'hint' }, `${home.checkup.total} questions across every group, no feedback until the end. Optional: it gates nothing.`),
+      checkupLink(home.checkup)) : null,
     h('nav', { class: 'home-links' },
       link('#card', 'Preflop card'),
       link('#progress', 'Progress'),
@@ -114,20 +119,11 @@ function confidenceLabel(on) {
 
 function link(href, text) { return h('a', { class: 'home-link', href }, text); }
 
-function checkupLink(action) {
-  const text = action.resume
-    ? `Resume checkup: ${action.title} (${action.answered} of ${action.total})`
-    : `Take checkup: ${action.title}`;
-  return h('a', { class: 'btn', href: `#checkup:${action.skill}` }, text);
-}
-
-function stepRow(step) {
-  const state = step.passed ? 'Passed' : step.current ? 'Current' : step.unlocked ? 'Open' : 'Locked';
-  return h('li', { class: step.unlocked ? 'step' : 'step locked' },
-    h('div', { class: 'step-head' }, h('span', {}, `Step ${step.step}`), h('span', { class: `pill ${step.passed ? 'good' : ''}` }, state)),
-    h('p', { class: 'hint' }, `Drills ${step.drill_passed ? 'passed' : 'not yet'}, checkups ${step.checkup_passed ? 'passed' : 'not yet'}.`),
-    h('ul', { class: 'step-skill-list' }, step.skills.map(s =>
-      h('li', { class: s.passed ? 'done' : '' }, h('strong', {}, s.title), ': ', s.status))));
+function checkupLink(offer) {
+  const text = offer.resume
+    ? `Resume checkup (${offer.answered} of ${offer.total})`
+    : 'Take the monthly checkup';
+  return h('a', { class: 'btn', href: `#checkup:${offer.kind}` }, text);
 }
 
 // --- Drill ---------------------------------------------------------------------
@@ -135,10 +131,16 @@ let drill = null;
 
 let starting = false;
 
-async function startDrill(minutes) {
+/** Starts the prepared mixed drill, or one practice group's when `group` is given. */
+async function startDrill(minutes, group) {
   if (starting || drill) return;
   starting = true;
   try {
+    if (group) {
+      const opened = await engine.call('session_open', randomSeed(), Date.now(), `group:${group}`);
+      prepared = opened.first;
+      if (prepared) prepareDrill(prepared, true);
+    }
     await engine.call('session_start', minutes);
     store.writeMinutes(minutes);
     drill = { minutes, startedAt: activeNow(), answered: 0, ok: 0 };
@@ -629,9 +631,9 @@ async function finishBaseline() {
         h('dt', {}, s.title),
         h('dd', {}, `${s.ok} of ${s.answered}${s.show_exact ? ` (${s.exact} exact)` : ''}`),
       ])),
-      h('h2', { class: 'panel-title' }, 'By step'),
+      h('h2', { class: 'panel-title' }, 'By part'),
       h('dl', { class: 'stat-list' }, r.steps.map(s => [
-        h('dt', {}, `Step ${s.step}`), h('dd', {}, `${s.ok} of ${s.answered}`),
+        h('dt', {}, `Part ${s.step}`), h('dd', {}, `${s.ok} of ${s.answered}`),
       ]))),
     h('section', { class: 'panel' },
       h('h2', { class: 'panel-title' }, 'Earlier runs'),
@@ -647,7 +649,7 @@ function runDate(run) {
 }
 
 function runLine(run) {
-  const steps = run.steps.map(s => `step ${s.step} ${s.ok}/${s.answered}`).join(', ');
+  const steps = run.steps.map(s => `part ${s.step} ${s.ok}/${s.answered}`).join(', ');
   return h('li', {}, `Run ${run.run}${runDate(run) ? ` (${runDate(run)})` : ''}: ${run.ok} of ${run.answered}, ${steps}${run.complete ? '' : ', unfinished'}`);
 }
 
@@ -670,7 +672,7 @@ export async function showCheckup(skill) {
     topBar('Checkup'),
     h('section', { class: 'panel' },
       h('h2', {}, info.title),
-      h('p', {}, `${info.total} questions: ${info.originals} new ones and ${info.repeats} repeats. No feedback until the end.`),
+      h('p', {}, info.intro),
       info.reuse_note ? h('p', { class: 'hint', 'data-reuse-start': '' }, info.reuse_note) : null,
       info.in_progress
         ? h('p', { class: 'hint' }, `You have an unfinished checkup: ${info.in_progress.answered} of ${info.in_progress.total} answered.`)
@@ -823,19 +825,22 @@ async function finishCheckup() {
     h('section', { class: 'panel' },
       h('h2', {}, state.title),
       h('p', { class: 'big-score' }, r.summary.score),
-      h('p', { class: 'hint' }, `${r.summary.margin[0].toUpperCase()}${r.summary.margin.slice(1)}. Scored on the ${r.originals} new questions.`),
+      h('p', { class: 'hint' }, `${r.summary.margin[0].toUpperCase()}${r.summary.margin.slice(1)}. ${r.scope}`),
       r.reused_note ? h('p', { class: 'hint', 'data-reused': '' }, r.reused_note) : null,
-      h('p', { class: r.summary.passed ? 'mark-line good' : 'mark-line' }, r.summary.status),
-      h('dl', { class: 'stat-list' },
-        row('Mark', r.mark.join(', ')),
-        row('You', r.measures.join(', '))),
-      h('p', {}, r.repeats)),
+      r.groups
+        ? h('dl', { class: 'stat-list', 'data-by-group': '' }, r.groups.map(g => row(g.title, `${g.ok} of ${g.answered}`)))
+        : [
+          h('p', { class: r.summary.passed ? 'mark-line good' : 'mark-line' }, r.summary.status),
+          h('dl', { class: 'stat-list' },
+            row('Mark', r.mark.join(', ')),
+            row('You', r.measures.join(', '))),
+          h('p', {}, r.repeats)]),
     h('section', { class: 'panel' },
       h('h2', { class: 'panel-title' }, 'Earlier checkups'),
       r.comparison ? h('p', {}, r.comparison) : null,
       result.earlier.length
         ? h('ul', { class: 'facts' }, result.earlier.slice().reverse().map(checkupLine))
-        : h('p', { class: 'hint' }, 'This is your first checkup for this skill, so there is nothing to compare yet.')),
+        : h('p', { class: 'hint' }, 'This is your first checkup of this kind, so there is nothing to compare yet.')),
     h('div', { class: 'action-bar' }, h('a', { class: 'btn primary', href: '#home' }, 'Home')));
 }
 
@@ -907,25 +912,20 @@ export async function showProgress() {
   screen(
     topBar('Progress'),
     h('section', { class: 'panel' },
-      h('p', { class: 'big-score small' }, `Step ${data.step} of ${data.step_count}`),
-      h('p', { class: 'hint' }, data.step_skills.join(', '), '. Pass marks are starting guesses.')),
-    h('section', { class: 'panel' },
-      h('h2', { class: 'panel-title' }, 'Steps'),
-      h('ul', { class: 'steps' }, data.steps.map(stepRow))),
+      h('p', { class: 'hint' }, 'Every drill is open. A pass mark once reached stays reached. Pass marks are starting guesses.'),
+      data.checkup ? checkupLink(data.checkup) : null),
     h('section', { class: 'panel' },
       h('h2', { class: 'panel-title' }, 'Skills'),
       data.skills.map(s => h('article', { class: 'skill-row' },
         h('div', { class: 'step-head' }, h('h3', {}, s.title),
           h('span', { class: 'pills' },
-            h('span', { class: `pill ${s.drill_passed ? 'good' : ''}` }, s.drill_passed ? 'Drill passed' : 'Drill not yet'),
-            h('span', { class: `pill ${s.checkup_passed === true ? 'good' : ''}` },
-              s.checkup_passed === null ? 'Checkup not taken' : s.checkup_passed ? 'Checkup passed' : 'Checkup missed'))),
+            h('span', { class: 'pill' }, s.group || 'No longer dealt'),
+            h('span', { class: `pill ${s.passed ? 'good' : ''}` }, s.passed ? 'Passed' : 'Not yet'))),
         s.enough_data
           ? h('p', {}, s.stats.join(', '), '.')
           : h('p', { class: 'hint' }, `Not enough data (${s.total} of ${s.needed} attempts).`),
         h('p', { class: 'hint' }, 'Pass mark: ', s.mark.join(', '), '.'),
-        h('p', { class: 'hint' }, s.status),
-        s.checkup ? checkupLink(s.checkup) : null))),
+        h('p', { class: 'hint' }, s.status)))),
     readPricePanel(data.read_price),
     boardTypePanel(data.board_types),
     equityPanel(data.equity),
@@ -955,6 +955,7 @@ function readPricePanel(info) {
     h('h2', { class: 'panel-title' }, 'Read the price'),
     h('p', {}, `Rung ${info.rung} of ${info.rungs}: ${info.label}.`),
     info.recent ? h('p', {}, info.recent) : h('p', { class: 'hint' }, 'No attempts at this rung yet.'),
+    info.points ? h('p', {}, info.points) : null,
     h('p', { class: 'hint' }, info.rule));
 }
 
@@ -972,6 +973,7 @@ function equityPanel(info) {
   return h('section', { class: 'panel' },
     h('h2', { class: 'panel-title' }, 'Estimating equity'),
     h('p', {}, `Now practising with ${info.rung_label}.`),
+    info.points ? h('p', { class: 'hint' }, info.points) : null,
     h('ul', { class: 'facts' }, info.bands.map(line => h('li', {}, line))),
     h('h3', { class: 'sub-title' }, 'How your estimates lean'),
     bias.enough_data

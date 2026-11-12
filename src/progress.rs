@@ -124,25 +124,20 @@ pub fn pass_mark(skill: Skill) -> PassMark {
 /// EV loss above this percentage of P counts as a blunder.
 const BLUNDER_PCT: f64 = crate::grade::EV_MISTAKE_PCT;
 
-pub const STEPS: [&[Skill]; 4] = [
-    &[Skill::Nuts, Skill::Possible, Skill::Made, Skill::BeatsMe, Skill::BoardType],
-    &[Skill::Outs, Skill::Price, Skill::Hit, Skill::Equity, Skill::Anchor],
-    &[Skill::Spot, Skill::SpotMw, Skill::Chain],
-    &[Skill::Table],
-];
-
-/// The generator version whose rows earned steps under [`OLD_STEPS`].
-const OLD_GEN_VERSION: u32 = 1;
-/// The step gates before `beats_me` replaced `beats` and `chain` joined step 3.
-const OLD_STEPS: [&[Skill]; 4] = [
-    &[Skill::Nuts, Skill::Possible, Skill::Made, Skill::Beats, Skill::BoardType],
-    &[Skill::Outs, Skill::Price, Skill::Hit, Skill::Equity, Skill::Anchor],
-    &[Skill::Spot, Skill::SpotMw],
-    &[Skill::Table],
-];
-
-/// Steps the frozen baseline covers: it has no questions for later steps.
+/// The baseline's sections, kept from the old step gates so its runs stay
+/// comparable: 1 board reading, 2 odds and outs, 3 decisions. The baseline has
+/// no questions for any later section.
 pub const BASELINE_STEPS: usize = 3;
+
+/// The baseline section a skill's questions are scored under, if any.
+pub const fn baseline_step(skill: Skill) -> Option<usize> {
+    match skill {
+        Skill::Nuts | Skill::Possible | Skill::Made | Skill::Beats | Skill::BoardType | Skill::BeatsMe => Some(1),
+        Skill::Outs | Skill::Price | Skill::Hit | Skill::Equity | Skill::Anchor => Some(2),
+        Skill::Spot | Skill::SpotMw | Skill::Chain => Some(3),
+        Skill::Preflop | Skill::ReadPrice | Skill::Table => None,
+    }
+}
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct SkillStats {
@@ -158,12 +153,13 @@ pub struct SkillStats {
     /// `equity` only: mean absolute error, in points, over the window.
     pub mean_abs_error: Option<f64>,
     pub enough_data: bool,
-    /// The drill pass mark alone.
+    /// The drill pass mark is met over the current window.
     pub drill_passed: bool,
-    /// Whether the most recent completed checkup met the same standard;
-    /// `None` until the skill has a completed checkup.
+    /// Whether the most recent completed per-skill checkup met the same standard;
+    /// `None` without one. Per-skill checkups are history now: they gate nothing.
     pub checkup_passed: Option<bool>,
-    /// The drill pass mark is met and so is the most recent checkup.
+    /// The drill pass mark has been met at some point. Once reached it stays
+    /// reached, so a run of misses never takes progress away.
     pub passed: bool,
 }
 
@@ -225,8 +221,10 @@ pub fn skill_stats(skill: Skill, attempts: &[Attempt]) -> SkillStats {
         .collect();
     let recent = &all[all.len().saturating_sub(STAT_WINDOW)..];
     let m = window_metrics(recent);
-    let drill_passed = all.len() >= PASS_ATTEMPTS && meets_mark(&pass_mark(skill), &m);
+    let mark = pass_mark(skill);
+    let drill_passed = all.len() >= PASS_ATTEMPTS && meets_mark(&mark, &m);
     let checkup_passed = latest_checkup(skill, attempts).map(|score| score.passed);
+    let passed = drill_passed || ever_met(&mark, &all);
     SkillStats {
         skill,
         total_attempts: all.len(),
@@ -240,55 +238,24 @@ pub fn skill_stats(skill: Skill, attempts: &[Attempt]) -> SkillStats {
         enough_data: all.len() >= MIN_ATTEMPTS,
         drill_passed,
         checkup_passed,
-        passed: drill_passed && checkup_passed == Some(true),
+        passed,
     }
+}
+
+/// True if any [`STAT_WINDOW`] counted attempts in a row met the mark.
+fn ever_met(mark: &PassMark, counted: &[&Attempt]) -> bool {
+    counted.len() >= PASS_ATTEMPTS && counted.windows(STAT_WINDOW).any(|window| meets_mark(mark, &window_metrics(window)))
 }
 
 pub fn all_stats(attempts: &[Attempt]) -> Vec<SkillStats> {
     Skill::ALL.into_iter().map(|s| skill_stats(s, attempts)).collect()
 }
 
-pub fn step_passed(step: usize, stats: &[SkillStats]) -> bool {
-    STEPS[step - 1]
-        .iter()
-        .all(|skill| stats.iter().any(|s| s.skill == *skill && s.passed))
-}
-
-/// The first step not yet passed; the last step once every step is passed.
-pub fn current_step(stats: &[SkillStats]) -> usize {
-    (1..=STEPS.len())
-        .find(|&step| !step_passed(step, stats))
-        .unwrap_or(STEPS.len())
-}
-
-/// The player's step: the higher of the step under today's gates and the step
-/// the old gates give from rows logged before they changed. A player never drops
-/// a step, and a new player can't skip `beats_me` by passing `beats`.
-pub fn current_step_for(attempts: &[Attempt]) -> usize {
-    let today = current_step(&all_stats(attempts));
-    let old_rows: Vec<Attempt> = attempts.iter().filter(|a| a.gen_version == OLD_GEN_VERSION).cloned().collect();
-    let old_stats = all_stats(&old_rows);
-    let passed_old = |step: &&[Skill]| step.iter().all(|skill| old_stats.iter().any(|s| s.skill == *skill && s.passed));
-    let earned = OLD_STEPS.iter().position(|step| !passed_old(step)).map_or(OLD_STEPS.len(), |i| i + 1);
-    today.max(earned)
-}
-
-/// `preflop`, `beats` (kept in drills but in no step's pass requirement),
-/// `read_price` (dealt from the first day, also outside the steps) and every
-/// skill up to and including `step`.
-pub fn skills_up_to_step(step: usize) -> Vec<Skill> {
-    let mut out = vec![Skill::Preflop, Skill::Beats, Skill::ReadPrice];
-    for skills in &STEPS[..step] {
-        out.extend_from_slice(skills);
-    }
-    out
-}
-
-/// Which skills a drill deals: exactly the `requested` ones, or if none are
-/// requested, `preflop` plus every skill up to the player's current step.
-pub fn drill_skills(requested: &[Skill], attempts: &[Attempt]) -> Vec<Skill> {
+/// Which skills a drill deals when it names them: each once, in the order given.
+/// An empty request is the default mixed drill, see [`crate::groups::mixed_skills`].
+pub fn drill_skills(requested: &[Skill]) -> Vec<Skill> {
     if requested.is_empty() {
-        return skills_up_to_step(current_step_for(attempts));
+        return crate::groups::mixed_skills();
     }
     let mut skills: Vec<Skill> = Vec::with_capacity(requested.len());
     for &skill in requested {
@@ -370,7 +337,7 @@ pub fn baseline_runs(attempts: &[Attempt], baseline_size: usize) -> Vec<Baseline
             let steps = (1..=BASELINE_STEPS)
                 .map(|step| {
                     let in_step: Vec<&SectionScore> =
-                        sections.iter().filter(|s| s.skill.step() == Some(step as u8)).collect();
+                        sections.iter().filter(|s| baseline_step(s.skill) == Some(step)).collect();
                     StepScore {
                         step,
                         answered: in_step.iter().map(|s| s.answered).sum(),

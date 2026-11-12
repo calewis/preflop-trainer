@@ -236,10 +236,12 @@ fn relevant_range(seat: Seat, situation: Situation) -> Range {
         },
         Situation::Limpers(_) => CARD.iso_raise.range.union(&CARD.iso_limp.range),
         Situation::Raised | Situation::RaisedCalled(_) | Situation::ThreeBet { .. } | Situation::FourBet => {
-            let (raise, call) = chart_for(seat, situation).expect("this situation has a chart").lines();
+            let chart = chart_for(seat, situation).expect("this situation has a chart");
+            let (raise, call) = chart.lines();
+            let extra = chart.extra_call().map_or(Range::EMPTY, |line| line.range);
             // Also the hands a player opens with but folds here, so the folds are real decisions.
             let open = CARD.open_range(Seat::Button).expect("the button has an open range").range;
-            raise.range.union(&call.range).union(&open)
+            raise.range.union(&call.range).union(&extra).union(&open)
         }
     }
 }

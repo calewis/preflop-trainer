@@ -21,35 +21,67 @@ exhaustive 7-card count and regenerating the anchor deck with its full preflop s
 1. Run `poker-trainer baseline` once to get a starting score, then again every few weeks.
 2. Run `poker-trainer drill` for 10 minutes each day.
 3. Read every reveal. It explains why, which is the point.
-4. When a skill's drill stats reach its pass mark, take `poker-trainer check --skill NAME`.
-5. Check `poker-trainer progress` now and then. Each step unlocks once the one before it passes.
+4. About once a month, take the mixed checkup with `poker-trainer check`. It is optional.
+5. Check `poker-trainer progress` now and then. Every drill is open from the first day.
 
 ## Commands
 
 - `baseline`: 32 frozen questions in shuffled order with a random suit permutation.
-  No feedback until the end, then scores per section and step against earlier runs. Four `beats` percentage questions (b13-b16) are retired: rows answering them stay in the log but no run, old or new, is scored on them.
+  No feedback until the end, then scores per section and part (board reading; odds and outs;
+  decisions, the sections of the old steps, kept so runs stay comparable) against earlier runs. Four `beats` percentage questions (b13-b16) are retired: rows answering them stay in the log but no run, old or new, is scored on them.
 - `card`: prints the preflop card and its notes.
 - `drill [--skill NAME]... [--minutes N] [--items N] [--seed N]`: defaults to 10 minutes.
-  `--skill` deals only the named skills. Without it, `preflop` plus every skill up to
-  your current step is in rotation, and `preflop` is at least 25% of the items
-  (`MIN_PREFLOP_PERCENT`). A `chain` picked when its four stages would break that share
-  waits and starts after the next one or two `preflop` items.
-- `check --skill NAME`: a held-out checkup. 40 new items plus 10 repeats, no feedback
-  until the end, then a score with its standard error.
-- `progress`: last-40 stats against the pass marks, current step, baseline and checkup
-  history, and how your equity estimates are biased once there are 30 of them.
+  `--skill` deals only the named skills. Without it, every practice group is dealt at its
+  fixed share (see "Practice groups" below).
+- `check`: the mixed held-out checkup, 40 items across the groups with no feedback until
+  the end, then a score by group. `check --skill NAME` takes the older one-skill checkup:
+  40 new items plus 10 repeats, scored against the skill's pass mark.
+- `progress`: last-40 stats against the pass marks, baseline and checkup history, and how
+  your equity estimates are biased once there are 30 of them.
 
 Skills are `preflop`, `nuts`, `possible`, `made`, `beats`, `beats_me`, `board_type`, `outs`, `price`,
-`hit`, `equity`, `anchor`, `spot`, `spot_mw`, `chain`, `table` and `read_price`. Type `q` at any question to quit; every
-answer is already saved.
+`hit`, `equity`, `anchor`, `spot`, `spot_mw`, `chain`, `table` and `read_price`. `price` and `beats`
+are no longer dealt by default: their history still loads and shows, and `--skill` still asks for
+them. Type `q` at any question to quit; every answer is already saved.
+
+## Practice groups
+
+Every drill is open from the first day; there are no steps or gates between skills. The ladders
+inside a skill (`read_price`, `beats_me`, `equity`) work as before. The default drill deals seven
+groups at fixed shares of the items (`src/groups.rs`, starting guesses):
+
+| Group | Share | Skills (weight inside the group) |
+|---|---|---|
+| Preflop | 20% | `preflop` |
+| Read the price | 15% | `read_price` |
+| Equity and anchors | 15% | `equity` (3), `anchor` (1) |
+| Whole hands | 15% | `chain` |
+| Board reading | 15% | `nuts`, `possible`, `made`, `board_type`, `beats_me` |
+| Outs | 10% | `outs` (3), `hit` (2) |
+| Spots | 10% | `spot` (2), `spot_mw` (2), `table` (1) |
+
+Each new item's group is picked at random, weighted by how far the group is behind its share of
+the items dealt so far plus one item of slack (`SHARE_SLACK_ITEMS`), so the shares hold at every
+point of a session, not just on average. Retries, reviews and a whole hand's four stages count
+toward their group's share. Inside the group a skill is picked by its weight times `0.1 + miss
+rate`. The rest of the scheduling is unchanged: `preflop` never drops below its 20% share
+(`MIN_PREFLOP_PERCENT`); a `chain` picked when its four stages would break that share waits and
+starts after the next one or two `preflop` items; missed items come back once in the session;
+due families are reviewed; and no skill comes three times running except a hand's stages.
+
+On the phone, Home also offers each group on its own. A one-group drill deals only that group's
+skills, with the same weights and no shares or floor.
+
+A skill's pass mark, once reached over 40 drill attempts in a row, stays reached: a later bad
+run shows as below the mark for now, never as a lost pass.
 
 Preflop drills are mostly 4-5 players with occasional 6-7. Your seat comes from how
 many players are still to act behind you.
 
 The card has one action for every hand in every spot, with no mixing. Besides opening and
-limpers it covers one raise (from an early or middle seat, from the cutoff or button, or from the
-blinds, with two extra calls closing the action from the big blind), a raise with callers (again
-with two extra big blind calls), being
+limpers (where the cutoff and button also raise some limp-along hands) it covers one raise (from
+an early or middle seat, from the cutoff or button, or from the blinds, with extra calls closing
+the action from the big blind), a raise with callers (again with extra big blind calls), being
 3-bet after you opened (in position or out of position) and being 4-bet after you 3-bet.
 Hands not listed fold. The ranges are rules of thumb for a loose game with few light
 3-bets, so raises are for value. Drills deal hands you could really hold: after opening,
@@ -82,19 +114,33 @@ act, including the bet and earlier callers, and C is the amount to call. Mistake
 graded by EV lost as a percentage of P. Very large multiway cases use a deterministic
 300,000-outcome sample, and the reveal says so.
 
-A skill passes only after 40 drill attempts that meet its pass mark and a most recent
-completed checkup that meets the same standard; baseline answers are scored separately.
+A skill passes once 40 drill attempts in a row meet its pass mark, and stays passed;
+checkups and baseline answers are scored separately and gate nothing.
 Pass marks, EV bands and the other thresholds are starting guesses, kept as named
 constants in the modules that use them, to be tuned with real data.
 
 ## Checkups
 
-Seeds with bit 63 set are held out: drills and reviews never serve them. A checkup is
-one skill, 40 new held-out items and 10 repeats placed at least 10 items after their
-originals, all fixed by the skill and form number. Each new checkup uses the next form.
-Attempts are logged in `check` mode and never count toward drill stats, miss rates or
-reviews. The score uses only the 40 originals, with the skill's own measure and a
-standard error; the repeats report how much your answers agree with themselves.
+Seeds with bit 63 set are held out: drills and reviews never serve them. Attempts are logged
+in `check` mode and never count toward drill stats, miss rates or reviews. No checkup gates
+anything.
+
+The monthly checkup is mixed: 40 held-out items across the groups, near the drill's shares
+(preflop 8, read the price 7, equity 5 and anchors 2, one whole hand of 4 stages, board reading
+6, outs 4, spots 4; `MIXED_CHECKUP_MIX` in `src/checkup.rs`). `table` is left out. A hand's
+stages stay together and in order; there are no repeats. It is scored as the percent right
+(close answers count) with a standard error, and by group. Its forms are stored from
+`MIXED_FORM_BASE` (1,000,000) up, so its rows need no new log column. Home offers it, as an
+option, when one is under way (to resume), 30 days after the last completed one ended
+(`MIXED_CHECKUP_EVERY_DAYS`), or, before the first, once there are 100 drill answers and the
+first was at least 7 days ago. A run begun before a generator change to any skill in it can't
+be resumed.
+
+The older one-skill checkup is kept for history and the command line: 40 new held-out items
+and 10 repeats placed at least 10 items after their originals, all fixed by the skill and
+form number. Each new checkup uses the next form. The score uses only the 40 originals, with
+the skill's own measure and a standard error; the repeats report how much your answers agree
+with themselves. Rows of these checkups from earlier releases still load and score.
 
 Forms are distinct in seed, not always in content. `price` and `hit` have too few
 distinct questions to avoid overlap with drills, and `anchor` is a fixed deck, so its
@@ -107,33 +153,33 @@ for review.
 
 ## New skills
 
-- `nuts` (step 1): a holding is the nuts if no other holding disjoint from it, given the
+- `nuts`: a holding is the nuts if no other holding disjoint from it, given the
   board, beats it, so card removal can make a lesser holding unbeatable (K7 on K-K-7).
   Name a holding, a card or rank plus any card (`Ahx`, `Ax`), or a card plus any card of a
   suit (`Asxs`, the ace of spades with any spade). Forms that say "any" must hold for
   every unseen holding they describe. Others count if one holding they describe is the
   nuts.
 
-- `equity` (step 2): estimate your all-in equity with 1 to 3 opponents, as a percent.
+- `equity`: estimate your all-in equity with 1 to 3 opponents, as a percent.
   Rung 0 shows exact hands; rung 1 states classes as in `spot`, averaged over every
   card-disjoint combo. Hits stay near 86% through a tolerance staircase per rung
   (start 10 points; tighten 1 on a hit, minimum 2; loosen 6 on a miss, maximum 20).
-  Moves to rung 1 once 30 straight rung-0 attempts average within 8 points. Pass mark:
+  Moves to rung 1 by the ladder points rule below: rung 0 starts at 30 points, each
+  first-try drill estimate adds 8 less its error in whole points (an error over 20 counts
+  as 20), and 110 moves the player up. Pass mark:
   mean absolute error at most 6 over 40. Checkups mix 20 of each rung at a fixed band of 5.
-- `anchor` (step 2): 40 memorized numbers in `data/anchors_v1.txt`, covering bet prices,
+- `anchor`: 40 memorized numbers in `data/anchors_v1.txt`, covering bet prices,
   flop matchups and preflop equities. Leitner boxes of 1, 3, 7, 14 and 30 days, at most
   5 new cards per session. Pass mark: 90% within tolerance over 40.
-- `beats_me` (step 1, "What beats you?"): a ladder that replaces `beats` in the step 1 gate.
+- `beats_me` ("What beats you?"): a ladder that replaced `beats`.
   Rung 0 shows four specific hands to pick from, rung 1 asks which kinds of hand beat you,
   rung 2 asks how many ways a named holding type can be held, and rung 3 asks if you are
   ahead of a stated mix of hands (over 60%, 40-60%, under 40%, with ties counting half).
-  A rung is passed when 20 straight attempts at it are at least 85% correct, and the
-  ladder only goes up. Pass mark: at least 85% correct over the last 40 attempts at
-  rungs 2-3. Checkups take 10 items per rung from held-out seeds.
-- `beats` stays in drills as a feel for how far ahead you are, at half a skill's normal
-  scheduling weight (`BEATS_WEIGHT_PER_MILLE`), and no longer counts toward any step.
+  A rung is passed by the ladder points rule below, and the ladder only goes up. Pass
+  mark: at least 85% correct over the last 40 attempts at rungs 2-3. Checkups take 10 items per rung from held-out seeds.
+- `beats` is no longer dealt; its rows still load and show on Progress.
   Its reveal notes that the percentage is against random hands.
-- `board_type` (step 1): name a flop's suit and rank pattern from four choices. Eight
+- `board_type`: name a flop's suit and rank pattern from four choices. Eight
   categories exist, because a paired flop cannot be monotone. Answers over 12 seconds
   count as misses. A category retires after 3 straight correct answers inside 6 seconds,
   and comes back if a later answer is wrong or slower than 6 seconds. Pass mark: 95%
@@ -141,10 +187,9 @@ for review.
 
 ## Read the price
 
-`read_price` (web title "Read the price") is outside the steps and dealt from the first day,
-like `preflop`: in the default drill it is about 14% of the items (`READ_PRICE_DEAL_PER_MILLE`
-and `READ_PRICE_MAX_PERCENT` in `src/schedule.rs`), and asked-for skills use the normal
-weights. Amounts are whole dollars: the pot before the bet is $3 to $300, mostly $6 to $60,
+`read_price` (web title "Read the price") is its own practice group, 15% of the default
+drill's items; later-day reviews take at most half of its slots
+(`READ_PRICE_REVIEW_SHARE_DIVISOR`), so new items at your rung keep coming. Amounts are whole dollars: the pot before the bet is $3 to $300, mostly $6 to $60,
 and bets run from $1 to two and a half times the pot, tiny stabs and overbets included.
 About 40% of items on rungs 0-3 have one or two callers, whose money goes in the pot, and on
 most of those the amounts are chosen so that leaving the callers out changes the answer. With a
@@ -167,12 +212,42 @@ cards are shown, so its checkups have nothing to relabel. A five-rung ladder, by
   first, second, third or last.
 
 Later-day reviews take at most half of a session's `read_price` slots.
-A rung is passed by 20 straight attempts at it at 85% or better, and the ladder only goes up.
+A rung is passed by the ladder points rule below, and the ladder only goes up.
 The drill mark is 85% over the last 40 attempts at rungs 2-4; checkups take 8 items per rung
 from held-out seeds. Reflection forms appear on missed rung 2 and 3 decisions; confidence
 taps on any rung. Adding this skill doesn't change any existing seed's item.
 
-## Table spots (step 4)
+## Moving up a ladder
+
+`read_price`, `beats_me` and `equity` share one rule (`src/ladder.rs`). Each first-try drill
+answer at the player's rung moves a points count that starts at a fixed number on every rung and
+never goes below 0; the first time it reaches the goal the player moves up for good, so a review
+of an old item can't demote. On `read_price` and `beats_me` a rung starts at 10, a right answer
+adds 1, a miss takes off 4, and 32 moves the player up (22 straight right from a fresh rung).
+`equity` scores error size instead, as above. Progress shows the count.
+
+The rule it replaces, any 20 straight attempts at 85% (any 30 averaging within 8 points for
+`equity`), was checked after every attempt, so luck added up: a player right 76% of the time
+passed a rung within 100 attempts about 96% of the time. Simulated over 20,000 players per row,
+the share who move up within 60 and within 100 attempts at a rung:
+
+| Right | Within 60 | Within 100 |
+|-------|-----------|------------|
+| 70%   | 0.4%      | 0.7%       |
+| 76%   | 3.9%      | 8.0%       |
+| 80%   | 13%       | 27%        |
+| 85%   | 42%       | 73%        |
+| 90%   | 83%       | 98%        |
+| 95%   | 99%       | 100%       |
+
+For `equity`, with errors spread like a half-normal or an exponential, a mean error of 6 moves up
+within 60 attempts 91-93% of the time and a mean error of 10 within 100 attempts at most 5%; the
+old rule moved a mean error of 10 up within 100 attempts 48-69% of the time.
+
+Attempts logged before `OLD_RULE_CUTOFF_MS` (2026-11-13 00:00 UTC) still count under the old
+rule too, so nobody drops a rung they had reached. The numbers are starting guesses.
+
+## Table spots
 
 `table` deals realistic decisions from `data/spots_v3.txt`: 3,000 spots already graded
 offline by the engine in `engine/`. Each verdict is about simulated opponents, drawn from a
@@ -204,8 +279,8 @@ forms; from the sixth on, forms reuse some spots from earlier ones, and the resu
 says so.
 
 Pass mark (starting guesses): over the last 40 graded attempts on robust or close spots, mean
-EV loss at most 3% of the pot and at most 2 blunders, and the latest checkup meets the same
-standard. Depends attempts do not count toward it.
+EV loss at most 3% of the pot and at most 2 blunders. Depends attempts do not count toward it.
+`table` is dealt in the spots group at the lowest weight there.
 
 The library is produced by the engine's `library` binary (`POKER_POPULATION=mixture library
 20261109 8000000 16000 5000 3000 30 target/library/spots_v3.txt 2 2` in `engine/`, about 80
@@ -231,7 +306,7 @@ after each correct review, reset to 1 day by a miss, retired after a correct 30-
 and a retired family can come back on a new miss. Among due families the slowest relative to
 the skill's median come first. Rows logged before families existed are not reviewed.
 A generator change resets queued reviews and unfinished checkups only for the skills it changed:
-`spot`, `spot_mw` and `equity` at version 2, and `preflop` at version 3. `table` checkups reset
+`spot`, `spot_mw` and `equity` at version 2, and `preflop` at versions 3 and 4. `table` checkups reset
 when the spot library changes instead.
 
 Spot reveals add library-computed flip facts: the largest call that breaks even, from
@@ -247,7 +322,7 @@ sibling attempted, Progress compares how often those siblings were right after a
 form and after no form; it is one player's noisy data and says so. Reflection and confidence
 are web-only; the terminal drill neither shows them nor logs them as offered.
 
-`chain` (step 3) plays one hand through four stages, each committed before its reveal and
+`chain` (the whole hands group) plays one hand through four stages, each committed before its reveal and
 logged as one row with a stage column: name your hand, count outs against a stated opponent
 hand, the equity a stated price needs, then call or fold with the all-in or next-card
 assumption stated. Hands are ones the preflop card plays, with hero behind and at least 4

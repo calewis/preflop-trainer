@@ -1,5 +1,5 @@
 """Full browser test suite: python3 web/test/run.py [sections...]
-Sections: native libresearch libreadprice readprice libcli research researchshots (on request only) libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card preflopspots libpreflop offline nostorage legacy screens
+Sections: native libgroups groups libresearch libreadprice readprice libcli research researchshots (on request only) libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card preflopspots libpreflop offline nostorage legacy screens
 Results go to target/webtest/results.json and screenshots to target/webtest/screens/."""
 import itertools, json, os, pathlib, random, re, shutil, subprocess, sys, time
 
@@ -334,16 +334,19 @@ def check_probe(page, current, answer, response=0):
     return page.eval(f"__trainer.engine.call('check_grade', {', '.join(json.dumps(a) for a in args)})")
 
 
-def pick_answer(page, current, want_ok):
-    """Returns (kind, answer) with the wanted result, or (kind, None) if impossible."""
+def pick_answer(page, current, want_ok, probe=None):
+    """Returns (kind, answer) with the wanted result, or (kind, None) if impossible.
+    `probe` grades a trial answer; a drill item's grade by default."""
     bundle = current["bundle"]
     kind = bundle["format"]["type"]
     skill = bundle["skill"]
     seed = bundle["seed"]
+    if probe is None:
+        probe = lambda answer: grade_probe(page, skill, seed, answer)
     if kind == "choice":
         if not bundle["graded"]:  # board_type: graded when answered, with its time
             for option in bundle["format"]["options"]:
-                outcome = grade_probe(page, skill, seed, option["code"])["outcome"]
+                outcome = probe(option["code"])["outcome"]
                 if outcome["ok"] == want_ok:
                     return kind, option["code"]
             return kind, bundle["format"]["options"][0]["code"]
@@ -352,16 +355,16 @@ def pick_answer(page, current, want_ok):
                 return kind, code
         return kind, next(iter(bundle["graded"]))
     if kind == "holding":
-        probe = grade_probe(page, skill, seed, "AKs")
+        trial = probe("AKs")
         for guess in ("AKs", "QJ", "22"):
-            probe = grade_probe(page, skill, seed, guess)
-            if "outcome" in probe:
+            trial = probe(guess)
+            if "outcome" in trial:
                 break
-        top = probe["outcome"]["reveal"]["holdings"]["shown"][0]
+        top = trial["outcome"]["reveal"]["holdings"]["shown"][0]
         if want_ok:
             return kind, top[0] + top[1]
         for guess in ("72o", "32", "54s", "QJ", "TT", "88", "33", "22"):
-            result = grade_probe(page, skill, seed, guess)
+            result = probe(guess)
             if "outcome" in result and not result["outcome"]["ok"]:
                 return kind, guess
         return kind, top[0] + top[1]
@@ -369,25 +372,25 @@ def pick_answer(page, current, want_ok):
         codes = [o["code"] for o in bundle["format"]["options"]]
         subsets = ["none"] + ["".join(c) for r in range(1, len(codes) + 1) for c in itertools.combinations(codes, r)]
         for code in subsets:
-            result = grade_probe(page, skill, seed, code)
+            result = probe(code)
             if result["outcome"]["correct"] == want_ok:
                 return kind, code
         return kind, "none"
     if kind == "integer":
         for n in range(0, 48):
-            result = grade_probe(page, skill, seed, str(n))
+            result = probe(str(n))
             if result["outcome"]["correct"] == want_ok:
                 return kind, str(n)
         return kind, "0"
     if kind == "percent":
-        reveal = grade_probe(page, skill, seed, "50")["outcome"]["reveal"]
+        reveal = probe("50")["outcome"]["reveal"]
         if reveal["kind"] in ("equity", "anchor"):
             truth = float(reveal["answer"].rstrip("%"))
             if want_ok:
                 return kind, str(int(round(truth)))
             return kind, str(int(round(truth + 45 if truth <= 50 else truth - 45)))
         for n in range(1, 100):
-            result = grade_probe(page, skill, seed, str(n))
+            result = probe(str(n))
             if result["outcome"]["correct"] == want_ok:
                 return kind, str(n)
         return kind, "1"
@@ -568,8 +571,11 @@ def drill_session(page, inspector, want_all, max_items, keyboard=False, label_pr
     return items, seen, records
 
 
-ALL_SKILLS = ["preflop", "nuts", "possible", "made", "beats", "beats_me", "read_price", "outs", "price", "hit", "spot", "spot_mw",
+# Every skill the default drill deals except `table`, which comes too rarely to
+# promise both a right and a wrong answer. `price` and `beats` are no longer dealt.
+ALL_SKILLS = ["preflop", "nuts", "possible", "made", "beats_me", "read_price", "outs", "hit", "spot", "spot_mw",
               "board_type", "equity", "anchor", "chain"]
+RETIRED_SKILLS = ["price", "beats"]
 LOG_COLUMNS = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer"
 PASSING_SKILLS = [("nuts", "AKs"), ("possible", "f"), ("made", "top"), ("beats_me", "a"), ("board_type", "td"),
                   ("outs", "8"), ("price", "25"), ("hit", "20"), ("equity", "50"), ("anchor", "33")]
@@ -608,14 +614,14 @@ def synthetic_checkups(skills, start, first_run=1, correct=1):
 
 
 def synthetic_log():
-    """Drill marks and checkups for steps 1 and 2, so step 3 unlocks."""
+    """Drill marks for ten skills and a passing old-style checkup for each: a long history."""
     drills, end = synthetic_drills()
     checks, _ = synthetic_checkups(PASSING_SKILLS, end)
     return "\n".join([LOG_COLUMNS] + drills + checks) + "\n"
 
 
-def drills_only_log(skills, signed_error=1.0):
-    drills, _ = synthetic_drills(skills, signed_error)
+def drills_only_log(skills, signed_error=1.0, now=None):
+    drills, _ = synthetic_drills(skills, signed_error, now)
     return "\n".join([LOG_COLUMNS] + drills) + "\n"
 
 
@@ -687,13 +693,16 @@ def run_e2e():
         inspector = Inspector(page, (390, 844), "light", False)
         seed_step3(page, 8953 + PORT_SHIFT)
         inspector.snapshot("home")
-        check(page.eval("document.body.innerText.includes('Step 3 of 4')"), "synthetic log did not unlock step 3")
+        home_text = page.eval("document.body.innerText")
+        check("Practise one group" in home_text and "Step " not in home_text, f"home after a long history: {home_text[:300]}")
         before = log_lines(page)
         start_drill(page)
         items, seen, records = drill_session(page, inspector, True, 500)
         print("e2e drill answered", items, {k: sorted(v) for k, v in seen.items()})
         missing = [s for s in ALL_SKILLS if not {"right", "wrong"} <= seen.get(s, set())]
         check(not missing, f"skills not covered with right and wrong answers: {missing}")
+        retired = [s for s in RETIRED_SKILLS if s in seen]
+        check(not retired, f"the default drill dealt retired skills: {retired}")
         results["e2e_drill_items"] = items
         check_logged(rows_of(page)[before:], records, "e2e drill")
         end_drill_summary(page, inspector)
@@ -710,7 +719,7 @@ def run_e2e():
         page.wait("!!document.querySelector('.skill-row')", 20)
         inspector.snapshot("progress")
         text = page.eval("document.body.innerText")
-        check("Pass mark" in text and re.search(r"Step \d of 4", text), f"progress text: {text[:200]}")
+        check("Pass mark" in text and "Every drill is open" in text and not re.search(r"Step \d", text), f"progress text: {text[:200]}")
         check("win rate" not in text.lower(), "progress mentions a win rate")
         # Export, then import into empty storage, then re-import.
         exported = page.eval("__trainer.engine.call('export').then(r => r.text)")
@@ -786,7 +795,7 @@ def run_baseline(port=8954 + PORT_SHIFT, inspector_args=None):
         text = page.eval("document.body.innerText")
         print("baseline result:", text[:400].replace("\n", " | "))
         check(re.search(r"\d+ of 32", text), "baseline report has no score")
-        check("By section" in text and "By step" in text, "baseline report sections missing")
+        check("By section" in text and "By part" in text, "baseline report sections missing")
         check("first baseline" in text, "first baseline comparison text missing")
         inspector.snapshot("baseline-report")
         lines = log_lines(page)
@@ -1521,12 +1530,13 @@ def run_table_spots():
         inspector = Inspector(page, (390, 844), "light", True)
         seed_log(page, port, LOG_COLUMNS + "\n")
         home = page.eval("document.body.innerText")
-        check("Step 1 of 4" in home and "Table spots" in home, f"home does not list step 4: {home[:300]}")
+        spots = page.eval("(document.querySelector('[data-group=spots]') || {}).title || ''")
+        check("Spots" in home and "Table spots" in spots, f"home does not offer table spots in its group: {home[:300]} / {spots}")
         page.eval("location.hash = '#progress'")
         page.wait("!!document.querySelector('.skill-row')", 20)
         progress = page.eval("document.body.innerText")
         check("Table spots" in progress and "robust and close spots only" in progress, f"progress: {progress[:400]}")
-        check("Step 1 of 4" in progress, f"progress step count: {progress[:200]}")
+        check("Every drill is open" in progress and "Step " not in progress, f"progress still shows steps: {progress[:200]}")
         page.eval("location.hash = '#home'")
         wait_home(page)
         open_limited_drill(page, "table")
@@ -1586,16 +1596,18 @@ def run_table_spots():
         end_drill_summary(page, inspector)
         page.eval("location.hash = '#home'")
         wait_home(page)
-        # Checkup: a passing drill log makes the checkup offered.
+        # A passing drill log passes the skill on its own: no per-skill checkup is offered.
         seed_log(page, port, TABLE_DRILL_LOG)
         page.eval("location.hash = '#progress'")
         page.wait("!!document.querySelector('.skill-row')", 20)
         text = page.eval("document.body.innerText")
-        check("Drill passed" in text and "Checkup not taken" in text and "Take checkup: Table spots" in text, f"table status on Progress: {text[:500]}")
+        table_row = page.eval("[...document.querySelectorAll('.skill-row')].find(r => r.textContent.includes('Table spots')).innerText")
+        check("Passed" in table_row and "Pass mark met" in table_row and "checkup" not in table_row.lower(), f"table status on Progress: {table_row}")
         page.eval("location.hash = '#home'")
         wait_home(page)
-        check("Take checkup: Table spots" in page.eval("document.body.innerText"), "no table checkup offered on Home")
-        page.eval("[...document.querySelectorAll('[data-checkup-offers] a')].find(a => a.textContent.includes('Table spots')).click()")
+        check("Take checkup" not in page.eval("document.body.innerText"), "a per-skill checkup was offered on Home")
+        # The older one-skill checkup still runs from its address, with its own machinery.
+        page.eval("location.hash = '#checkup:table'")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Begin')", 20)
         click_text(page, ".btn.primary", "Begin")
         before = len(rows_of(page))
@@ -1749,6 +1761,64 @@ def run_lib_preflop():
     check(done.returncode == 0, f"library preflop tests failed: {done.stdout[-400:]}")
 
 
+def run_lib_groups():
+    done = subprocess.run(["cargo", "test", "--release", "--test", "groups"], capture_output=True, text=True, cwd=ROOT)
+    print(done.stdout[-3000:])
+    if done.returncode != 0:
+        print(done.stderr[-1500:])
+    check(done.returncode == 0, f"library group tests failed: {done.stdout[-400:]}")
+
+
+GROUP_SKILLS = {
+    "preflop": {"preflop"}, "read_price": {"read_price"}, "equity": {"equity", "anchor"}, "hands": {"chain"},
+    "board": {"nuts", "possible", "made", "board_type", "beats_me"}, "outs": {"outs", "hit"}, "spots": {"spot", "spot_mw", "table"},
+}
+
+
+def run_groups():
+    """Home: every group is open from the first visit; picking one deals only it."""
+    port = 8991 + PORT_SHIFT
+    srv = server.start(port)
+    browser = Browser("groups")
+    try:
+        page = browser.page
+        boot_app(page, port)
+        inspector = Inspector(page, (390, 844), "light", False)
+        home = page.eval("document.body.innerText")
+        codes = page.eval("[...document.querySelectorAll('[data-group]')].map(b => b.dataset.group)")
+        check(codes == list(GROUP_SKILLS), f"group picker on a first visit: {codes}")
+        check("Step " not in home and "Locked" not in home, f"home still shows steps: {home[:300]}")
+        check("preflop 20%" in home and "spots 10%" in home, f"the mix is not described: {home[:300]}")
+        check(not page.eval("!!document.querySelector('[data-checkup-offers]')"), "a checkup was offered on day one")
+        inspector.snapshot("home-groups")
+        for code in ("outs", "board"):
+            page.eval("document.querySelectorAll('.seg')[0].click()")
+            page.eval(f"document.querySelector('[data-group={code}]').click()")
+            page.wait(READY, 60)
+            items, seen, _ = drill_session(page, inspector, False, 14, label_prefix=f"group-{code}-")
+            dealt = set(seen)
+            check(items == 14 and dealt <= GROUP_SKILLS[code], f"group {code} dealt {sorted(dealt)}")
+            check(len(dealt) >= 2, f"group {code} dealt only {sorted(dealt)}")
+            end_drill_summary(page, inspector)
+            page.eval("location.hash = '#home'")
+            wait_home(page)
+        # The default drill opens with preflop, which keeps its floor from the first item.
+        before = len(rows_of(page))
+        start_drill(page)
+        first = page.eval("__trainer.current.bundle.skill")
+        check(first == "preflop", f"the mixed drill opened with {first}")
+        items, seen, _ = drill_session(page, inspector, False, 30, label_prefix="mixed-")
+        groups = {code for code, skills in GROUP_SKILLS.items() if skills & set(seen)}
+        check(len(groups) >= 5, f"30 mixed items reached only {sorted(groups)}")
+        check(not set(seen) & {"price", "beats"}, f"retired skills dealt: {sorted(seen)}")
+        check(len(rows_of(page)) == before + items, "mixed drill rows not logged")
+        check(not browser.errors, f"group errors: {browser.errors[:5]}")
+        print("groups ok")
+    finally:
+        browser.close()
+        srv.shutdown()
+
+
 def run_lib_read_price():
     done = subprocess.run(["cargo", "test", "--release", "--test", "read_price"], capture_output=True, text=True, cwd=ROOT)
     print(done.stdout[-3000:])
@@ -1760,12 +1830,16 @@ def run_lib_read_price():
 READ_PRICE_RUNG_SEED = lambda rung, i: (rung << 60) + 1000 + i
 
 
+# Right answers in a row that take a new rung from 10 points to 32.
+READ_PRICE_PASS_RUN = 22
+
+
 def read_price_log(rung):
     """A log that has passed every rung below `rung`, so a new drill deals at `rung`."""
     lines = [LOG_COLUMNS]
     t = int(time.time() * 1000) - 86400000 * 5
     for lower in range(rung):
-        for i in range(20):
+        for i in range(READ_PRICE_PASS_RUN):
             t += 1000
             lines.append(f"{t}\tdrill\t\tread_price\t{READ_PRICE_RUNG_SEED(lower, i)}\t2\t1\t0\t\t1500\tc")
     return "\n".join(lines) + "\n"
@@ -1802,7 +1876,7 @@ def run_read_price():
                 check(rung != 3 or "%" not in text, f"rung 3 shows the share: {text}")
                 inspector.snapshot(f"readprice-q{rung}-{theme}", full=True)
                 answer_drill_item(page, False)
-                wait_rows(page, 20 * rung + 1)
+                wait_rows(page, READ_PRICE_PASS_RUN * rung + 1)
                 reveal_text = page.eval("document.querySelector('.reveal').innerText")
                 check(("to win $" in reveal_text and "\u00f7" in reveal_text) if rung != 4 else "They call $" in reveal_text, f"rung {rung} reveal has no sum: {reveal_text}")
                 check("Answer" in reveal_text, f"rung {rung} reveal has no answer: {reveal_text}")
@@ -1822,7 +1896,7 @@ def run_read_price():
                 page.wait(READY, 60)
                 current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
                 answer_drill_item(page, True)
-                wait_rows(page, 20 * rung + 1)
+                wait_rows(page, READ_PRICE_PASS_RUN * rung + 1)
                 check(page.eval("document.querySelector('.reveal').classList.contains('good')"), f"rung {rung}: right answer not graded right")
                 check(page.eval("document.querySelector('.reveal').innerText").count(wanted[rung]) >= 1, f"rung {rung}: reveal lacks {wanted[rung]!r}")
                 page.eval("location.hash = '#home'")
@@ -1834,13 +1908,14 @@ def run_read_price():
             panel = page.eval("document.querySelector('[data-read-price]').innerText")
             check("Rung 3 of 5" in panel and "With a hand, share stated" in panel, f"no read the price panel: {panel}")
             check("No attempts at this rung yet" in panel, f"no read the price panel: {panel}")
-            check("Moves up when 20 straight attempts" in panel, f"no promotion rule: {panel}")
+            check("Points toward the next rung: 10 of 32." in panel, f"no points: {panel}")
+            check("Every rung starts at 10 points. Each first-try drill answer at this rung adds 1 if right and takes off 4 if wrong, never going below 0. Reaching 32 moves you up." in panel, f"no promotion rule: {panel}")
             inspector.snapshot(f"readprice-progress-{theme}", full=True)
             seed_log(page, port, read_price_log(4))
             page.eval("location.hash = '#progress'")
             must_see(page, "!!document.querySelector('[data-read-price]')", 20, "no read the price panel at all")
             top = page.eval("document.querySelector('[data-read-price]').innerText")
-            check("Rung 5 of 5" in top and "This is the top rung." in top and "Moves up" not in top, f"top rung panel: {top}")
+            check("Rung 5 of 5" in top and "This is the top rung." in top and "Points" not in top and "moves you up" not in top, f"top rung panel: {top}")
             page.eval("location.hash = '#home'")
             wait_home(page)
         check(not browser.errors, f"read_price errors: {browser.errors[:5]}")
@@ -1932,10 +2007,13 @@ def answer_check_item(page, current, want_ok):
                 break
         answer_percent_keypad(page, answer)
         return answer
-    raise RuntimeError(kind)
+    # The mixed checkup also asks for holdings, several picks and counts.
+    kind, answer = pick_answer(page, current, want_ok, probe=lambda a: check_probe(page, current, a))
+    type_answer(page, current, kind, answer)
+    return answer
 
 
-def play_checkup(page, inspector, want_ok, start_number=1, count=50, shot=None):
+def play_checkup(page, inspector, want_ok, start_number=1, count=50, shot=None, total=50):
     """Answers `count` items of an open checkup, checking the counter as it goes."""
     answers = []
     for i in range(count):
@@ -1944,16 +2022,17 @@ def play_checkup(page, inspector, want_ok, start_number=1, count=50, shot=None):
         if shot and i == 0:
             inspector.snapshot(shot)
         counter = page.eval("document.querySelector('.top-bar .count').textContent")
-        check(counter == f"{start_number + i} of 50", f"checkup counter {counter} at {start_number + i}")
+        check(counter == f"{start_number + i} of {total}", f"checkup counter {counter} at {start_number + i}")
         check(not page.eval("!!document.querySelector('.reveal')"), "checkup gave feedback before the end")
         answers.append(answer_check_item(page, current, want_ok))
     return answers
 
 
 def check_checkup_rows(rows, count, where, run, form, slots=None, columns=24):
+    """`columns` None allows any row width, as a mixed checkup's skills log differently."""
     check(len(rows) == count, f"{where}: {len(rows)} rows for {count} answers")
     for i, row in enumerate(rows):
-        check(row[1] == "check" and len(row) == columns, f"{where}: row {i} mode/columns {row[1]}, {len(row)}")
+        check(row[1] == "check" and (columns is None or len(row) == columns), f"{where}: row {i} mode/columns {row[1]}, {len(row)}")
         check(row[11] == str(run) and row[12] == str(form), f"{where}: run/form {row[11]}/{row[12]}, want {run}/{form}")
         check(int(row[9]) >= 300, f"{where}: response {row[9]}")
         if slots is not None:
@@ -1977,18 +2056,48 @@ def run_checkup():
         page.navigate(f"http://127.0.0.1:{port}/")
         page.wait("!!document.querySelector('.app-title') && !!window.__trainer", 30)
         inspector = Inspector(page, (390, 844), "light", False)
-        # The drill mark is met for price and hit but their checkups aren't.
-        seed_log(page, port, drills_only_log([("price", "25"), ("hit", "20")]))
+        # A week of practice behind them, and no checkup yet: the monthly one is offered.
+        week_ago = int(time.time() * 1000) - 86400000 * 10
+        seed_log(page, port, drills_only_log([("price", "25"), ("hit", "20"), ("nuts", "AKs")], now=week_ago))
         home = page.eval("document.body.innerText")
-        check("Take checkup: Pot odds" in home and "Take checkup: Chance of hitting" in home, f"checkup not offered on Home: {home[:400]}")
-        page.eval("[...document.querySelectorAll('[data-checkup-offers] a')].find(a => a.textContent.includes('Pot odds')).click()")
+        check("Monthly checkup" in home and "Take the monthly checkup" in home and "Take checkup:" not in home, f"checkup not offered on Home: {home[:400]}")
+        page.eval("[...document.querySelectorAll('[data-checkup-offers] a')].find(a => a.textContent.includes('monthly')).click()")
         page.wait("!!document.querySelector('.panel .btn.primary')", 20)
         text = page.eval("document.body.innerText")
-        check("50 questions" in text and "40" in text and "10 repeats" in text, f"checkup intro: {text[:300]}")
+        check("40 new questions from all seven practice groups" in text, f"checkup intro: {text[:300]}")
         inspector.snapshot("checkup-intro")
         click_text(page, ".btn.primary", "Begin")
         before = len(rows_of(page))
-        answers = play_checkup(page, inspector, True, shot="checkup-item")
+        answers = play_checkup(page, inspector, True, count=40, total=40, shot="checkup-item")
+        page.wait("!!document.querySelector('.big-score')", 30)
+        text = page.eval("document.body.innerText")
+        print("mixed checkup result:", text[:500].replace("\n", " | "))
+        check("100% right" in text, "mixed checkup score wrong")
+        check("Scored on all 40 questions" in text, "mixed checkup scope missing")
+        check(page.eval("!!document.querySelector('[data-by-group]')") and "Whole hands" in text and "4 of 4" in text and "8 of 8" in text,
+              f"no result by group: {text[:500]}")
+        check("Mark met" not in text and "repeated" not in text, f"a mixed checkup has no mark or repeats: {text[:300]}")
+        check("first checkup" in text, "first-checkup comparison missing")
+        inspector.snapshot("checkup-result")
+        rows = rows_of(page)[before:]
+        check_checkup_rows(rows, 40, "mixed checkup", "1", "1000000", columns=None)
+        counts = {}
+        for r in rows:
+            counts[r[3]] = counts.get(r[3], 0) + 1
+        check(counts == {"preflop": 8, "read_price": 7, "equity": 5, "anchor": 2, "chain": 4, "nuts": 1, "possible": 1, "made": 1,
+                         "board_type": 1, "beats_me": 2, "outs": 2, "hit": 2, "spot": 2, "spot_mw": 2}, f"mixed checkup skills: {counts}")
+        # Taken: Home stops offering it for a month.
+        page.eval("location.hash = '#home'")
+        wait_home(page)
+        check(not page.eval("!!document.querySelector('[data-checkup-offers]')"), "the monthly checkup was offered again straight away")
+        # The older one-skill checkup still runs from its address and scores against its mark.
+        page.eval("location.hash = '#checkup:price'")
+        page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Begin')", 20)
+        text = page.eval("document.body.innerText")
+        check("50 questions" in text and "40" in text and "10 repeats" in text, f"one-skill checkup intro: {text[:300]}")
+        click_text(page, ".btn.primary", "Begin")
+        before = len(rows_of(page))
+        answers = play_checkup(page, inspector, True)
         page.wait("!!document.querySelector('.big-score')", 30)
         text = page.eval("document.body.innerText")
         print("checkup result:", text[:400].replace("\n", " | "))
@@ -1997,9 +2106,8 @@ def run_checkup():
         check("margin of error too small" in text.lower(), f"a perfect score needs its margin explained: {text[:300]}")
         check("consistent" in text and "repeated" in text, "repeat consistency missing")
         check("first checkup" in text, "first-checkup comparison missing")
-        inspector.snapshot("checkup-result")
         rows = rows_of(page)[before:]
-        check_checkup_rows(rows, 50, "first checkup", "1", "0")
+        check_checkup_rows(rows, 50, "first checkup", "2", "0")
         check([r[3] for r in rows] == ["price"] * 50, "checkup logged the wrong skill")
         check(rows[0][10] == answers[0], f"logged answer {rows[0][10]}, gave {answers[0]}")
         # A second form with wrong answers misses the mark and compares with the first.
@@ -2017,7 +2125,7 @@ def run_checkup():
         check("Mark not met" in text, "wrong-answer checkup should miss the mark")
         check("than your last checkup" in text or "same score" in text, f"no comparison: {text}")
         rows = rows_of(page)[before:]
-        check_checkup_rows(rows, 50, "second checkup", "2", "1")
+        check_checkup_rows(rows, 50, "second checkup", "3", "1")
         # A full board_type checkup: choices graded as answered, with response time.
         page.eval("location.hash = '#home'")
         wait_home(page)
@@ -2037,12 +2145,12 @@ def run_checkup():
         page.wait("!!document.querySelector('.big-score')", 30)
         text = page.eval("document.body.innerText")
         check("100% correct" in text and "Mark met" in text, f"board checkup result: {text[:300]}")
-        check_checkup_rows(rows_of(page)[before:], 50, "board checkup", "3", "0", columns=18)
-        # Once passed, Home stops offering; checkup_passed reflects the latest run, here missed.
+        check_checkup_rows(rows_of(page)[before:], 50, "board checkup", "4", "0", columns=18)
+        # One-skill checkups are never offered on Home.
         page.eval("location.hash = '#home'")
         wait_home(page)
         home = page.eval("document.body.innerText")
-        check("Take checkup: Pot odds" in home, "after a missed checkup it should be offered again")
+        check("Pot odds" not in home and "Take checkup" not in home, f"a one-skill checkup was offered: {home[:300]}")
         # A mixed score gets a real margin of error in plain words.
         t = int(time.time() * 1000) - 3600000
         mixed = [f"{t + slot}\tcheck\t\thit\t{2000 + slot}\t2\t{slot % 2}\t0\t\t1500\t20\t1\t0\t{slot}\t\t\t\t" for slot in range(49)]
@@ -2072,56 +2180,56 @@ def run_checkup_quit():
         page.navigate(f"http://127.0.0.1:{port}/")
         page.wait("!!document.querySelector('.app-title') && !!window.__trainer", 30)
         inspector = Inspector(page, (390, 844), "light", False)
-        seed_log(page, port, drills_only_log([("price", "25")]))
-        page.eval("location.hash = '#checkup:price'")
+        seed_log(page, port, drills_only_log([("price", "25"), ("hit", "20"), ("nuts", "AKs")], now=int(time.time() * 1000) - 86400000 * 10))
+        page.eval("location.hash = '#checkup:mixed'")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Begin')", 20)
         click_text(page, ".btn.primary", "Begin")
         before = len(rows_of(page))
-        play_checkup(page, inspector, True, start_number=1, count=4)
+        play_checkup(page, inspector, True, start_number=1, count=4, total=40)
         # Stop partway: the screen must not reveal a score.
         page.wait(READY + " && __trainer.current.number === 5", 30)
         page.eval("document.querySelector('.top-bar button.back').click()")
         must_see(page, "document.body.innerText.includes('Checkup saved')", 20, "stopping a checkup did not reach the saved screen")
         text = page.eval("document.body.innerText")
-        check("4 of 50 answered" in text, f"quit screen: {text[:300]}")
+        check("4 of 40 answered" in text, f"quit screen: {text[:300]}")
         check("correct" not in text and "plus or minus" not in text, f"a quit checkup leaked a score: {text[:300]}")
         inspector.snapshot("checkup-saved")
         # Home and Progress offer to resume, even after a reload.
         page.eval("location.hash = '#home'")
         wait_home(page)
         home = page.eval("document.body.innerText")
-        check("Resume checkup: Pot odds (4 of 50)" in home, f"no resume on home: {home[:400]}")
+        check("Resume checkup (4 of 40)" in home, f"no resume on home: {home[:400]}")
         page.send("Page.reload", {})
         page.wait("!!document.querySelector('.app-title') && !!window.__trainer", 30)
-        check("Resume checkup: Pot odds (4 of 50)" in page.eval("document.body.innerText"), "resume lost on reload")
+        check("Resume checkup (4 of 40)" in page.eval("document.body.innerText"), "resume lost on reload")
         page.eval("location.hash = '#progress'")
         page.wait("!!document.querySelector('.skill-row')", 20)
-        check("Resume checkup: Pot odds (4 of 50)" in page.eval("document.body.innerText"), "resume missing from Progress")
+        check("Resume checkup (4 of 40)" in page.eval("document.body.innerText"), "resume missing from Progress")
         # Resume: the next question is the fifth, the first four stay as logged.
         page.eval("[...document.querySelectorAll('a.btn')].find(a => a.textContent.includes('Resume checkup')).click()")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Resume')", 20)
         check("Start over" in page.eval("document.body.innerText"), "no option to start over")
         click_text(page, ".btn.primary", "Resume")
         page.wait(READY, 30)
-        check(page.eval("document.querySelector('.top-bar .count').textContent") == "5 of 50", "resume did not continue at question 5")
+        check(page.eval("document.querySelector('.top-bar .count').textContent") == "5 of 40", "resume did not continue at question 5")
         # Leave by the back gesture partway, then resume again and finish.
         page.eval("location.hash = '#home'")
         wait_home(page)
-        check("Resume checkup: Pot odds (4 of 50)" in page.eval("document.body.innerText"), "back gesture lost the checkup")
-        page.eval("location.hash = '#checkup:price'")
+        check("Resume checkup (4 of 40)" in page.eval("document.body.innerText"), "back gesture lost the checkup")
+        page.eval("location.hash = '#checkup:mixed'")
         must_see(page, "[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Resume')", 20, "after the back gesture the checkup was not offered to resume")
         click_text(page, ".btn.primary", "Resume")
-        answers = play_checkup(page, inspector, True, start_number=5, count=46)
+        answers = play_checkup(page, inspector, True, start_number=5, count=36, total=40)
         page.wait("!!document.querySelector('.big-score')", 30)
-        check("100% correct" in page.eval("document.body.innerText"), "resumed checkup score wrong")
+        check("100% right" in page.eval("document.body.innerText"), "resumed checkup score wrong")
         rows = rows_of(page)[before:]
-        check_checkup_rows(rows, 50, "resumed checkup", "1", "0")
-        check(sorted(int(r[13]) for r in rows) == list(range(50)), f"slots not 0-49: {sorted(int(r[13]) for r in rows)}")
-        results["checkup_resumed"] = 50
+        check_checkup_rows(rows, 40, "resumed checkup", "1", "1000000", columns=None)
+        check(sorted(int(r[13]) for r in rows) == list(range(40)), f"slots not 0-39: {sorted(int(r[13]) for r in rows)}")
+        results["checkup_resumed"] = 40
         # Starting over leaves the old run and begins a new form; the new run is resumable.
         page.eval("location.hash = '#home'")
         wait_home(page)
-        page.eval("location.hash = '#checkup:price'")
+        page.eval("location.hash = '#checkup:mixed'")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Begin')", 20)
         click_text(page, ".btn.primary", "Begin")
         page.wait(READY, 30)
@@ -2131,13 +2239,13 @@ def run_checkup_quit():
         page.wait("document.body.innerText.includes('Checkup saved')", 20)
         page.eval("location.hash = '#home'")
         wait_home(page)
-        page.eval("location.hash = '#checkup:price'")
+        page.eval("location.hash = '#checkup:mixed'")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Resume')", 20)
         click_text(page, ".btn", "Start over with new questions")
         page.wait(READY, 30)
-        check(page.eval("document.querySelector('.top-bar .count').textContent") == "1 of 50", "starting over did not reset to question 1")
+        check(page.eval("document.querySelector('.top-bar .count').textContent") == "1 of 40", "starting over did not reset to question 1")
         current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
-        check(current["form"] == 2 and current["run"] == 3, f"start over used form {current['form']} run {current['run']}")
+        check(current["form"] == 1000002 and current["run"] == 3, f"start over used form {current['form']} run {current['run']}")
         check(not browser.errors, f"checkup quit errors: {browser.errors[:5]}")
         print("checkup quit and resume ok")
     finally:
@@ -2154,17 +2262,18 @@ def run_checkup_tabs():
         first = browser.page
         boot_app(first, port)
         seed_log(first, port, drills_only_log([("price", "25")]))
+        # Both tabs open the monthly checkup.
         second = browser.chrome.new_page()
         boot_app(second, port)
         first.send("Emulation.setFocusEmulationEnabled", {"enabled": True})
         second.send("Emulation.setFocusEmulationEnabled", {"enabled": True})
         for page in (first, second):
             page.send("Page.bringToFront")
-            page.eval("location.hash = '#checkup:price'")
+            page.eval("location.hash = '#checkup:mixed'")
             page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Begin')", 20)
             click_text(page, ".btn.primary", "Begin")
             page.wait(READY, 30)
-        # Both tabs are on slot 0 of the same run, form 0.
+        # Both tabs are on slot 0 of the same run and form.
         first.send("Page.bringToFront")
         answer_check_item(first, json.loads(first.eval("JSON.stringify(__trainer.current)")), True)
         first.wait(READY + " && __trainer.current.number === 2", 30)
@@ -2207,7 +2316,7 @@ def showcase_lines():
 
 
 def run_checkup_conflict():
-    """Two tabs start different checkups together and both get the same run number."""
+    """Two tabs start different kinds of checkup together and both get the same run number."""
     port = 8988 + PORT_SHIFT
     srv = server.start(port)
     browser = Browser("checkupconflict")
@@ -2219,7 +2328,7 @@ def run_checkup_conflict():
         boot_app(second, port)
         first.send("Emulation.setFocusEmulationEnabled", {"enabled": True})
         second.send("Emulation.setFocusEmulationEnabled", {"enabled": True})
-        for page, skill in ((first, "price"), (second, "hit")):
+        for page, skill in ((first, "mixed"), (second, "hit")):
             page.send("Page.bringToFront")
             page.eval(f"location.hash = '#checkup:{skill}'")
             page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Begin')", 20)
@@ -2237,8 +2346,9 @@ def run_checkup_conflict():
         answer_check_item(second, current, True)
         second.wait(READY + " && __trainer.current.number === 3", 30)
         rows = [r for r in rows_of(first) if len(r) > 1 and r[1] == "check"]
-        check([(r[3], r[11], r[13]) for r in rows] == [("price", "1", "0"), ("hit", "2", "0"), ("hit", "2", "1")],
-              f"run clash left the wrong rows: {[(r[3], r[11], r[13]) for r in rows]}")
+        check([(r[11], r[12], r[13]) for r in rows] == [("1", "1000000", "0"), ("2", "0", "0"), ("2", "0", "1")]
+              and [r[3] for r in rows[1:]] == ["hit", "hit"],
+              f"run clash left the wrong rows: {[(r[3], r[11], r[12], r[13]) for r in rows]}")
         check(not browser.errors, f"checkup conflict errors: {browser.errors[:5]}")
         print("checkup run clash ok")
     finally:
@@ -2275,7 +2385,9 @@ def run_progress_new():
         check("Three-way pots" in text, "bias table by opponents missing")
         check("Hand types: within" in text and "Exact hands: within" in text, "staircase band missing")
         check("Checkup history" in text and "Pot odds" in text, "checkup history missing")
-        check("Drill passed" in text and ("Checkup passed" in text or "Checkup not taken" in text), "drill/checkup split missing")
+        anchor_row = page.eval("[...document.querySelectorAll('.skill-row')].find(r => r.textContent.includes('Key numbers')).innerText")
+        check("Equity and anchors" in anchor_row and "Passed" in anchor_row, f"group and pass state missing: {anchor_row}")
+        check("Not yet" in text and "Checkup passed" not in text and "Take checkup" not in text, "per-skill checkup state still shown")
         check("rainbow, connected" in text, "per-category table missing")
         check("Box 1" in text and "cards seen" in text, "anchor boxes missing")
         check(not page.eval("!!document.querySelector('svg.chart, canvas')"), "progress must have no charts")
@@ -2284,7 +2396,7 @@ def run_progress_new():
         page.eval("location.hash = '#home'")
         wait_home(page)
         home = page.eval("document.body.innerText")
-        check("Reading the board" in home and "Estimating equity" in home, f"home step list: {home[:400]}")
+        check("Board reading" in home and "Equity and anchors" in home and "Step " not in home, f"home group list: {home[:400]}")
         check(not browser.errors, f"progress errors: {browser.errors[:5]}")
         print("progress ok")
     finally:
@@ -2532,7 +2644,7 @@ def capture_new_screens(page, port, inspector):
     inspector.snapshot("progress-with-data", full=True)
     page.eval("location.hash = '#home'")
     wait_home(page)
-    page.eval("location.hash = '#checkup:hit'")
+    page.eval("location.hash = '#checkup:mixed'")
     page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Begin')", 20)
     inspector.snapshot("checkup-intro")
     click_text(page, ".btn.primary", "Begin")
@@ -2545,10 +2657,10 @@ def capture_new_screens(page, port, inspector):
     inspector.snapshot("checkup-saved")
     page.eval("location.hash = '#home'")
     wait_home(page)
-    page.eval("location.hash = '#checkup:hit'")
+    page.eval("location.hash = '#checkup:mixed'")
     page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Resume')", 20)
     click_text(page, ".btn.primary", "Resume")
-    play_checkup(page, inspector, True, start_number=2, count=49)
+    play_checkup(page, inspector, True, start_number=2, count=39, total=40)
     page.wait("!!document.querySelector('.big-score')", 30)
     inspector.snapshot("checkup-result")
     page.eval("location.hash = '#home'")
@@ -2811,6 +2923,9 @@ def run_dealing():
         # The same race in the baseline: Stop right after answering.
         page.eval("location.hash = '#home'")
         page.wait("!!document.querySelector('.app-title')", 10)
+        # Let the drill's leftover look-ahead work drain first: the default drill's next
+        # items can be slow ones, and they must not use up the passes meant for the baseline.
+        page.eval("__trainer.prepare({ skill: 'nuts', seed: '12345', origin: 'new' }, false).then(() => true)")
         page.eval("window.__holdPrep = true; window.__passPrep = 2; location.hash = '#baseline'")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Begin')", 20)
         page.eval("[...document.querySelectorAll('.btn.primary')].find(b => b.textContent === 'Begin').click()")
@@ -3097,6 +3212,7 @@ SECTIONS = {
     "differential": run_differential, "timing": run_timing, "e2e": run_e2e, "baseline": run_baseline,
     "newskills": run_new_skills, "noneleft": run_none_left, "checkup": run_checkup, "checkupquit": run_checkup_quit,
     "checkuptabs": run_checkup_tabs, "checkupconflict": run_checkup_conflict, "progressnew": run_progress_new,
+    "libgroups": run_lib_groups, "groups": run_groups,
     "preflopspots": run_preflop_spots, "libpreflop": run_lib_preflop, "card": run_card, "offline": run_offline, "nostorage": run_nostorage, "legacy": run_legacy, "screens": run_screens,
 }
 

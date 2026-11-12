@@ -56,7 +56,7 @@ fn drill_logs_each_answer_and_ignores_invalid_input() {
         assert_eq!(row[2], "");
         assert_eq!(row[3], "price", "--skill deals only the named skill");
         assert!(row[4].parse::<u64>().is_ok());
-        assert_eq!(row[5], "3");
+        assert_eq!(row[5], poker_trainer::item::GEN_VERSION.to_string());
         assert!(row[6] == "0" || row[6] == "1");
         assert!(row[9].parse::<u32>().unwrap() <= 60_000);
     }
@@ -137,7 +137,8 @@ fn baseline_runs_and_compares_with_earlier_runs() {
     let progress = run(&home, &["progress"], "");
     let stdout = String::from_utf8_lossy(&progress.stdout);
     assert!(stdout.contains("Not enough data"), "{stdout}");
-    assert!(stdout.contains("Current step: 1 of 4"), "{stdout}");
+    assert!(stdout.contains("Every drill is open."), "{stdout}");
+    assert!(!stdout.contains("step"), "no steps remain: {stdout}");
     assert!(stdout.contains("Run 2:"), "{stdout}");
     assert!(!stdout.to_lowercase().contains("win rate"));
     let _ = fs::remove_dir_all(&home);

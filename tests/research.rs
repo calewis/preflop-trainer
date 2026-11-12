@@ -19,7 +19,8 @@ use poker_trainer::log::{
 };
 use poker_trainer::money;
 use poker_trainer::preflop::{Seat, Situation, CARD};
-use poker_trainer::progress::{all_stats, current_step, pass_mark, reliability_table, skill_stats, STEPS};
+use poker_trainer::groups::{group_of, mixed_skills, Group};
+use poker_trainer::progress::{pass_mark, reliability_table, skill_stats};
 use poker_trainer::reflection::{
     reflection_comparison, reflection_eligible, reflection_form, reflection_offered, reflection_row, reflection_state,
     ReflectState, MAX_CUES, REFLECTION_MIN_MISSES,
@@ -921,10 +922,9 @@ fn the_chain_mark_is_85_percent_of_stages_with_outs_within_one_counting() {
 }
 
 #[test]
-fn chain_is_in_step_three() {
-    assert_eq!(Skill::Chain.step(), Some(3));
-    assert!(STEPS[2].contains(&Skill::Chain));
-    assert_eq!(current_step(&all_stats(&[])), 1);
+fn chain_is_its_own_group_and_open_from_the_start() {
+    assert_eq!(group_of(Skill::Chain), Some(Group::WholeHands));
+    assert!(mixed_skills().contains(&Skill::Chain));
 }
 
 #[test]
@@ -1254,10 +1254,11 @@ mod beats_me {
     use super::*;
     use poker_trainer::beats_me::{beats_me_rung, kinds_analysis, mix_standing, ways_count, BeatKind, MixBand, MIX_AHEAD_PCT, MIX_BEHIND_PCT};
     use poker_trainer::classes::PlayerType;
+    use poker_trainer::ladder::OLD_RULE_CUTOFF_MS;
     use poker_trainer::grade::{BeatsMeReveal, BEATS_RANDOM_NOTE};
     use poker_trainer::item::{beats_me_rung_of_seed, beats_me_seed_with_rung, BeatsMeAsk, BeatsMeQuestion, BEATS_ME_RUNGS, CHAIN_STAGES};
-    use poker_trainer::progress::{skills_up_to_step, PASS_BEATS_ME};
-    use poker_trainer::schedule::{BEATS_WEIGHT_PER_MILLE, MIN_PREFLOP_PERCENT};
+    use poker_trainer::progress::PASS_BEATS_ME;
+    use poker_trainer::schedule::MIN_PREFLOP_PERCENT;
 
     fn at_rung(seed: u64, rung: u8) -> Item {
         generate(Skill::BeatsMe, beats_me_seed_with_rung(seed, rung))
@@ -1439,16 +1440,42 @@ mod beats_me {
         row(beats_me_seed_with_rung(t, rung), t, right)
     }
 
+    /// A row logged after the old rule stopped applying.
+    fn gated_row(t: u64, rung: u8, right: bool) -> Attempt {
+        correct_row(OLD_RULE_CUTOFF_MS + t, rung, right)
+    }
+
     #[test]
-    fn the_rung_rises_at_eighty_five_percent_over_twenty() {
-        let build = |right: u64| -> Vec<Attempt> {
-            (0..20).map(|i| correct_row(i, 0, i < right)).collect()
+    fn the_rung_rises_by_the_shared_points_gate() {
+        assert_eq!(beats_me_rung(&[]), 0);
+        // From 10 points, 21 straight right is 31 and the 22nd reaches 32.
+        let build = |pattern: &[bool]| -> Vec<Attempt> {
+            pattern.iter().enumerate().map(|(i, &right)| gated_row(i as u64, 0, right)).collect()
         };
-        assert_eq!(beats_me_rung(&build(17)), 1, "17 of 20 is 85%");
-        assert_eq!(beats_me_rung(&build(16)), 0);
-        assert_eq!(beats_me_rung(&(0..19).map(|i| correct_row(i, 0, true)).collect::<Vec<_>>()), 0, "19 attempts");
-        let climbed: Vec<Attempt> = (0..3).flat_map(|r| (0..20).map(move |i| correct_row(i + r * 100, r as u8, true))).collect();
+        assert_eq!(beats_me_rung(&build(&[true; 21])), 0);
+        assert_eq!(beats_me_rung(&build(&[true; 22])), 1);
+        // A miss costs four right answers: one miss needs 26 right.
+        let mut pattern = vec![false];
+        pattern.extend([true; 25]);
+        assert_eq!(beats_me_rung(&build(&pattern)), 0);
+        pattern.push(true);
+        assert_eq!(beats_me_rung(&build(&pattern)), 1);
+        // 17 of 20 met the old rule but is far short now.
+        let mut pattern = vec![true; 17];
+        pattern.extend([false; 3]);
+        assert_eq!(beats_me_rung(&build(&pattern)), 0);
+        // Before the cutoff the old rule still gives the rung.
+        let before: Vec<Attempt> = pattern.iter().enumerate().map(|(i, &right)| correct_row(i as u64, 0, right)).collect();
+        assert_eq!(beats_me_rung(&before), 1);
+        // Each rung starts again at 10, and passing is permanent.
+        let mut climbed: Vec<Attempt> =
+            (0..3).flat_map(|r| (0..22).map(move |i| gated_row(i + r * 100, r as u8, true))).collect();
         assert_eq!(beats_me_rung(&climbed), 3);
+        climbed.extend((0..30).map(|i| gated_row(1000 + i, 1, false)));
+        assert_eq!(beats_me_rung(&climbed), 3, "reviews of an old rung cannot demote");
+        let partial: Vec<Attempt> =
+            (0..2).flat_map(|r| (0..22).map(move |i| gated_row(i + r * 100, r as u8, r == 0 || i < 21))).collect();
+        assert_eq!(beats_me_rung(&partial), 1, "21 right at rung 1 is one short");
     }
 
     #[test]
@@ -1463,11 +1490,12 @@ mod beats_me {
     }
 
     #[test]
-    fn beats_is_in_no_step_but_still_in_the_drill() {
-        assert!(STEPS[0].contains(&Skill::BeatsMe));
-        assert!(!STEPS.iter().any(|step| step.contains(&Skill::Beats)));
-        assert!(skills_up_to_step(1).contains(&Skill::Beats));
-        assert_eq!(BEATS_WEIGHT_PER_MILLE, 500);
+    fn beats_and_price_are_no_longer_dealt_but_beats_me_is() {
+        assert_eq!(group_of(Skill::BeatsMe), Some(Group::Board));
+        for retired in [Skill::Beats, Skill::Price] {
+            assert_eq!(group_of(retired), None, "{retired:?}");
+            assert!(!mixed_skills().contains(&retired), "{retired:?}");
+        }
     }
 
     #[test]
@@ -1476,26 +1504,9 @@ mod beats_me {
     }
 
     #[test]
-    fn beats_is_dealt_at_about_half_the_weight() {
-        let allowed = vec![Skill::Beats, Skill::Made, Skill::Outs, Skill::Price];
-        let mut session = Session::new(allowed, &[], 1000, 11);
-        let (mut beats, mut total) = (0u32, 0u32);
-        for _ in 0..8000 {
-            let planned = session.try_next_item().unwrap();
-            beats += u32::from(planned.skill == Skill::Beats);
-            total += 1;
-            session.record(planned, true);
-        }
-        // Weights 500:1000:1000:1000, against 25% at equal weight.
-        let share = f64::from(beats) / f64::from(total);
-        assert!((0.11..=0.18).contains(&share), "beats {beats} of {total}: {share}");
-    }
-
-    #[test]
-    fn the_default_drill_keeps_preflop_at_a_quarter() {
+    fn the_default_drill_keeps_preflop_at_its_share() {
         for seed in 0..5u64 {
-            let allowed = skills_up_to_step(1);
-            let mut session = Session::new(allowed, &[], 1000, seed).with_preflop_floor();
+            let mut session = Session::mixed(&[], 1000, seed);
             let (mut preflop, mut total) = (0u64, 0u64);
             for _ in 0..800 {
                 let planned = session.try_next_item().unwrap();
@@ -1510,7 +1521,7 @@ mod beats_me {
     #[test]
     fn a_chain_cannot_push_preflop_under_its_share() {
         for seed in 0..300u64 {
-            let mut session = Session::new(skills_up_to_step(3), &[], 1000, seed).with_preflop_floor();
+            let mut session = Session::mixed(&[], 1000, seed);
             let (mut preflop, mut total) = (0u64, 0u64);
             for _ in 0..15 {
                 let planned = session.try_next_item().unwrap();
@@ -1656,6 +1667,9 @@ mod beats_me {
             assert_eq!(generator_changed(skill, 1, 2), to_v2.contains(&skill), "{skill:?} v1 to v2");
             assert_eq!(generator_changed(skill, 2, 3), skill == Skill::Preflop, "{skill:?} v2 to v3");
             assert_eq!(generator_changed(skill, 1, 3), to_v2.contains(&skill) || skill == Skill::Preflop, "{skill:?} v1 to v3");
+            assert_eq!(generator_changed(skill, 3, 4), skill == Skill::Preflop, "{skill:?} v3 to v4");
+            assert_eq!(generator_changed(skill, 2, 4), skill == Skill::Preflop, "{skill:?} v2 to v4");
+            assert_eq!(generator_changed(skill, 1, 4), to_v2.contains(&skill) || skill == Skill::Preflop, "{skill:?} v1 to v4");
             assert!(!generator_changed(skill, GEN_VERSION, GEN_VERSION), "{skill:?}: a version is itself");
             assert!(generator_changed(skill, GEN_VERSION + 1, GEN_VERSION), "{skill:?}: an unknown version is a change");
             assert!(generator_changed(skill, GEN_VERSION, GEN_VERSION + 1));
@@ -1666,26 +1680,60 @@ mod beats_me {
 
     #[test]
     fn a_chain_waiting_for_the_floor_starts_right_after_the_next_preflop() {
-        // A waiting chain is dealt the moment it fits; until then only preflop comes next.
-        let mut waits = 0;
-        for seed in 0..2_000u64 {
-            let mut session = Session::new(skills_up_to_step(3), &[], 1000, seed).with_preflop_floor();
-            let (mut preflop, mut total) = (0u64, 0u64);
-            for i in 0..30u64 {
-                let waiting = session.chain_is_waiting();
-                let planned = session.try_next_item().unwrap();
-                if waiting {
-                    waits += 1;
-                    let fits = preflop * 100 >= (total + CHAIN_STAGES) * MIN_PREFLOP_PERCENT;
-                    let expected = if fits { Skill::Chain } else { Skill::Preflop };
-                    assert_eq!(planned.skill, expected, "seed {seed} item {i}");
+        // A waiting chain is dealt the moment it fits; until then preflop comes next,
+        // unless two preflop items in a row block a third.
+        //
+        // In a session whose floor holds from its first item, one preflop item is
+        // always enough. A session that turns the floor on after dealing (`late`)
+        // starts below it, so a chain can be picked right after two preflop items
+        // and still not fit after the next one: those waits test the rest of the rule.
+        let (mut waits, mut held, mut held_unowed) = (0u64, 0u64, 0u64);
+        let rotations = [mixed_skills(), vec![Skill::Preflop, Skill::Chain, Skill::Made, Skill::Outs]];
+        for (r, allowed) in rotations.iter().enumerate() {
+            // The second rotation only runs late-floor sessions.
+            let late = r == 1;
+            for seed in 0..[2_000u64, 600][r] {
+                let mut session = Session::new(allowed.clone(), &[], 1000, seed);
+                let mut dealt: Vec<Skill> = Vec::new();
+                if late {
+                    for _ in 0..2 + seed % 7 {
+                        let planned = session.try_next_item().unwrap();
+                        dealt.push(planned.skill);
+                        session.record(planned, true);
+                    }
                 }
-                total += 1;
-                preflop += u64::from(planned.skill == Skill::Preflop);
-                session.record(planned, i % 3 != 0);
+                // The first rotation is the default drill, dealt by group share.
+                let mut session = if late { session.with_preflop_floor() } else { session.with_preflop_floor().with_group_shares() };
+                for i in 0..30u64 {
+                    let waiting = session.chain_is_waiting();
+                    let planned = session.try_next_item().unwrap();
+                    if waiting {
+                        waits += 1;
+                        let preflop = dealt.iter().filter(|&&s| s == Skill::Preflop).count() as u64;
+                        let total = dealt.len() as u64;
+                        let fits = preflop * 100 >= (total + CHAIN_STAGES) * MIN_PREFLOP_PERCENT;
+                        let owed = preflop * 100 < (total + 1) * MIN_PREFLOP_PERCENT;
+                        let blocked = dealt.ends_with(&[Skill::Preflop, Skill::Preflop]);
+                        held += u64::from(!fits);
+                        held_unowed += u64::from(!fits && !owed && !blocked);
+                        let at = format!("rotation {r} seed {seed} item {i}: {:?}", planned.skill);
+                        if fits {
+                            assert_eq!(planned.skill, Skill::Chain, "{at}");
+                        } else if blocked {
+                            assert!(planned.skill != Skill::Preflop && planned.skill != Skill::Chain, "{at}");
+                        } else {
+                            assert_eq!(planned.skill, Skill::Preflop, "{at}");
+                        }
+                    }
+                    dealt.push(planned.skill);
+                    session.record(planned, i % 3 != 0);
+                }
             }
         }
+        println!("{waits} waits, {held} still not fitting, {held_unowed} of them with preflop neither owed nor blocked");
         assert!(waits > 100, "only {waits} chains waited, so the check above proves little");
+        assert!(held >= 50, "only {held} waits where the chain still didn't fit");
+        assert!(held_unowed >= 50, "only {held_unowed} of those where only the wait itself calls for preflop");
     }
 
     #[test]
@@ -1693,7 +1741,7 @@ mod beats_me {
         let mut chain_items = 0u64;
         let mut items = 0u64;
         for seed in 0..1_000u64 {
-            let mut session = Session::new(skills_up_to_step(3), &[], 1000, seed).with_preflop_floor();
+            let mut session = Session::mixed(&[], 1000, seed);
             let (mut preflop, mut total) = (0u64, 0u64);
             for i in 0..60u64 {
                 let planned = session.try_next_item().unwrap();
@@ -1707,8 +1755,8 @@ mod beats_me {
         }
         let pct = chain_items as f64 * 100.0 / items as f64;
         println!("chain share {pct:.1}%");
-        // Dropping the pick instead of delaying it leaves chain near 7%.
-        assert!(pct >= 11.0, "chain was dealt {pct:.1}% of items");
+        // Whole hands' share is 15%; a short session ends with a hand or two still owed.
+        assert!(pct >= 12.0, "chain was dealt {pct:.1}% of items");
     }
 
     #[test]
@@ -1742,8 +1790,8 @@ mod beats_me {
 
     #[test]
     fn a_new_session_deals_at_the_players_rung() {
-        let log: Vec<Attempt> = (0..20).map(|i| correct_row(i, 0, true)).collect();
-        let mut session = Session::new(vec![Skill::BeatsMe], &log, 1000, 9);
+        let log: Vec<Attempt> = (0..22).map(|i| gated_row(i, 0, true)).collect();
+        let mut session = Session::new(vec![Skill::BeatsMe], &log, OLD_RULE_CUTOFF_MS + 1000, 9);
         let planned = session.try_next_item().unwrap();
         assert_eq!(beats_me_rung_of_seed(planned.seed), 1);
         assert!(!poker_trainer::item::is_held_out(planned.seed));
@@ -1837,4 +1885,97 @@ mod the_nuts {
         assert!(!answer(&nuts_item("KsKd7c"), "Kx").correct);
         assert!(!answer(&nuts_item("KsKd7c"), "7x").correct);
     }
+}
+
+/// How often an `equity` player whose errors have mean `mae` points moves to
+/// rung 1 within 60 and within 100 rung-0 attempts, by `passed` over the absolute
+/// errors so far. `exponential` picks the error spread; otherwise half-normal.
+fn equity_promotion_rates(mae: f64, exponential: bool, passed: impl Fn(&[f64]) -> bool) -> (f64, f64) {
+    const PLAYERS: u64 = 20_000;
+    let mut rng = poker_trainer::rng::Rng::new(0xE0E0 ^ (mae * 10.0) as u64 ^ u64::from(exponential) << 20);
+    let mut uniform = move || (rng.below(1 << 53) as f64 + 0.5) / (1u64 << 53) as f64;
+    let (mut by_60, mut by_100) = (0u64, 0u64);
+    for _ in 0..PLAYERS {
+        let errors: Vec<f64> = (0..100)
+            .map(|_| {
+                if exponential {
+                    -mae * uniform().ln()
+                } else {
+                    // A half-normal with this mean has sigma = mean * sqrt(pi / 2).
+                    let normal = (-2.0 * uniform().ln()).sqrt() * (std::f64::consts::TAU * uniform()).cos();
+                    (normal * mae * (std::f64::consts::PI / 2.0).sqrt()).abs()
+                }
+            })
+            .collect();
+        if let Some(at) = (1..=100).find(|&n| passed(&errors[..n])) {
+            by_100 += 1;
+            by_60 += u64::from(at <= 60);
+        }
+    }
+    (by_60 as f64 / PLAYERS as f64, by_100 as f64 / PLAYERS as f64)
+}
+
+#[test]
+fn equity_promotion_tracks_the_mean_error_not_a_lucky_stretch() {
+    use poker_trainer::equity_skill::{estimate_points, EQUITY_GATE, OLD_PROMOTE_MAX_MAE, OLD_PROMOTE_WINDOW};
+    let gate = |errors: &[f64]| EQUITY_GATE.passed(errors.iter().map(|&e| estimate_points(e)));
+    let old = |errors: &[f64]| {
+        errors.windows(OLD_PROMOTE_WINDOW).any(|w| w.iter().sum::<f64>() / w.len() as f64 <= OLD_PROMOTE_MAX_MAE)
+    };
+    for exponential in [false, true] {
+        let spread = if exponential { "exponential" } else { "half-normal" };
+        for mae in [5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.0] {
+            let (by_60, by_100) = equity_promotion_rates(mae, exponential, gate);
+            let (old_60, old_100) = equity_promotion_rates(mae, exponential, old);
+            println!(
+                "{spread} mean error {mae}: within 60 {:.1}%, within 100 {:.1}% (old rule {:.1}%, {:.1}%)",
+                100.0 * by_60,
+                100.0 * by_100,
+                100.0 * old_60,
+                100.0 * old_100
+            );
+            if mae == 6.0 {
+                assert!(by_60 >= 0.80, "{spread}: a mean error of 6 moved up within 60 only {by_60}");
+            }
+            if mae == 10.0 {
+                assert!(by_100 <= 0.10, "{spread}: a mean error of 10 moved up within 100 {by_100}");
+                assert!(old_100 >= 0.3, "{spread}: the old rule let luck through {old_100}");
+            }
+        }
+    }
+}
+
+#[test]
+fn equity_rung_uses_the_points_gate_and_keeps_old_promotions() {
+    use poker_trainer::equity_skill::{equity_points, equity_rung, estimate_points};
+    use poker_trainer::item::equity_seed_with_rung;
+    use poker_trainer::ladder::OLD_RULE_CUTOFF_MS;
+    // 8 less the error rounded to whole points, counting at most 20.
+    assert_eq!([estimate_points(0.4), estimate_points(-2.5), estimate_points(8.0)], [8, 5, 0]);
+    assert_eq!([estimate_points(-19.6), estimate_points(20.4), estimate_points(64.0)], [-12, -12, -12]);
+    let rows = |first: u64, errors: &[f64]| -> Vec<Attempt> {
+        let seed = equity_seed_with_rung(77, 0);
+        let rows = errors.iter().enumerate().map(|(i, &error)| {
+            let mut row = logged(Skill::Equity, seed, first + i as u64, error.abs() <= 10.0, "0:1:25-50");
+            row.extra.signed_error = Some(error);
+            row
+        });
+        rows.collect()
+    };
+    let after = OLD_RULE_CUTOFF_MS;
+    // From 30, an error of 1 adds 7: eleven make 107, the twelfth passes 110.
+    assert_eq!(equity_points(&rows(after, &[1.0; 11])).points, 107);
+    assert_eq!(equity_rung(&rows(after, &[1.0; 11])), 0);
+    assert_eq!(equity_rung(&rows(after, &[-1.0; 12])), 1);
+    // Two wild guesses cost 12 each, never more, and the count stops at 0.
+    let mut errors = vec![60.0, -45.0];
+    errors.extend([1.0; 12]);
+    assert_eq!(equity_points(&rows(after, &errors)).points, 90);
+    errors.extend([3.0; 4]);
+    assert_eq!(equity_rung(&rows(after, &errors)), 1);
+    // Thirty straight attempts averaging 8 met the old rule: before the cutoff they
+    // still promote, after it they hold the count at 30.
+    assert_eq!(equity_rung(&rows(after - 30, &[8.0; 30])), 1);
+    assert_eq!(equity_rung(&rows(after - 29, &[8.0; 30])), 0);
+    assert_eq!(equity_points(&rows(after, &[8.0; 30])).points, 30);
 }
