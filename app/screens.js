@@ -187,8 +187,15 @@ function leaveHeader(leave, title) {
     h('span', {}));
 }
 
+// If dealing still hasn't finished by then, offer a reload: answers are already saved.
+const STUCK_MS = 15000;
+
 function renderLoading(leave) {
-  screen(leaveHeader(leave, 'Dealing'), h('p', { class: 'loading' }, 'Dealing...'));
+  const stuck = h('p', { class: 'hint', hidden: '' }, 'This is taking too long. Reloading keeps everything you have answered. ',
+    h('button', { class: 'btn', onclick: () => location.reload() }, 'Reload'));
+  const status = h('p', { class: 'loading' }, 'Dealing...');
+  setTimeout(() => { if (status.isConnected) stuck.hidden = false; }, STUCK_MS);
+  screen(leaveHeader(leave, 'Dealing'), status, stuck);
 }
 
 function renderFailure(err, leave) {

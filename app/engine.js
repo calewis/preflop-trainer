@@ -36,8 +36,9 @@ function client(onFatal) {
     if (dead) return Promise.reject(new Error(dead));
     const id = nextId++;
     return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      worker.postMessage({ id, args: args.map(String) });
+      const message = { id, args: args.map(String) };
+      pending.set(id, { resolve, reject, message });
+      worker.postMessage(message);
     });
   }
 
@@ -49,6 +50,15 @@ function client(onFatal) {
       rejectPending('the worker restarted');
       worker = new Worker(workerUrl);
       attach();
+    },
+    /** Swaps in a fresh worker and resends everything still waiting, after `setup` (which may send first). */
+    revive(setup) {
+      const waiting = [...pending.values()].map(entry => entry.message);
+      worker.terminate();
+      worker = new Worker(workerUrl);
+      attach();
+      setup();
+      waiting.forEach(message => worker.postMessage(message));
     },
     /** Gives up on this worker: everything waiting or to come fails with `reason`. */
     stop(reason) {
@@ -71,6 +81,15 @@ const prepWorker = client(message => {
   prepRestarts += 1;
   if (prepRestarts > MAX_PREP_RESTARTS) prepWorker.stop(message);
   else prepWorker.restart();
+});
+
+// iOS can bring a home-screen app back from the background with its workers
+// frozen: a reply never comes and the page sits on "Dealing..." for good. The
+// prep worker holds no state, so on every return replace it and resend
+// whatever it was working on.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  prepWorker.revive(() => {});
 });
 
 // One prepare runs at a time. Requests the player is waiting for jump the queue.
