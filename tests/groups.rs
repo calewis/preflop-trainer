@@ -69,14 +69,15 @@ fn the_seven_groups_have_the_agreed_shares_and_cover_every_dealt_skill() {
     );
     assert_eq!(MIN_PREFLOP_PERCENT, 20, "the preflop floor is its group's share");
     for skill in Skill::ALL {
-        let retired = matches!(skill, Skill::Price | Skill::Beats);
+        // River has its own entry in the picker and its own mode, outside every group.
+        let retired = matches!(skill, Skill::Price | Skill::Beats | Skill::River);
         assert_eq!(group_of(skill).is_none(), retired, "{skill:?}");
         // A hidden drill keeps its group (for its history) but no group deals it.
         let dealt = !retired && is_dealt(skill);
         assert_eq!(Group::ALL.iter().filter(|g| g.skills().contains(&skill)).count(), usize::from(dealt), "{skill:?} in one group");
         assert_eq!(mixed_skills().contains(&skill), dealt, "{skill:?} in the default drill");
     }
-    assert_eq!(mixed_skills().len(), Skill::ALL.len() - 2 - HIDDEN_SKILLS.len());
+    assert_eq!(mixed_skills().len(), Skill::ALL.len() - 3 - HIDDEN_SKILLS.len());
     for g in Group::ALL {
         assert_eq!(Group::from_code(g.code()), Some(g));
     }

@@ -133,6 +133,7 @@ pub fn answer_format(question: &Question) -> AnswerFormat {
             AnswerFormat::Choice(options.iter().map(|c| option(c.code(), c.label())).collect())
         }
         Question::Table(q) => AnswerFormat::Choice(q.options.clone()),
+        Question::River(q) => AnswerFormat::Choice(q.options.clone()),
         Question::BeatsMe(q) => beats_me_format(q),
         Question::ReadPrice(q) => read_price_format(q),
     }

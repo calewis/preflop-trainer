@@ -557,3 +557,17 @@ button:focus-visible, a:focus-visible, label:focus-visible { outline: 2px solid 
 /* Preflop mistakes: loading a leak file kept on this device. */
 .leak-loader { gap: 8px; }
 .paste { width: 100%; min-height: 64px; font: 16px/1.35 ui-monospace, Menlo, monospace; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px; resize: vertical; }
+
+/* River: the line so far in small type, and the "you beat / beats you" bar. */
+.river-context { font-weight: 600; color: var(--ink); }
+.river-line { font-size: 14.5px; line-height: 1.35; color: var(--muted); }
+.question.revealed .river .prompt, .question.revealed .river .river-line { display: none; }
+.river-split { display: flex; flex-direction: column; gap: 4px; }
+.split-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--line); }
+.split-beat { background: var(--good); }
+.split-tie { background: var(--muted); }
+.split-lose { background: var(--bad); }
+.split-text { font-size: 13.5px; line-height: 1.3; }
+.split-beat-text { color: var(--good); }
+.split-lose-text { color: var(--bad); }
+.river-reply { font-size: 13.5px; line-height: 1.3; color: var(--muted); }

@@ -122,6 +122,36 @@ The file is personal: it is never part of the app or this repository (`.gitignor
 text; it is kept in that browser's storage only, and Clear (there or under Backup) removes it.
 Answers are logged with mode `leak` and an anonymous family tag, with no hand ids or dates.
 
+## River
+
+"River" in the web app's group picker drills river decisions from a library of 1,328 spots
+graded offline by a solver (`data/river_drills_v1.txt`, made by the postflop lab's
+`tools/riverdrills` and copied here as data; the lab's code is not part of this app). Each
+question shows your hand, the board, the pot and any bet you face, the hand so far in one
+sentence, the opponent's style and how many are in the pot, with buttons for the options the
+solver weighed (check, bet 1/3, 3/4 or 1.5 times the pot, call, fold, raise, all-in). The
+feedback gives the best play, the EV an answer gave up (in big blinds and as a share of the
+pot), the library's explanation, how your hand does against the range you face, and for bets
+heads-up what calls and what folds (`data/river_replies_v1.txt`, taken from the same export
+by `tools/river_replies.py`). On an "either is fine" spot every option within the solver's
+margin (3% of the pot, or its noise if larger) is right, and the feedback says the options
+are close.
+
+A session is 20 questions: about 60% against home-game opponents and 40% against ordinary
+ones, a quarter three-way, and every kind of decision (kinds are picked by the square root
+of their size, so small ones turn up). A miss comes back three to five questions later with
+new suits; spots missed in an earlier session come back once in every four questions until
+answered right; a spot seen in the last 300 River answers is not dealt as new while others
+of its kind remain. The verdicts are about assumed hand ranges for each opponent style, not
+real players. River answers are logged in their own mode (`river`) and count toward no pass
+mark, Progress, checkup or baseline. The command-line app does not deal them.
+
+To replace the library, copy the new export over `data/river_drills_v1.txt` (or a new
+version's file), rerun `python3 -B tools/river_replies.py <the export's .jsonl> >
+data/river_replies_v1.txt`, and update `RIVER_LIBRARY_VERSION` and the counts at the top of
+`src/river.rs`. A new library version changes the rows' `gen_version`, so older River
+answers stop steering which spots come back.
+
 ## What the spot grading assumes
 
 `spot` and `spot_mw` state each opponent as a tight, average or loose player and a mix of

@@ -39,6 +39,8 @@ pub enum Mode {
     Reflect,
     /// A personal-leak drill item loaded from a local leak export.
     Leak,
+    /// A River drill item. Like `leak`, counted by nothing but the River drill itself.
+    River,
 }
 
 impl Mode {
@@ -50,6 +52,7 @@ impl Mode {
             Mode::Check => "check",
             Mode::Reflect => "reflect",
             Mode::Leak => "leak",
+            Mode::River => "river",
         }
     }
 
@@ -61,6 +64,7 @@ impl Mode {
             "check" => Some(Mode::Check),
             "reflect" => Some(Mode::Reflect),
             "leak" => Some(Mode::Leak),
+            "river" => Some(Mode::River),
             _ => None,
         }
     }
@@ -218,6 +222,14 @@ impl Attempt {
             Attempt::record(Mode::Leak, None, skill, ItemRef::Seed(seed), outcome, timestamp_ms, response_ms);
         attempt.gen_version = crate::leaks::LEAK_GEN_VERSION;
         attempt.extra.family = Some(family_tag);
+        attempt
+    }
+
+    /// The log record for an answered River drill item: mode `river`, the library in
+    /// `gen_version` and the spot id as its family.
+    pub fn from_river(seed: u64, outcome: &Outcome, timestamp_ms: u64, response_ms: u32) -> Attempt {
+        let mut attempt = Attempt::record(Mode::River, None, Skill::River, ItemRef::Seed(seed), outcome, timestamp_ms, response_ms);
+        attempt.gen_version = crate::river::RIVER_GEN_VERSION;
         attempt
     }
 

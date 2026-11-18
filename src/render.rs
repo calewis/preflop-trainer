@@ -10,6 +10,7 @@ use poker_trainer::grade::{any_of_suit_text, BeatsMeReveal, EquityAnalysis, EvBa
 use poker_trainer::item::{BeatsMeAsk, BeatsMeQuestion, ChainHand, ChainQuestion, ChainStage, EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question, Skill, SpotMode, SpotQuestion};
 use poker_trainer::preflop::{action_label, why_line, Action, CardLine, Chart, PreflopReason, Seat, Range, Situation, CARD};
 use poker_trainer::progress::{pass_mark, BaselineRun, SkillStats, PASS_ATTEMPTS};
+use poker_trainer::river::{river_bb, RiverGrade, RiverQuestion, RIVER_NOTE};
 use poker_trainer::table::{bb_text, checkup_form_reuses_spots, ev_bb_text, REUSE_NOTE, TableAction, TableActionKind, TableGrade, TableQuestion, TableSeat, TableStreetName, Verdict, ASSUMPTION_NOTE};
 
 #[derive(Clone, Copy)]
@@ -191,6 +192,7 @@ pub fn question(item: &Item, style: Style) -> String {
             format!("Flop: {}\nName its suit pattern and rank pattern.", style.cards(board))
         }
         Question::Table(q) => table_question(q, style),
+        Question::River(q) => river_question(q, style),
         Question::Chain(q) => chain_question(item, q, style),
     }
 }
@@ -270,6 +272,20 @@ fn table_question(q: &TableQuestion, style: Style) -> String {
     let call = if q.call_cents > 0 { format!(", {}bb to call", bb_text(q.call_cents)) } else { String::new() };
     lines.push(format!("Pot {}bb{call}. What do you do?", bb_text(q.pot_cents)));
     lines.join("\n")
+}
+
+fn river_question(q: &RiverQuestion, style: Style) -> String {
+    let spot = q.spot();
+    let bet = spot.bet_text().map_or(String::new(), |b| format!(", facing a bet of {b}"));
+    [
+        spot.context_line(),
+        spot.line.clone(),
+        format!("Board: {}", style.cards(&q.board)),
+        format!("Your hand: {}", style.holding(q.hand)),
+        format!("Pot {}bb{bet}.", river_bb(spot.pot_cents)),
+        spot.prompt().to_string(),
+    ]
+    .join("\n")
 }
 
 fn equity_question(q: &EquityQuestion, style: Style) -> String {
@@ -629,6 +645,7 @@ pub fn reveal(outcome: &Outcome, style: Style) -> String {
             }
         }
         Reveal::Table(graded) => table_reveal(&mut lines, graded),
+        Reveal::River(graded) => river_reveal(&mut lines, graded),
     }
     lines.extend(outcome.chain_tie.clone());
     lines.join("\n")
@@ -666,6 +683,20 @@ fn table_reveal(lines: &mut Vec<String>, g: &TableGrade) {
         }
     }
     lines.push(ASSUMPTION_NOTE.to_string());
+}
+
+fn river_reveal(lines: &mut Vec<String>, g: &RiverGrade) {
+    let spot = g.spot;
+    lines.push(format!("{} Best: {}.", g.verdict_text(), spot.answer_text()));
+    lines.extend(g.loss_text());
+    if !spot.why.first().is_some_and(|w| w.starts_with("Either is fine")) {
+        lines.extend(g.close_note());
+    }
+    lines.extend(spot.why.iter().cloned());
+    lines.push(spot.beat_line());
+    lines.push(spot.beaten_line());
+    lines.extend(spot.reply_line(spot.best_option().code));
+    lines.push(RIVER_NOTE.to_string());
 }
 
 fn equity_reveal(
@@ -965,7 +996,8 @@ pub fn progress_text(
     bias: &EquityBias,
 ) -> String {
     let mut out = String::from("PROGRESS\n\n");
-    for s in stats {
+    // River answers have their own mode and no pass mark yet; the web app shows them.
+    for s in stats.iter().filter(|s| s.skill != Skill::River) {
         out.push_str(&format!("{}\n", s.skill.name()));
         if s.enough_data {
             out.push_str(&format!(

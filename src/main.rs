@@ -86,10 +86,14 @@ struct DrillArgs {
 }
 
 fn parse_skill(name: &str) -> Result<Skill, String> {
-    Skill::from_name(name).ok_or_else(|| {
-        let names: Vec<&str> = Skill::ALL.iter().map(|s| s.name()).collect();
+    let skill = Skill::from_name(name).filter(|&s| s != Skill::River).ok_or_else(|| {
+        let names: Vec<&str> = Skill::ALL.iter().filter(|&&s| s != Skill::River).map(|s| s.name()).collect();
         format!("unknown skill {name}. Skills: {}", names.join(", "))
-    })
+    });
+    if name == Skill::River.name() {
+        return Err("river is a drill of the web app only: open River in its group picker".to_string());
+    }
+    skill
 }
 
 fn parse_check_args(args: &[String]) -> Result<CheckupKind, String> {

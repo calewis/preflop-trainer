@@ -101,6 +101,8 @@ export async function showHome() {
         class: 'btn group', 'data-group': g.code, title: g.skills.join(', '),
         onclick: () => startDrill(minutes, g.code),
       }, g.title)),
+      // Solver-graded river decisions, a fixed number per session.
+      h('button', { class: 'btn group', 'data-group': 'river', title: `${home.river.spots} river spots`, onclick: () => startRiverDrill() }, 'River'),
       // Your own preflop mistakes, loaded from a file on this device only.
       h('a', { class: 'btn group', 'data-group': 'mistakes', href: '#mistakes' }, 'Preflop mistakes'))),
     home.checkup ? h('section', { class: 'panel', 'data-checkup-offers': '' },
@@ -142,9 +144,24 @@ async function startLeakDrill(total, preflopOnly = false) {
     prepared = opened.first;
     if (prepared) prepareLeak(prepared, true);
     drill = {
-      leaks: true, title: preflopOnly ? 'Preflop mistakes' : 'My leaks',
+      leaks: true, counted: true, title: preflopOnly ? 'Preflop mistakes' : 'My leaks',
       total: opened.total || total, startedAt: activeNow(), answered: 0, ok: 0,
     };
+    location.hash = '#drill';
+  } finally {
+    starting = false;
+  }
+}
+
+/** Starts a River session: solver-graded river spots, counted, no countdown clock. */
+async function startRiverDrill() {
+  if (starting || drill) return;
+  starting = true;
+  try {
+    const opened = await engine.call('session_open', randomSeed(), Date.now(), 'river');
+    prepared = opened.first;
+    if (prepared) prepareDrill(prepared, true);
+    drill = { counted: true, river: true, title: 'River', total: opened.total, startedAt: activeNow(), answered: 0, ok: 0 };
     location.hash = '#drill';
   } finally {
     starting = false;
@@ -187,7 +204,7 @@ function timeLeft() {
 }
 
 function drillHeader(title, tag) {
-  if (drill.leaks) {
+  if (drill.counted) {
     const num = Math.min(drill.answered + 1, drill.total);
     return h('header', { class: 'top-bar' },
       h('button', { class: 'back', onclick: endDrill }, 'End'),
@@ -263,8 +280,10 @@ function trackedSubmit(submit, isLocked) {
 // is dealt again by the grading engine itself, with a word about why.
 const STALE_NOTE = 'That question was out of date, so here it is again. Please answer it once more.';
 
+// An answer the engine can't read for its question (a spot's options differ) is
+// caught the same way: its reply names the question too.
 function staleQuestion(bundle, graded) {
-  if (!graded.outcome || graded.check === bundle.check) return false;
+  if (!(graded.outcome || graded.invalid) || !graded.check || graded.check === bundle.check) return false;
   distrustPrep();
   return true;
 }
@@ -519,7 +538,7 @@ async function commitAnswer(outcome, response, confidence) {
     if (result.ok) state.ok += 1;
     const count = document.querySelector('.top-right .count');
     if (count) {
-      count.textContent = state.leaks
+      count.textContent = state.counted
         ? `${Math.min(result.answered, state.total)} of ${state.total}`
         : `${result.answered} done`;
     }

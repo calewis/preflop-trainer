@@ -128,6 +128,7 @@ pub fn generate(skill: Skill, seed: u64) -> Item {
         Skill::Chain => Question::Chain(gen_chain(seed)),
         Skill::BeatsMe => Question::BeatsMe(gen_beats_me(&mut rng, seed)),
         Skill::ReadPrice => Question::ReadPrice(gen_read_price(&mut rng, seed)),
+        Skill::River => Question::River(crate::river::question_for_seed(seed)),
     };
     Item { skill, seed, question }
 }

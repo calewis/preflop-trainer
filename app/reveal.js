@@ -45,6 +45,7 @@ export function questionView(q) {
     case 'chain': return chainQuestion(q);
     case 'beats_me': return beatsMeQuestion(q);
     case 'read_price': return readPriceQuestion(q);
+    case 'river': return riverQuestion(q);
     default: return h('p', {}, 'Unknown question');
   }
 }
@@ -155,6 +156,18 @@ function tableQuestion(q) {
     prompt(`You are ${q.seat_sentence}. What do you do?`));
 }
 
+// A river spot: who and how deep, the board over your hand, the pot and any bet,
+// then the hand so far in one sentence.
+function riverQuestion(q) {
+  return h('div', { class: 'stack river' },
+    h('p', { class: 'context river-context' }, q.context),
+    labelled('Board', cardRow(q.board, 'board')),
+    hand(q.hero),
+    h('div', { class: 'chips' }, chip('Pot', q.pot), q.bet ? chip('Bet to you', q.bet) : null),
+    h('p', { class: 'context river-line' }, q.line),
+    prompt(q.prompt));
+}
+
 function readPriceQuestion(q) {
   return h('div', { class: 'stack' },
     q.hero ? hand(q.hero) : null,
@@ -243,6 +256,7 @@ function revealBody(r) {
     case 'equity': return equityReveal(r);
     case 'anchor': return anchorReveal(r);
     case 'table': return tableReveal(r);
+    case 'river': return riverReveal(r);
     default: return [];
   }
 }
@@ -373,6 +387,34 @@ function tableReveal(r) {
   ];
 }
 
+// You beat / ties / beats you, as one bar over the range you are up against.
+function splitBar(r) {
+  const part = (cls, pct) => (pct > 0 ? h('span', { class: `split-${cls}`, style: `width:${pct}%` }) : null);
+  return h('div', { class: 'split-bar', role: 'img', 'aria-label': `You beat ${r.beat_pct}%, ${r.tie_pct}% tie, ${r.lose_pct}% beat you` },
+    part('beat', r.beat_pct), part('tie', r.tie_pct), part('lose', r.lose_pct));
+}
+
+function riverReveal(r) {
+  return [
+    h('p', { class: 'reveal-answer' }, 'Best: ', h('strong', {}, r.best)),
+    r.loss ? p(r.loss) : null,
+    r.close_note ? p(r.close_note) : null,
+    r.why.map(line => p(line)),
+    h('div', { class: 'river-split', 'data-river-split': '' },
+      splitBar(r),
+      h('p', { class: 'reveal-line split-text' }, h('span', { class: 'split-beat-text' }, r.beat_line), ' ',
+        h('span', { class: 'split-lose-text' }, r.beaten_line))),
+    r.replies.length ? h('p', { class: 'reveal-line river-reply', 'data-river-reply': '' }, r.replies[0]) : null,
+    more('Every option',
+      h('ul', { class: 'table-options' }, r.options.map(o => h('li', { class: o.is_chosen ? 'chosen' : '' },
+        h('div', { class: 'tl-head' }, h('strong', {}, o.label),
+          o.is_best ? h('span', { class: 'pill good' }, 'Best') : o.accepted ? h('span', { class: 'pill good' }, 'Also fine') : null),
+        h('div', { class: 'hint' }, o.ev)))),
+      r.replies.slice(1).map(line => p(line)),
+      h('p', { class: 'hint' }, r.note)),
+  ];
+}
+
 function boardTypeReveal(r) {
   return [
     answerLine(r.answer),
@@ -414,8 +456,9 @@ function row(label, value) {
 }
 
 export function revealView(outcome) {
-  const verdict = outcome.correct ? 'Correct.' : outcome.close ? 'Close.'
-    : outcome.reveal.too_slow ? 'Too slow.' : 'Not quite.';
+  const verdict = outcome.reveal.headline ? outcome.reveal.headline
+    : outcome.correct ? 'Correct.' : outcome.close ? 'Close.'
+      : outcome.reveal.too_slow ? 'Too slow.' : 'Not quite.';
   const tone = outcome.correct ? 'good' : outcome.close ? 'close' : 'bad';
   return h('div', { class: `reveal ${tone}` },
     h('p', { class: 'verdict' }, verdict, ' ', h('span', { class: 'you' }, `You answered ${outcome.picked}.`)),

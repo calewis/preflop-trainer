@@ -21,6 +21,7 @@ use poker_trainer::progress::{ReliabilityRow, RELIABILITY_MIN_RATINGS};
 use poker_trainer::read_price;
 use poker_trainer::reflection::{Prompt, ReflectionComparison, ReflectionGroup, REFLECTION_MIN_MISSES};
 use poker_trainer::preflop::{action_label, why_line, Action, PreflopReason, Seat, Situation, CARD};
+use poker_trainer::river::{ev_bb_text as river_ev_text, river_bb, RiverGrade, RiverQuestion, RiverVerdict, RIVER_NOTE};
 use poker_trainer::table::{bb_text, ev_bb_text, TableAction, TableActionKind, TableGrade, TableQuestion, TableSeat, TableStreetName, Verdict, ASSUMPTION_NOTE};
 
 use crate::json::{obj, V};
@@ -44,6 +45,7 @@ pub fn skill_title(skill: Skill) -> &'static str {
         Skill::Chain => "Whole hand",
         Skill::BeatsMe => "What beats you?",
         Skill::ReadPrice => "Read the price",
+        Skill::River => "River",
     }
 }
 
@@ -178,7 +180,70 @@ pub fn question(q: &Question) -> V {
             "target_seconds": BOARD_TYPE_TARGET_MS / 1000,
         },
         Question::Table(q) => table_question(q),
+        Question::River(q) => river_question(q),
         Question::Chain(q) => chain_question(q),
+    }
+}
+
+/// A river spot as asked: everything but the grade.
+fn river_question(q: &RiverQuestion) -> V {
+    let spot = q.spot();
+    obj! {
+        "kind": "river",
+        "hero": holding(&q.hand),
+        "board": cards(&q.board),
+        "players": spot.players,
+        "context": spot.context_line(),
+        "pot": format!("{}bb", river_bb(spot.pot_cents)),
+        "bet": spot.bet_text(),
+        "line": capitalized(&spot.line),
+        "prompt": spot.prompt(),
+    }
+}
+
+fn river_reveal(g: &RiverGrade) -> V {
+    let spot = g.spot;
+    let options: Vec<V> = spot
+        .options
+        .iter()
+        .enumerate()
+        .map(|(i, o)| {
+            obj! {
+                "label": o.label.as_str(),
+                "ev": format!("{}bb, {:.1}% of the pot", river_ev_text(o.ev_milli_bb), f64::from(o.ev_pct_tenths) / 10.0),
+                "accepted": spot.accept.contains(&i),
+                "is_best": i == spot.best,
+                "is_chosen": i == g.chosen,
+            }
+        })
+        .collect();
+    let mut replies: Vec<V> = Vec::new();
+    let best_code = spot.best_option().code;
+    replies.extend(spot.reply_line(best_code).map(V::from));
+    if g.chosen != spot.best {
+        replies.extend(spot.reply_line(g.chosen_option().code).map(V::from));
+    }
+    let pct = |milli: u16| (u32::from(milli) + 5) / 10;
+    obj! {
+        "kind": "river",
+        "headline": g.verdict_text(),
+        "either_ok": g.accepted && spot.verdict == RiverVerdict::Either,
+        "verdict": spot.verdict.code(),
+        "best": spot.answer_text(),
+        "chosen": g.chosen_option().label.as_str(),
+        "accepted": g.accepted,
+        "loss": g.loss_text(),
+        // The library's own explanation already says so on its "either" spots.
+        "close_note": g.close_note().filter(|_| !spot.why.first().is_some_and(|w| w.starts_with("Either is fine"))),
+        "why": spot.why.iter().map(|s| V::from(s.as_str())).collect::<Vec<V>>(),
+        "beat_pct": pct(spot.split.beat_milli),
+        "tie_pct": pct(spot.split.tie_milli),
+        "lose_pct": pct(spot.split.lose_milli),
+        "beat_line": spot.beat_line(),
+        "beaten_line": spot.beaten_line(),
+        "replies": replies,
+        "options": options,
+        "note": RIVER_NOTE,
     }
 }
 
@@ -514,6 +579,7 @@ pub fn format(q: &Question) -> V {
         AnswerFormat::Choice(options) => obj! {
             "type": "choice",
             "large": matches!(q, Question::BoardType { .. }),
+            "two": matches!(q, Question::River(_)),
             "options": options.iter().map(option).collect::<Vec<_>>(),
         },
         AnswerFormat::MultiSelect { options, none_code, none_label } => obj! {
@@ -756,6 +822,7 @@ fn reveal(item: &Item, o: &Outcome, response_ms: u32) -> V {
             }
         }
         Reveal::Table(graded) => table_reveal(graded),
+        Reveal::River(graded) => river_reveal(graded),
         Reveal::BeatsMe(reveal) => beats_me_reveal(reveal),
         Reveal::ReadPrice(r) => obj! {
             "kind": "read_price",

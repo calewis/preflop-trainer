@@ -50,6 +50,7 @@ pub fn family_of(item: &Item) -> Option<String> {
         Question::Spot(q) => Some(spot_mw_family(q)),
         Question::Equity(q) => equity_analysis(q, item.seed).map(|a| equity_family(q, a.truth_pct)),
         Question::Table(q) => Some(table_family(q)),
+        Question::River(q) => Some(q.spot().family_tag()),
         Question::BeatsMe(q) => Some(beats_me_family(q)),
         Question::ReadPrice(q) => Some(read_price_family(q)),
         Question::Anchor { .. } | Question::BoardType { .. } | Question::Chain(_) => None,

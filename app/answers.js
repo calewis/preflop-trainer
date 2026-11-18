@@ -24,7 +24,7 @@ function keyHint(key) {
 
 function choiceControls(format, submit) {
   const columns = format.large ? 'choice-grid large'
-    : format.options.length > 4 ? 'choice-grid two' : 'choice-grid';
+    : format.options.length > 4 || (format.two && format.options.length > 2) ? 'choice-grid two' : 'choice-grid';
   const buttons = format.options.map((option, i) =>
     h('button', { class: 'btn choice', onclick: () => submit(option.code) },
       CHOICE_KEYS[i] ? keyHint(CHOICE_KEYS[i]) : null, option.label));

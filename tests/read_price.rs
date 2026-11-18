@@ -119,7 +119,8 @@ fn existing_skills_keep_their_positions_and_the_generator_version() {
     assert!(!poker_trainer::item::generator_changed(Skill::ReadPrice, 3, GEN_VERSION), "read_price items are unchanged since version 3");
     assert_eq!(Skill::BeatsMe as u64, 15, "existing positions seed their generators");
     assert_eq!(Skill::ReadPrice as u64, 16);
-    assert_eq!(Skill::ALL.last(), Some(&Skill::ReadPrice));
+    assert_eq!(Skill::River as u64, 17, "river came after read_price");
+    assert_eq!(Skill::ALL.last(), Some(&Skill::River));
 }
 
 #[test]

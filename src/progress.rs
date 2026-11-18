@@ -118,6 +118,9 @@ pub fn pass_mark(skill: Skill) -> PassMark {
         Skill::Chain => PASS_CHAIN,
         Skill::BeatsMe => PASS_BEATS_ME,
         Skill::ReadPrice => PASS_READ_PRICE,
+        // River rows have their own mode and count toward no pass mark yet; this mark
+        // is the table spots' and only says what one would look like.
+        Skill::River => PASS_TABLE,
     }
 }
 
@@ -135,7 +138,7 @@ pub const fn baseline_step(skill: Skill) -> Option<usize> {
         Skill::Nuts | Skill::Possible | Skill::Made | Skill::Beats | Skill::BoardType | Skill::BeatsMe => Some(1),
         Skill::Outs | Skill::Price | Skill::Hit | Skill::Equity | Skill::Anchor => Some(2),
         Skill::Spot | Skill::SpotMw | Skill::Chain => Some(3),
-        Skill::Preflop | Skill::ReadPrice | Skill::Table => None,
+        Skill::Preflop | Skill::ReadPrice | Skill::Table | Skill::River => None,
     }
 }
 

@@ -33,6 +33,7 @@ use poker_trainer::progress::{
 use poker_trainer::reflection::{reflection_comparison, reflection_form, reflection_row, reflection_state, ReflectState};
 use poker_trainer::ladder::{MISS_POINTS, RIGHT_POINTS, RIGHT_WRONG_GATE};
 use poker_trainer::read_price::read_price_status;
+use poker_trainer::river::{self, RiverSession, DEFAULT_RIVER_ITEMS, RIVER_SPOT_COUNT};
 use poker_trainer::rng::Rng;
 use poker_trainer::table;
 use poker_trainer::schedule::{
@@ -41,6 +42,9 @@ use poker_trainer::schedule::{
 
 use crate::json::{obj, V};
 use crate::present;
+
+/// The `session_open` pick for the River drill.
+const RIVER_PICK: &str = "river";
 
 thread_local! {
     static ENGINE: RefCell<Engine> = RefCell::new(Engine::default());
@@ -85,6 +89,7 @@ struct Engine {
     session: Option<LiveSession>,
     leak_session: Option<LiveLeakSession>,
     leaks: Option<LeakLibrary>,
+    river_session: Option<LiveRiverSession>,
     baseline: Option<LiveBaseline>,
 }
 
@@ -98,6 +103,12 @@ struct LiveSession {
 
 struct LiveLeakSession {
     real: LeakSession,
+    current: Option<Planned>,
+    done: Vec<(Planned, bool)>,
+}
+
+struct LiveRiverSession {
+    real: RiverSession,
     current: Option<Planned>,
     done: Vec<(Planned, bool)>,
 }
@@ -148,7 +159,7 @@ fn question_check_of(question: &V) -> String {
 fn bundle(item: &Item, origin: Option<Origin>, make_template: &dyn Fn(&poker_trainer::grade::Outcome) -> Attempt) -> V {
     let format = poker_trainer::answer::answer_format(&item.question);
     let mut graded: Vec<(String, V)> = Vec::new();
-    if !matches!(item.skill, Skill::BoardType | Skill::Table) {
+    if !matches!(item.skill, Skill::BoardType | Skill::Table | Skill::River) {
         if let poker_trainer::answer::AnswerFormat::Choice(options) = &format {
             let codes: Vec<&str> = options.iter().map(|o| o.code).collect();
             for (option, result) in options.iter().zip(grade_choices(item, &codes)) {
@@ -386,6 +397,7 @@ impl Engine {
             "groups": groups_json(),
             "checkup": checkup_offer_json(mixed_checkup_offer(&self.attempts, now_ms)),
             "leaks": leaks,
+            "river": obj! { "spots": RIVER_SPOT_COUNT, "session_items": DEFAULT_RIVER_ITEMS },
         }
     }
 
@@ -525,6 +537,18 @@ impl Engine {
         // `leaks` deals every loaded leak; `leaks:preflop` only the preflop ones
         // (the "Preflop mistakes" drill).
         let pick = fields.get(3).copied();
+        // `river` deals the River drill: a fixed number of library spots.
+        if pick == Some(RIVER_PICK) {
+            let real = RiverSession::new(&self.attempts, seed, Some(DEFAULT_RIVER_ITEMS));
+            let total = real.total_items();
+            let mut preview = real.clone();
+            let first = preview.try_next_item().map(planned_json);
+            self.session = None;
+            self.leak_session = None;
+            self.river_session = Some(LiveRiverSession { real, current: None, done: Vec::new() });
+            return Ok(obj! { "first": first, "total": total, "river": true });
+        }
+        self.river_session = None;
         if pick == Some("leaks") || pick == Some("leaks:preflop") {
             let lib = self.leaks.clone().ok_or("no leak file loaded")?;
             let mut real = LeakSession::new(lib, &self.attempts, seed, Some(DEFAULT_LEAK_ITEMS));
@@ -552,6 +576,10 @@ impl Engine {
             }
             list => {
                 let requested: Vec<Skill> = list.split(',').map(skill_from).collect::<Result<_, _>>()?;
+                // River spots are dealt only by their own drill, so their rows keep their mode.
+                if requested.contains(&Skill::River) {
+                    return Err("river is dealt only by the River drill".to_string());
+                }
                 Session::new(drill_skills(&requested), &self.attempts, now_ms, seed)
             }
         };
@@ -573,7 +601,7 @@ impl Engine {
 
     fn session_start(&mut self, fields: &[&str]) -> Reply {
         let minutes = parse_u64(arg(fields, 1)?, "minutes")?;
-        if self.leak_session.is_some() {
+        if self.leak_session.is_some() || self.river_session.is_some() {
             return Ok(obj! { "minutes": minutes as u32 });
         }
         let live = self.session.as_mut().ok_or("no session is open")?;
@@ -582,6 +610,17 @@ impl Engine {
     }
 
     fn session_next(&mut self, fields: &[&str]) -> Reply {
+        if let Some(live) = self.river_session.as_mut() {
+            let Some(planned) = live.real.try_next_item() else {
+                return Ok(obj! { "finished": true, "out_of_items": false });
+            };
+            live.current = Some(planned);
+            return Ok(obj! {
+                "planned": planned_json(planned),
+                "answered": live.done.len(),
+                "total": live.real.total_items(),
+            });
+        }
         if let Some(live) = self.leak_session.as_mut() {
             let Some(planned) = live.real.try_next_item() else {
                 return Ok(obj! { "finished": true, "out_of_items": false });
@@ -609,6 +648,14 @@ impl Engine {
     /// The item that would follow the current one if it were answered `ok`.
     fn session_peek(&mut self, fields: &[&str]) -> Reply {
         let ok = arg(fields, 1)? == "1";
+        if let Some(live) = self.river_session.as_ref() {
+            let Some(current) = live.current else {
+                return Ok(obj! { "planned": V::Null });
+            };
+            let mut copy = live.real.clone();
+            copy.record(current, ok);
+            return Ok(obj! { "planned": copy.try_next_item().map(planned_json) });
+        }
         if let Some(live) = self.leak_session.as_ref() {
             let Some(current) = live.current else {
                 return Ok(obj! { "planned": V::Null });
@@ -633,6 +680,22 @@ impl Engine {
     }
 
     fn session_summary(&self) -> Reply {
+        if let Some(live) = self.river_session.as_ref() {
+            let mut rows: Vec<V> = Vec::new();
+            for (players, title) in [(2u8, "Heads-up"), (3, "Three-way")] {
+                let mine: Vec<bool> =
+                    live.done.iter().filter(|(p, _)| river::spot_of_seed(p.seed).players == players).map(|&(_, ok)| ok).collect();
+                if !mine.is_empty() {
+                    rows.push(obj! { "title": title, "answered": mine.len(), "ok": mine.iter().filter(|&&ok| ok).count() });
+                }
+            }
+            return Ok(obj! {
+                "answered": live.done.len(),
+                "ok": live.done.iter().filter(|(_, ok)| *ok).count(),
+                "by_skill": rows,
+                "river": true,
+            });
+        }
         if let Some(live) = self.leak_session.as_ref() {
             let mut rows: Vec<(Skill, usize, usize)> = Vec::new();
             let mut ok_total = 0usize;
@@ -684,6 +747,18 @@ impl Engine {
         let seed = parse_u64(arg(fields, 2)?, "seed")?;
         let raw = arg(fields, 3)?;
         let response = response_field(fields, 4)?;
+        if skill == Skill::River {
+            // Graded from the seed alone, so a late answer still grades the question shown.
+            let item = river::item_for_seed(seed);
+            return match grade_timed(&item, raw, response) {
+                Ok(outcome) => {
+                    let template = Attempt::from_river(seed, &outcome, 0, 0);
+                    let out = present::outcome(&item, &outcome, format_attempt(&template), response, V::Null);
+                    Ok(obj! { "outcome": out, "check": question_check(&item) })
+                }
+                Err(invalid) => Ok(obj! { "invalid": invalid.0, "check": question_check(&item) }),
+            };
+        }
         if let Some(live) = self.leak_session.as_ref() {
             let entry = live.real.entry_for_seed(seed).ok_or("unknown leak id")?;
             let item = entry.item_for_seed(seed);
@@ -717,7 +792,7 @@ impl Engine {
                 let template = drill_template(planned, &outcome);
                 Ok(obj! { "outcome": graded_outcome(&item, &outcome, Some(origin), template, response), "check": question_check(&item) })
             }
-            Err(invalid) => Ok(obj! { "invalid": invalid.0 }),
+            Err(invalid) => Ok(obj! { "invalid": invalid.0, "check": question_check(&item) }),
         }
     }
 
@@ -742,6 +817,25 @@ impl Engine {
         let now = parse_u64(arg(fields, 2)?, "now")?;
         let response = parse_u64(arg(fields, 3)?, "response")?.min(u64::from(u32::MAX)) as u32;
         let mut attempt = Self::attempt_from_template(arg(fields, 1)?, now, response)?;
+        if attempt.skill == Skill::River {
+            // Whatever session is open, a River answer is logged as one, so it never
+            // counts toward the other drills' marks, reviews or checkups.
+            attempt.mode = Mode::River;
+            attempt.gen_version = river::RIVER_GEN_VERSION;
+            let ok = attempt.ok();
+            let line = format_attempt(&attempt);
+            let item = attempt.item.clone();
+            self.attempts.push(attempt);
+            let Some(live) = self.river_session.as_mut() else {
+                return Ok(obj! { "line": line, "ok": ok, "answered": 0usize });
+            };
+            if live.current.is_some_and(|p| item == ItemRef::Seed(p.seed)) {
+                let planned = live.current.take().ok_or("no item is waiting for an answer")?;
+                live.real.record(planned, ok);
+                live.done.push((planned, ok));
+            }
+            return Ok(obj! { "line": line, "ok": ok, "answered": live.done.len() });
+        }
         if let Some(live) = self.leak_session.as_mut() {
             attempt.mode = Mode::Leak;
             let expected = live.current.is_some_and(|p| p.skill == attempt.skill && attempt.item == ItemRef::Seed(p.seed));
@@ -2196,5 +2290,60 @@ LEAK|1|price|leak:price:call_below:river|3500|1|2026-01-15|2026-01-15a|synth-02|
 
         assert!(dispatch("load_leaks\x1f").contains("\"loaded\":false"));
         assert!(dispatch("home\x1f1000").contains("\"leaks\":null"));
+    }
+
+    #[test]
+    fn river_drill_deals_grades_the_question_shown_and_logs_its_own_mode() {
+        load("");
+        assert!(dispatch("home\x1f1000").contains("\"river\":{\"spots\":1328,\"session_items\":20}"));
+        // The generic drills never deal river spots.
+        assert!(dispatch("session_open\x1f7\x1f1000\x1friver,outs").contains("\"error\""));
+        let opened = dispatch("session_open\x1f99\x1f1000\x1friver");
+        assert!(opened.contains("\"total\":20") && opened.contains("\"river\":true"), "{opened}");
+        let mut right = 0;
+        for step in 0..20u64 {
+            let next = dispatch("session_next\x1f0");
+            assert!(next.contains("\"skill\":\"river\""), "{next}");
+            let seed = field(&next, "seed");
+            let origin = field(&next, "origin");
+            let prep = dispatch(&format!("prepare\x1friver\x1f{seed}\x1f{origin}"));
+            // Nothing graded ships before the answer: no EV, no best, no explanation.
+            assert!(prep.contains("\"graded\":{}"), "{prep}");
+            for spoiler in ["accept", "best", "\"why\"", "beat", "ev"] {
+                assert!(!prep.contains(spoiler), "the bundle gives away {spoiler}: {prep}");
+            }
+            let codes: Vec<String> = prep.split("\"code\":\"").skip(1).map(|s| s.split('"').next().unwrap().to_string()).collect();
+            assert!(codes.len() >= 2, "{prep}");
+            let answer = &codes[step as usize % codes.len()];
+            // An answer the spot has no button for names its question too, so a page
+            // showing another spot's buttons can tell.
+            let invalid = dispatch(&format!("grade\x1friver\x1f{seed}\x1fbet999\x1f4000"));
+            assert!(invalid.contains("\"invalid\"") && check_of(&invalid) == check_of(&prep), "{invalid}");
+            let graded = dispatch(&format!("grade\x1friver\x1f{seed}\x1f{answer}\x1f4000"));
+            // The grade names the question shown, and a grade of another seed does not.
+            assert_eq!(check_of(&prep), check_of(&graded), "{graded}");
+            let other: u64 = seed.parse::<u64>().unwrap() ^ 4;
+            let elsewhere = dispatch(&format!("grade\x1friver\x1f{other}\x1f{answer}\x1f4000"));
+            if elsewhere.contains("\"outcome\"") {
+                assert_ne!(check_of(&prep), check_of(&elsewhere));
+            }
+            assert!(graded.contains("\"kind\":\"river\"") && graded.contains("\"headline\":"), "{graded}");
+            let committed = dispatch(&format!("commit\x1f{}\x1f{}\x1f4000", template(&graded), 5000 + step));
+            assert!(committed.contains(&format!("\"answered\":{}", step + 1)), "{committed}");
+            assert!(committed.contains("\\triver\\t"), "{committed}");
+            right += usize::from(committed.contains("\"ok\":true"));
+        }
+        assert!(dispatch("session_next\x1f0").contains("\"finished\":true"));
+        let summary = dispatch("session_summary");
+        assert!(summary.contains("\"answered\":20") && summary.contains(&format!("\"ok\":{right},")), "{summary}");
+        // Another drill closes the River session; a late River answer still logs as river.
+        dispatch("session_open\x1f5\x1f1000\x1fouts");
+        let seed = poker_trainer::river::seed_for(3, 0);
+        let graded = dispatch(&format!("grade\x1friver\x1f{seed}\x1fcheck\x1f100"));
+        if graded.contains("\"outcome\"") {
+            let committed = dispatch(&format!("commit\x1f{}\x1f9000\x1f100", template(&graded)));
+            assert!(committed.contains("\\triver\\t"), "{committed}");
+        }
+        assert!(!dispatch("progress\x1f10000").contains("\"River\""), "River rows showed up in Progress");
     }
 }

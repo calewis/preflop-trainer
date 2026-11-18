@@ -5,6 +5,7 @@ use crate::cards::{Card, Holding};
 use crate::classes::{OppClass, OppMix, PlayerType};
 use crate::preflop::{Seat, Situation};
 use crate::read_price::DrawKind;
+use crate::river::RiverQuestion;
 use crate::table::TableQuestion;
 
 /// Bump whenever a generator's output for a given seed changes, and add the
@@ -126,10 +127,11 @@ pub enum Skill {
     Chain,
     BeatsMe,
     ReadPrice,
+    River,
 }
 
 impl Skill {
-    pub const ALL: [Skill; 17] = [
+    pub const ALL: [Skill; 18] = [
         Skill::Preflop,
         Skill::Nuts,
         Skill::Possible,
@@ -147,6 +149,7 @@ impl Skill {
         Skill::Chain,
         Skill::BeatsMe,
         Skill::ReadPrice,
+        Skill::River,
     ];
 
     pub fn name(self) -> &'static str {
@@ -168,6 +171,7 @@ impl Skill {
             Skill::Chain => "chain",
             Skill::BeatsMe => "beats_me",
             Skill::ReadPrice => "read_price",
+            Skill::River => "river",
         }
     }
 
@@ -524,6 +528,8 @@ pub enum Question {
     BeatsMe(BeatsMeQuestion),
     /// A rung of the "Read the price" ladder.
     ReadPrice(ReadPriceQuestion),
+    /// A river spot from the solver-graded library, with its seed's suit permutation applied.
+    River(RiverQuestion),
 }
 
 impl Question {
@@ -577,6 +583,7 @@ impl Question {
                 ..q.clone()
             }),
             Question::Table(q) => Question::Table(q.with_suit_perm(perm)),
+            Question::River(q) => Question::River(q.with_suit_perm(perm)),
             Question::BeatsMe(q) => Question::BeatsMe(BeatsMeQuestion {
                 hero: holding(&q.hero),
                 board: board(&q.board),

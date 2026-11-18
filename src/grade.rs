@@ -16,6 +16,7 @@ use crate::item::{
 use crate::money;
 use crate::preflop::{preflop_answer, Action, PreflopReason, Seat, Situation};
 use crate::read_price::{price_points, question_band, question_call, reveal_for, smallest_mistake, PriceBand, PriceCall, ReadPriceReveal};
+use crate::river::{self, RiverGrade, RiverQuestion};
 use crate::table::{self, TableGrade, TableQuestion};
 
 /// EV-loss bands for `spot` and `spot_mw`, as a percentage of P. Starting guesses.
@@ -320,6 +321,7 @@ pub enum Reveal {
         too_slow: bool,
     },
     Table(TableGrade),
+    River(RiverGrade),
     BeatsMe(BeatsMeReveal),
     ReadPrice(ReadPriceReveal),
 }
@@ -397,6 +399,7 @@ fn grade_item(item: &Item, raw: &str) -> Result<Outcome, InvalidAnswer> {
         Question::Chain(q) => grade_chain(q, item.seed, raw),
         Question::BeatsMe(q) => grade_beats_me(q, raw),
         Question::ReadPrice(q) => grade_read_price(q, raw),
+        Question::River(q) => grade_river(q, raw),
     }
 }
 
@@ -1078,6 +1081,20 @@ fn grade_table(q: &TableQuestion, raw: &str) -> Result<Outcome, InvalidAnswer> {
     let graded = table::grade_option(spot, chosen);
     let (correct, loss_pct) = (graded.correct, graded.loss_pct);
     let mut result = outcome(correct, code, Reveal::Table(graded));
+    result.ev_loss_pct = Some(loss_pct);
+    Ok(result)
+}
+
+/// Right when the option is one the library accepts: the best play at any accepted
+/// size, or on an "either is fine" spot any option within the margin.
+fn grade_river(q: &RiverQuestion, raw: &str) -> Result<Outcome, InvalidAnswer> {
+    let code = normalize(raw);
+    let graded = river::grade_code(q, &code).ok_or_else(|| {
+        let codes: Vec<&str> = q.options.iter().map(|o| o.code).collect();
+        InvalidAnswer(format!("Answer one of {}.", codes.join(", ")))
+    })?;
+    let loss_pct = graded.loss_pct();
+    let mut result = outcome(graded.accepted, code, Reveal::River(graded));
     result.ev_loss_pct = Some(loss_pct);
     Ok(result)
 }

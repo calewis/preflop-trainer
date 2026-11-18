@@ -1,5 +1,5 @@
 """Full browser test suite: python3 web/test/run.py [sections...]
-Sections: samebuild phonefit hiddendrills native libgroups groups libresearch libreadprice readprice libcli research researchshots (on request only) libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card preflopspots libpreflop offline nostorage legacy screens
+Sections: river libriver samebuild phonefit hiddendrills native libgroups groups libresearch libreadprice readprice libcli research researchshots (on request only) libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card preflopspots libpreflop offline nostorage legacy screens
 Results go to target/webtest/results.json and screenshots to target/webtest/screens/."""
 import itertools, json, os, pathlib, random, re, shutil, subprocess, sys, time
 
@@ -1793,8 +1793,8 @@ def run_groups():
         inspector = Inspector(page, (390, 844), "light", False)
         home = page.eval("document.body.innerText")
         codes = page.eval("[...document.querySelectorAll('[data-group]')].map(b => b.dataset.group)")
-        # The seven groups, then your own Preflop mistakes.
-        check(codes == list(GROUP_SKILLS) + ["mistakes"], f"group picker on a first visit: {codes}")
+        # The seven groups, then River and your own Preflop mistakes.
+        check(codes == list(GROUP_SKILLS) + ["river", "mistakes"], f"group picker on a first visit: {codes}")
         check("Step " not in home and "Locked" not in home, f"home still shows steps: {home[:300]}")
         check("preflop 20%" in home and "spots 10%" in home, f"the mix is not described: {home[:300]}")
         check(not page.eval("!!document.querySelector('[data-checkup-offers]')"), "a checkup was offered on day one")
@@ -1939,6 +1939,14 @@ def run_lib_table():
     if done.returncode != 0:
         print(done.stderr[-1500:])
     check(done.returncode == 0, f"library table tests failed: {done.stdout[-400:]}")
+
+
+def run_lib_river():
+    done = subprocess.run(["cargo", "test", "--release", "--test", "river"], capture_output=True, text=True, cwd=ROOT)
+    print(done.stdout[-4000:])
+    if done.returncode != 0:
+        print(done.stderr[-1500:])
+    check(done.returncode == 0, f"library river tests failed: {done.stdout[-400:]}")
 
 
 def run_none_left():
@@ -3391,6 +3399,7 @@ FIT_JS = """(() => {
 
 # Drills whose question and feedback must fit a 390 x 844 screen without scrolling.
 # Table spots run longer; there Next follows the feedback instead of covering it.
+# River questions must fit as well; River feedback usually does (see run_river).
 FIT_SKILLS = ["preflop", "nuts", "possible", "made", "beats_me", "read_price", "outs", "hit", "board_type", "equity", "anchor", "chain"]
 
 
@@ -3419,11 +3428,14 @@ def run_phone_fit():
             check_fit(page, f"{width} home", width, False)
             # One session through every drill: the width set by a long screen must
             # not carry over to the next (on iOS it would stay).
-            for skill in FIT_SKILLS + ["table"]:
+            for skill in FIT_SKILLS + ["table", "river"]:
                 page.eval("location.hash = '#home'")
                 page.wait("!!document.querySelector('.app-title')", 20)
-                open_limited_drill(page, skill)
-                for i in range(4 if skill in ("outs", "chain", "beats_me", "table") else 2):
+                if skill == "river":
+                    start_river(page)  # its own entry in the picker
+                else:
+                    open_limited_drill(page, skill)
+                for i in range({"outs": 4, "chain": 4, "beats_me": 4, "table": 4, "river": 6}.get(skill, 2)):
                     page.wait(READY, 60)
                     current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
                     stage = current["bundle"]["question"].get("stage", "")
@@ -3433,7 +3445,9 @@ def run_phone_fit():
                     type_answer(page, current, kind, answer)
                     page.wait("!!document.querySelector('.reveal')", 30)
                     time.sleep(0.1)
-                    info = check_fit(page, f"{where} feedback", width, fits and skill != "table")
+                    # River feedback should fit too, but a long explanation may run a little
+                    # past the screen; there Next follows it (checked by check_fit).
+                    info = check_fit(page, f"{where} feedback", width, fits and skill not in ("table", "river"))
                     tall[where] = info["height"]
                     # Opening every "Show all" keeps the width and the bar clear.
                     page.eval("document.querySelectorAll('.reveal details').forEach(d => { d.open = true; })")
@@ -3611,6 +3625,208 @@ def run_leaks(leak_file=None, saved_log=None):
         browser.close()
         srv.shutdown()
 
+# --- the River drill ------------------------------------------------------------------
+RIVER_CODES = re.compile(r"\b(bluff_catch|thin_value|air_vs_bet|strong_vs_bet|bet33|bet75|bet150|allin|checked_to|top_pair_good|top_pair_weak|pp_below_top|low_pair|second_pair|H\d{4}|T\d{4})\b")
+PHONE_SHOTS = pathlib.Path("/tmp/phone-shots")
+
+
+def river_history():
+    """River rows as a player who has used the drill has them: right and wrong answers,
+    including misses that should come back as reviews."""
+    lines = []
+    for i in range(12):
+        ok = i % 3 != 0
+        seed = 1000 + i  # spot index i... in the low bits
+        lines.append(f"{1_700_000_000_000 + i * 60_000}\triver\t\triver\t{seed}\t3001\t{ok:d}\t0\t{'' if ok else '12.5'}\t5000\t{'call' if ok else 'fold'}"
+                     + "\t" * 10 + f"river:H{(1000 + i) % 1328 + 1:04d}" + "\t" * 3)
+    return "\n".join(lines) + "\n"
+
+
+def start_river(page):
+    page.wait("!!document.querySelector('[data-group=river]')", 20)
+    page.eval("document.querySelector('[data-group=river]').click()")
+    page.wait(READY, 60)
+
+
+def river_walk(page, inspector, questions, where, shots=False, fit_widths=(390,)):
+    """Answers `questions` River questions, alternately right and wrong, starting new
+    sessions as each ends. Returns how many feedback screens needed scrolling."""
+    rows_before = len(rows_of(page))
+    tall = []
+    shot_right = shot_wrong = not shots
+    answered = 0
+    in_session = 0
+    reviews = 0
+    either_seen = 0
+    while answered < questions:
+        if page.eval("!!document.querySelector('.big-score')"):
+            summary = page.eval("document.body.innerText")
+            check(" of 20 right" in summary, f"{where}: summary {summary[:200]}")
+            check_fit(page, f"{where} summary", 390, False)
+            page.eval("location.hash = '#home'")
+            in_session = 0
+            start_river(page)
+        page.wait(READY, 60)
+        current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+        bundle = current["bundle"]
+        q = bundle["question"]
+        check(bundle["skill"] == "river" and q["kind"] == "river", f"{where} {answered}: dealt {bundle['skill']}")
+        check(not bundle["graded"], f"{where} {answered}: shipped graded answers")
+        pre = json.dumps(bundle)
+        check(not any(k in pre for k in ('"accept', '"why"', '"best"', '"ev"')), f"{where} {answered}: the bundle gives the answer away")
+        title = page.eval("document.querySelector('.top-title').textContent")
+        counter = page.eval("document.querySelector('.top-bar .count').textContent")
+        check(title.startswith("River"), f"{where}: title {title}")
+        check(counter == f"{in_session + 1} of 20", f"{where} {answered}: counter {counter}")
+        reviews += current["planned"]["origin"] == "due"
+        text = inspector.text_check(f"{where} question")
+        check(not RIVER_CODES.findall(text), f"{where} {answered}: internal codes {RIVER_CODES.findall(text)[:3]}")
+        check(q["line"] in text and q["pot"] in text and q["context"] in text, f"{where} {answered}: question text missing")
+        info = check_fit(page, f"{where} {answered} question", 390, True)
+        if not shot_right or not shot_wrong:
+            if answered == 0:
+                PHONE_SHOTS.mkdir(parents=True, exist_ok=True)
+                page.screenshot(str(PHONE_SHOTS / "river-question.png"))
+        want_ok = answered % 2 == 0
+        if not shot_wrong and answered > 0:
+            want_ok = False
+        page.eval("__grades.length = 0")
+        kind, answer = pick_answer(page, current, want_ok)
+        type_answer(page, current, kind, answer)
+        page.wait("!!document.querySelector('.reveal')", 30)
+        time.sleep(0.1)
+        check_grade_matches(page, bundle, f"{where} {answered}")
+        reveal = page.eval("document.querySelector('.reveal').innerText")
+        outcome = json.loads(page.eval("JSON.stringify(__grades.length ? __grades[__grades.length - 1].r.outcome : null)"))
+        check(outcome is not None, f"{where} {answered}: no grade reply")
+        r = outcome["reveal"]
+        check("Best:" in reveal and r["beat_line"] in reveal, f"{where} {answered}: feedback {reveal[:300]}")
+        check(not RIVER_CODES.findall(reveal), f"{where} {answered}: internal codes in feedback {RIVER_CODES.findall(reveal)[:3]}")
+        check(page.eval("!!document.querySelector('.reveal .split-bar')"), f"{where} {answered}: no split bar")
+        if outcome["ok"]:
+            check("loses" not in reveal.split("Every option")[0], f"{where} {answered}: a right answer was taught as a loss")
+            if r["verdict"] == "either":
+                either_seen += 1
+                check(reveal.startswith("Either is fine.") and "about the same" in reveal, f"{where} {answered}: either feedback {reveal[:200]}")
+            else:
+                check(reveal.startswith("Right."), f"{where} {answered}: {reveal[:80]}")
+        else:
+            check(reveal.startswith("Not best.") and "loses" in reveal and "% of the pot" in reveal, f"{where} {answered}: wrong feedback {reveal[:300]}")
+        info = check_fit(page, f"{where} {answered} feedback", 390, False)
+        if info["height"] > info["vh"]:
+            tall.append(info["height"])
+        if not shot_right and outcome["ok"] and r["verdict"] == "clear":
+            page.screenshot(str(PHONE_SHOTS / "river-right.png"))
+            shot_right = True
+        if not shot_wrong and not outcome["ok"]:
+            page.screenshot(str(PHONE_SHOTS / "river-wrong.png"))
+            shot_wrong = True
+        page.eval("document.querySelectorAll('.reveal details').forEach(d => { d.open = true; })")
+        time.sleep(0.05)
+        check_fit(page, f"{where} {answered} feedback opened", 390, False)
+        answered += 1
+        in_session += 1
+        wait_rows(page, rows_before + answered)
+        click(page, ".action-bar .btn")
+        page.wait("!document.querySelector('.reveal')", 30)
+        page.wait(READY + " || !!document.querySelector('.big-score')", 60)
+    rows = rows_of(page)[rows_before:]
+    check(len(rows) == questions, f"{where}: {len(rows)} rows for {questions} answers")
+    check(all(row[1] == "river" and row[3] == "river" and row[5] == "3001" for row in rows), f"{where}: rows {rows[:2]}")
+    check(all(row[20].startswith("river:") for row in rows), f"{where}: no spot in the family column: {rows[:1]}")
+    return tall, reviews, either_seen
+
+
+def run_river():
+    """River: 30 questions on a fresh profile and on one with saved data; the
+    question and feedback fit a phone, a grade for another question is never
+    shown or saved, and River answers stay out of Progress and the checkups."""
+    port = 8993 + PORT_SHIFT
+    srv = server.start(port)
+    browser = Browser("river")
+    try:
+        page = browser.page
+        boot_app(page, port, viewport=(390, 844, True))
+        page.eval("localStorage.clear()")
+        boot_app(page, port, viewport=(390, 844, True))
+        inspector = Inspector(page, (390, 844), "light", False)
+        check(page.eval("[...document.querySelectorAll('[data-group]')].some(b => b.textContent === 'River')"), "no River entry in the picker")
+        start_river(page)
+        page.eval(GRADE_HOOK)
+        tall, _, either = river_walk(page, inspector, 30, "fresh", shots=True)
+        print(f"river fresh: {len(tall)} of 30 feedback screens scrolled {sorted(tall)[-3:]}; {either} either spots")
+        check(len(tall) <= 6, f"river feedback ran past a 390x844 screen {len(tall)} times in 30")
+        page.eval("document.querySelector('.top-bar button.back').click()")
+        page.wait("!!document.querySelector('.big-score')", 20)
+        # Nothing about River in Progress, and no checkup offered on River answers alone.
+        page.eval("location.hash = '#progress'")
+        time.sleep(0.8)
+        check("River" not in page.eval("document.body.innerText"), "River answers showed up in Progress")
+        home = page.eval("__trainer.engine.call('home', Date.now() + 90 * 86400000)")
+        check(home.get("checkup") is None, f"River answers offered a checkup: {home.get('checkup')}")
+
+        # A profile with saved data: other drills' history and earlier River misses.
+        log = synthetic_log().rstrip("\n") + "\n" + river_history()
+        seed_log(page, port, log)
+        rows_before = len(rows_of(page))
+        start_river(page)
+        page.eval(GRADE_HOOK)
+        tall, reviews, _ = river_walk(page, inspector, 30, "saved")
+        print(f"river saved: {len(tall)} of 30 feedback screens scrolled; {reviews} reviews")
+        check(len(tall) <= 6, f"river feedback ran past a 390x844 screen {len(tall)} times in 30")
+        check(reviews >= 2, f"only {reviews} earlier misses came back")
+        check(len(rows_of(page)) == rows_before + 30, "saved profile rows")
+        check(not browser.errors, f"river browser errors: {browser.errors[:5]}")
+    finally:
+        browser.close()
+        srv.shutdown()
+
+    # A prep worker that deals the wrong spot: the grade is refused, nothing is saved,
+    # and the spot is dealt again by the engine.
+    port = 8994 + PORT_SHIFT
+    srv = server.start(port)
+    browser = Browser("rivertamper")
+    try:
+        page = browser.page
+        page.send("Page.addScriptToEvaluateOnNewDocument", {"source": TAMPER_PREP})
+        # Until the wrong spot shows a button the real one lacks (check vs fold, say):
+        # that answer can't even be read for the real spot, and must still be caught.
+        for attempt in range(12):
+            boot_app(page, port)
+            page.eval(GRADE_HOOK)
+            rows_before = len(rows_of(page))
+            page.eval("window.__tamper = 1000")
+            start_river(page)
+            current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+            stale = current["bundle"]
+            real = page.eval(f"__trainer.engine.call('prepare', 'river', {json.dumps(current['planned']['seed'])}, 'new')")
+            real_codes = {o["code"] for o in real["format"]["options"]}
+            unreadable = [o["code"] for o in stale["format"]["options"] if o["code"] not in real_codes]
+            if unreadable:
+                break
+        check(unreadable, "river: never dealt a wrong spot with other buttons")
+        check(stale["seed"] != current["planned"]["seed"], "river: the tampered spot was not dealt")
+        page.eval("__grades.length = 0")
+        type_answer(page, current, "choice", (unreadable or [stale["format"]["options"][0]["code"]])[0])
+        must_see(page, "document.body.innerText.includes('out of date')", 30, "river: a spot out of date was not dealt again")
+        page.wait(READY, 30)
+        check(not page.eval("!!document.querySelector('.reveal')"), "river: a reveal about another spot was shown")
+        check(len(rows_of(page)) == rows_before, "river: the answer to the wrong spot was saved")
+        fresh = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+        check(fresh["bundle"]["seed"] == fresh["planned"]["seed"], "river: the spot was not dealt again")
+        check(fresh["bundle"]["check"] != stale["check"], "river: the same wrong spot came back")
+        page.eval("__grades.length = 0")
+        kind, answer = pick_answer(page, fresh, False)
+        type_answer(page, fresh, kind, answer)
+        page.wait("!!document.querySelector('.reveal')", 30)
+        check_grade_matches(page, fresh["bundle"], "river dealt again")
+        wait_rows(page, rows_before + 1)
+        check(not browser.errors, f"river tamper errors: {browser.errors[:5]}")
+        print("river ok")
+    finally:
+        browser.close()
+        srv.shutdown()
+
 SECTIONS = {
     "native": run_native, "wasmclean": run_wasm_clean, "doubletap": run_doubletap, "twotabs": run_twotabs,
     "libresearch": run_lib_research, "libcli": run_lib_cli, "libreadprice": run_lib_read_price, "readprice": run_read_price, "research": run_research, "researchshots": run_research_shots, "libtable": run_lib_table, "tablespots": run_table_spots, "midgrade": run_mid_grade,
@@ -3619,7 +3835,7 @@ SECTIONS = {
     "differential": run_differential, "timing": run_timing, "e2e": run_e2e, "baseline": run_baseline,
     "newskills": run_new_skills, "noneleft": run_none_left, "checkup": run_checkup, "checkupquit": run_checkup_quit,
     "checkuptabs": run_checkup_tabs, "checkupconflict": run_checkup_conflict, "progressnew": run_progress_new,
-    "libgroups": run_lib_groups, "groups": run_groups, "leaks": run_leaks,
+    "libgroups": run_lib_groups, "groups": run_groups, "leaks": run_leaks, "river": run_river, "libriver": run_lib_river,
     "samebuild": run_same_build, "phonefit": run_phone_fit, "hiddendrills": run_hidden_drills,
     "preflopspots": run_preflop_spots, "libpreflop": run_lib_preflop, "card": run_card, "offline": run_offline, "nostorage": run_nostorage, "legacy": run_legacy, "screens": run_screens,
 }

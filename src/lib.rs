@@ -28,6 +28,7 @@ pub mod preflop;
 pub mod progress;
 pub mod read_price;
 pub mod reflection;
+pub mod river;
 pub mod rng;
 pub mod schedule;
 pub mod table;
