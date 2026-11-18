@@ -5,12 +5,12 @@
 use std::collections::HashMap;
 
 use poker_trainer::checkup::{
-    checkup_runs, mixed_checkup_offer, mixed_checkup_plan, next_checkup_form, next_form, next_mixed_form, unfinished_run,
+    checkup_runs, full_mixed_checkup_plan, mixed_checkup_offer, mixed_checkup_plan, next_checkup_form, next_form, next_mixed_form, unfinished_run,
     CheckupKind, CheckupMetric, CheckupOffer, FIRST_CHECKUP_MIN_DAYS, FIRST_CHECKUP_MIN_DRILLS, MIXED_CHECKUP_EVERY_DAYS,
     MIXED_CHECKUP_LEN, MIXED_CHECKUP_MIX, MIXED_FORM_BASE,
 };
 use poker_trainer::generate::generate;
-use poker_trainer::groups::{group_of, mixed_skills, weight_in_group, Group};
+use poker_trainer::groups::{group_of, is_dealt, mixed_skills, weight_in_group, Group, HIDDEN_SKILLS};
 use poker_trainer::item::{chain_hand_seed, chain_stage_of_seed, is_held_out, ChainStage, Skill, GEN_VERSION};
 use poker_trainer::log::{parse_log, Attempt, AttemptExtra, CheckRef, ItemRef, Mode};
 use poker_trainer::progress::{all_stats, drill_skills};
@@ -71,9 +71,12 @@ fn the_seven_groups_have_the_agreed_shares_and_cover_every_dealt_skill() {
     for skill in Skill::ALL {
         let retired = matches!(skill, Skill::Price | Skill::Beats);
         assert_eq!(group_of(skill).is_none(), retired, "{skill:?}");
-        assert_eq!(Group::ALL.iter().filter(|g| g.skills().contains(&skill)).count(), usize::from(!retired), "{skill:?} in one group");
+        // A hidden drill keeps its group (for its history) but no group deals it.
+        let dealt = !retired && is_dealt(skill);
+        assert_eq!(Group::ALL.iter().filter(|g| g.skills().contains(&skill)).count(), usize::from(dealt), "{skill:?} in one group");
+        assert_eq!(mixed_skills().contains(&skill), dealt, "{skill:?} in the default drill");
     }
-    assert_eq!(mixed_skills().len(), Skill::ALL.len() - 2);
+    assert_eq!(mixed_skills().len(), Skill::ALL.len() - 2 - HIDDEN_SKILLS.len());
     for g in Group::ALL {
         assert_eq!(Group::from_code(g.code()), Some(g));
     }
@@ -212,6 +215,11 @@ fn a_one_group_drill_weights_its_skills_like_the_default_drill() {
         }
     }
     let table = f64::from(counts[&Skill::Table]) / 4000.0;
+    if HIDDEN_SKILLS.contains(&Skill::Spot) {
+        // With call-or-fold hidden, table spots are all the group deals.
+        assert_eq!(table, 1.0, "{counts:?}");
+        return;
+    }
     // Weights 2:2:1, so table is about a fifth.
     assert!((0.15..=0.25).contains(&table), "table at {table:.3}: {counts:?}");
 }
@@ -254,13 +262,15 @@ fn the_ladders_inside_skills_still_set_new_items() {
 
 #[test]
 fn the_mixed_checkup_is_forty_held_out_items_across_the_groups() {
-    assert_eq!(MIXED_CHECKUP_MIX.iter().map(|&(_, n)| n).sum::<usize>(), MIXED_CHECKUP_LEN);
-    assert_eq!(MIXED_CHECKUP_LEN, 40);
+    // Forty with every drill on; the hidden ones' items are dropped.
+    assert_eq!(MIXED_CHECKUP_MIX.iter().map(|&(_, n)| n).sum::<usize>(), 40);
+    let hidden: usize = MIXED_CHECKUP_MIX.iter().filter(|&&(s, _)| !is_dealt(s)).map(|&(_, n)| n).sum();
+    assert_eq!(MIXED_CHECKUP_LEN, 40 - hidden);
     for form in MIXED_FORM_BASE..MIXED_FORM_BASE + 6 {
         let plan = mixed_checkup_plan(form);
         assert_eq!(plan, mixed_checkup_plan(form), "deterministic");
         assert_eq!(plan.kind, CheckupKind::Mixed);
-        assert_eq!(plan.slots.len(), 40);
+        assert_eq!(plan.slots.len(), MIXED_CHECKUP_LEN);
         let mut by_group: HashMap<Group, usize> = HashMap::new();
         let mut by_skill: HashMap<Skill, usize> = HashMap::new();
         for (i, slot) in plan.slots.iter().enumerate() {
@@ -272,7 +282,8 @@ fn the_mixed_checkup_is_forty_held_out_items_across_the_groups() {
             assert_eq!(item.skill, slot.skill);
         }
         for &(skill, count) in &MIXED_CHECKUP_MIX {
-            assert_eq!(by_skill.get(&skill).copied().unwrap_or(0), count, "{skill:?}");
+            let want = if is_dealt(skill) { count } else { 0 };
+            assert_eq!(by_skill.get(&skill).copied().unwrap_or(0), want, "{skill:?}");
         }
         let want = [
             (Group::Preflop, 8),
@@ -281,7 +292,7 @@ fn the_mixed_checkup_is_forty_held_out_items_across_the_groups() {
             (Group::WholeHands, 4),
             (Group::Board, 6),
             (Group::Outs, 4),
-            (Group::Spots, 4),
+            (Group::Spots, if is_dealt(Skill::Spot) { 4 } else { 0 }),
         ];
         for (g, n) in want {
             assert_eq!(by_group.get(&g).copied().unwrap_or(0), n, "form {form}: {g:?}");
@@ -314,15 +325,65 @@ fn a_mixed_run_is_scored_by_group_and_can_be_resumed() {
     assert_eq!(unfinished_run(&runs, CheckupKind::Mixed).map(|r| r.run), Some(4));
     assert_eq!(next_mixed_form(&partial), form + 1);
 
-    let full = mixed_rows(4, form, 40, 10, 10_000);
+    let full = mixed_rows(4, form, MIXED_CHECKUP_LEN, 10, 10_000);
     let score = &checkup_runs(&full)[0];
     assert!(score.complete && !score.passed, "a mixed checkup has no mark to pass");
     assert_eq!(score.metric, CheckupMetric::PercentOk);
-    assert!((score.score - 75.0).abs() < 1e-9, "{}", score.score);
-    assert_eq!(score.groups.iter().map(|g| g.answered).sum::<usize>(), 40);
-    assert_eq!(score.groups.iter().map(|g| g.ok).sum::<usize>(), 30);
+    let want = 100.0 * (MIXED_CHECKUP_LEN - 10) as f64 / MIXED_CHECKUP_LEN as f64;
+    assert!((score.score - want).abs() < 1e-9, "{}", score.score);
+    assert_eq!(score.groups.iter().map(|g| g.answered).sum::<usize>(), MIXED_CHECKUP_LEN);
+    assert_eq!(score.groups.iter().map(|g| g.ok).sum::<usize>(), MIXED_CHECKUP_LEN - 10);
     assert_eq!(score.generator_key, Some(GEN_VERSION));
     assert!(unfinished_run(&checkup_runs(&full), CheckupKind::Mixed).is_none());
+}
+
+/// Rows answering the first `count` slots of the plan with every drill on, as a
+/// run taken before some drills were hidden did.
+fn full_mix_rows(run: u32, form: u32, count: usize, wrong: usize, start: u64) -> Vec<Attempt> {
+    full_mixed_checkup_plan(form)
+        .slots
+        .iter()
+        .enumerate()
+        .take(count)
+        .map(|(slot, s)| {
+            let mut row = drill_row(s.skill, s.seed, start + slot as u64, slot >= wrong, None);
+            row.mode = Mode::Check;
+            row.extra.check = Some(CheckRef { run, form, slot: slot as u32 });
+            row
+        })
+        .collect()
+}
+
+#[test]
+fn a_run_taken_before_drills_were_hidden_keeps_its_score() {
+    let form = MIXED_FORM_BASE;
+    let full = full_mixed_checkup_plan(form);
+    assert_eq!(full.slots.len(), 40);
+    if full.slots.iter().all(|s| is_dealt(s.skill)) {
+        return; // nothing is hidden: the two plans are one
+    }
+    // A finished forty-question run is scored on all forty, groups and all.
+    let done = full_mix_rows(3, form, 40, 8, 5_000);
+    let score = &checkup_runs(&done)[0];
+    assert!(score.complete && !score.stale, "complete {} stale {}", score.complete, score.stale);
+    assert_eq!(score.answered, 40);
+    assert!((score.score - 80.0).abs() < 1e-9, "{}", score.score);
+    assert_eq!(score.groups.iter().map(|g| g.answered).sum::<usize>(), 40);
+    assert!(score.groups.iter().any(|g| g.group == Group::Spots && g.answered == 4));
+    // An unfinished one that reached a hidden drill can't be picked up on the new
+    // plan, whose places no longer line up; a new checkup is offered instead.
+    let first_hidden = full.slots.iter().position(|s| !is_dealt(s.skill)).unwrap();
+    let partial = full_mix_rows(3, form, first_hidden + 1, 0, 5_000);
+    let runs = checkup_runs(&partial);
+    assert!(runs[0].stale && !runs[0].complete);
+    assert!(unfinished_run(&runs, CheckupKind::Mixed).is_none());
+    // One that stopped before any hidden item still lines up, so it can be resumed.
+    if first_hidden > 0 {
+        let early = full_mix_rows(3, form, first_hidden, 0, 5_000);
+        let runs = checkup_runs(&early);
+        assert!(!runs[0].stale);
+        assert_eq!(unfinished_run(&runs, CheckupKind::Mixed).map(|r| r.run), Some(3));
+    }
 }
 
 #[test]
@@ -388,7 +449,7 @@ fn a_mixed_checkup_is_offered_at_most_once_a_month() {
     let day = DAY_MS;
     let mut log = practice(200, day, 10 * day);
     let done_at = 20 * day;
-    log.extend(mixed_rows(1, MIXED_FORM_BASE, 40, 3, done_at - 39));
+    log.extend(mixed_rows(1, MIXED_FORM_BASE, 40, 3, done_at - (MIXED_CHECKUP_LEN as u64 - 1)));
     let every = MIXED_CHECKUP_EVERY_DAYS * day;
     assert_eq!(mixed_checkup_offer(&log, done_at), None, "just taken");
     assert_eq!(mixed_checkup_offer(&log, done_at + every - 1), None, "29 days later");
@@ -399,7 +460,7 @@ fn a_mixed_checkup_is_offered_at_most_once_a_month() {
     assert_eq!(mixed_checkup_offer(&log, done_at + 200 * day), Some(CheckupOffer::Resume { run: 2, answered: 7 }));
     // Finishing it starts the month again from its last answer.
     log.extend(mixed_rows(2, MIXED_FORM_BASE + 1, 40, 0, done_at + every + 5).into_iter().skip(7));
-    let finished = done_at + every + 5 + 39;
+    let finished = done_at + every + 5 + MIXED_CHECKUP_LEN as u64 - 1;
     assert_eq!(mixed_checkup_offer(&log, finished + every - 1), None);
     assert_eq!(mixed_checkup_offer(&log, finished + every), Some(CheckupOffer::Take));
 }

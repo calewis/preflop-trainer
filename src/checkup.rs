@@ -10,9 +10,9 @@
 use crate::anchors;
 use crate::board_type::{seed_with_category, BoardCategory};
 use crate::generate::generate;
-use crate::groups::{group_of, Group};
+use crate::groups::{group_of, is_dealt, Group};
 use crate::item::{beats_me_seed_with_rung, chain_seed_for_stage, equity_seed_with_rung, generator_changed, read_price_seed_with_rung, ChainStage, BEATS_ME_RUNGS, GEN_VERSION, Item, Question, Skill, HELD_OUT_BIT, READ_PRICE_RUNGS};
-use crate::log::{Attempt, CheckRef, Mode};
+use crate::log::{Attempt, CheckRef, ItemRef, Mode};
 use crate::schedule::DAY_MS;
 use crate::progress::{meets_mark, pass_mark, window_metrics, PassMark, WindowMetrics};
 use crate::rng::Rng;
@@ -44,7 +44,9 @@ pub const fn is_mixed_form(form: u32) -> bool {
 /// (preflop 8, read the price 7, equity 7, whole hands 4, board reading 6, outs
 /// 4, spots 4). Whole hands is one hand of four stages rather than six items, and
 /// the two items that frees go to read the price and equity. `table` is left
-/// out: its held-out spots are walked by its own forms.
+/// out: its held-out spots are walked by its own forms. Drills in
+/// [`crate::groups::HIDDEN_SKILLS`] are dropped from the plan, leaving the rest
+/// as they were, so the checkup is [`MIXED_CHECKUP_LEN`] long.
 pub const MIXED_CHECKUP_MIX: [(Skill, usize); 14] = [
     (Skill::Preflop, 8),
     (Skill::ReadPrice, 7),
@@ -61,7 +63,20 @@ pub const MIXED_CHECKUP_MIX: [(Skill, usize); 14] = [
     (Skill::Spot, 2),
     (Skill::SpotMw, 2),
 ];
-pub const MIXED_CHECKUP_LEN: usize = 40;
+pub const MIXED_CHECKUP_LEN: usize = mixed_checkup_len();
+
+const fn mixed_checkup_len() -> usize {
+    let mut i = 0;
+    let mut total = 0;
+    while i < MIXED_CHECKUP_MIX.len() {
+        let (skill, count) = MIXED_CHECKUP_MIX[i];
+        if is_dealt(skill) {
+            total += count;
+        }
+        i += 1;
+    }
+    total
+}
 
 /// Days from the end of one completed mixed checkup until the next is offered.
 pub const MIXED_CHECKUP_EVERY_DAYS: u64 = 30;
@@ -269,6 +284,14 @@ pub fn checkup_plan(skill: Skill, form: u32) -> CheckupPlan {
 /// The same form always gives the same plan. Items come in a shuffled order,
 /// a whole hand's four stages together and in order; there are no repeats.
 pub fn mixed_checkup_plan(form: u32) -> CheckupPlan {
+    let mut plan = full_mixed_checkup_plan(form);
+    plan.slots.retain(|slot| is_dealt(slot.skill));
+    plan
+}
+
+/// The plan with every skill in [`MIXED_CHECKUP_MIX`], hidden ones included: the
+/// one a run taken before they were hidden followed.
+pub fn full_mixed_checkup_plan(form: u32) -> CheckupPlan {
     let mut rng = Rng::new((u64::from(form) + 1).wrapping_mul(FORM_MIX) ^ MIXED_SALT);
     let deck_len = anchors::deck().len().max(1) as u64;
     let top_down = |i: usize, rungs: u8| rungs - 1 - (i % usize::from(rungs)) as u8;
@@ -499,8 +522,27 @@ fn agreement(plan: &CheckupPlan, by_slot: &[Option<&Attempt>]) -> RepeatAgreemen
     }
 }
 
+/// True if every row answered the item its slot holds in `plan`.
+fn rows_follow(plan: &CheckupPlan, rows: &[&Attempt]) -> bool {
+    rows.iter().all(|a| {
+        a.extra.check.and_then(|c| plan.slots.get(c.slot as usize)).is_some_and(|slot| {
+            slot.skill == a.skill && (slot.skill == Skill::Anchor || a.item == ItemRef::Seed(slot.seed))
+        })
+    })
+}
+
 fn score_run(kind: CheckupKind, check: CheckRef, rows: &[&Attempt]) -> CheckupScore {
-    let plan = plan_for(kind, check.form);
+    let mut plan = plan_for(kind, check.form);
+    // A mixed run begun before some drills were hidden is scored on the plan it
+    // followed, and can't be picked up again: its places no longer line up.
+    let mut older_plan = false;
+    if kind == CheckupKind::Mixed && !rows_follow(&plan, rows) {
+        let full = full_mixed_checkup_plan(check.form);
+        if rows_follow(&full, rows) {
+            plan = full;
+            older_plan = true;
+        }
+    }
     let mut by_slot: Vec<Option<&Attempt>> = vec![None; plan.slots.len()];
     for attempt in rows {
         if let Some(check) = attempt.extra.check {
@@ -524,7 +566,9 @@ fn score_run(kind: CheckupKind, check: CheckRef, rows: &[&Attempt]) -> CheckupSc
     let stale = match kind {
         CheckupKind::Skill(_) => rows.iter().any(|a| if a.skill == Skill::Table { !a.in_current_library() } else { generator_changed(a.skill, a.gen_version, GEN_VERSION) }),
         // Its unanswered items may be any skill's, so a change to any skill in it counts.
-        CheckupKind::Mixed => rows.iter().any(|a| plan.slots.iter().any(|slot| generator_changed(slot.skill, a.gen_version, GEN_VERSION))),
+        CheckupKind::Mixed => {
+            (older_plan && !complete) || rows.iter().any(|a| plan.slots.iter().any(|slot| generator_changed(slot.skill, a.gen_version, GEN_VERSION)))
+        }
     };
     let groups = match kind {
         CheckupKind::Skill(_) => Vec::new(),

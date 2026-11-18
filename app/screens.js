@@ -1,6 +1,6 @@
 // The app's screens. Each `show*` function fills the page and sets the key handler.
 import { h } from './dom.js';
-import { engine, prepareDrill, prepareBaseline, prepareCheck, clearSpeculation, drillKey } from './engine.js';
+import { engine, prepareDrill, prepareBaseline, prepareCheck, clearSpeculation, drillKey, distrustPrep } from './engine.js';
 import { answerControls } from './answers.js';
 import { questionView, revealView } from './reveal.js';
 import * as store from './store.js';
@@ -231,6 +231,17 @@ function trackedSubmit(submit, isLocked) {
   };
 }
 
+// The engine graded a different question from the one on screen (the page and a
+// worker were running different builds). Nothing is saved or revealed: the item
+// is dealt again by the grading engine itself, with a word about why.
+const STALE_NOTE = 'That question was out of date, so here it is again. Please answer it once more.';
+
+function staleQuestion(bundle, graded) {
+  if (!graded.outcome || graded.check === bundle.check) return false;
+  distrustPrep();
+  return true;
+}
+
 // Grading can take a moment on a phone; say so rather than looking frozen.
 function showPending(slot) {
   const timer = setTimeout(() => { slot.textContent = 'Working it out...'; }, 150);
@@ -273,10 +284,10 @@ async function speculate(planned) {
 
 const ORIGIN_TAG = { new: '', due: 'review', retry: 'again' };
 
-function showItem(planned, bundle) {
+function showItem(planned, bundle, note) {
   const tag = ORIGIN_TAG[planned.origin];
   const status = h('div', { role: 'status', 'aria-live': 'polite', class: 'live-slot' });
-  const errorSlot = h('p', { class: 'hint error', role: 'alert' });
+  const errorSlot = h('p', { class: 'hint error', role: 'alert' }, note || null);
   const pendingSlot = h('p', { class: 'hint', role: 'status', 'data-pending': '' });
   const shownAt = activeNow();
   // Real time, so a missed visibility event can never make answers ignored.
@@ -305,6 +316,15 @@ function showItem(planned, bundle) {
         return;
       }
       stopPending();
+      if (staleQuestion(bundle, graded)) {
+        try {
+          const fresh = await prepareDrill(planned, true);
+          if (drill === owner) showItem(planned, fresh, STALE_NOTE);
+        } catch (err) {
+          if (drill === owner) renderFailure(err, { label: 'End', action: endDrill });
+        }
+        return;
+      }
       if (graded.invalid) {
         errorSlot.textContent = graded.invalid;
         enabled.forEach(b => { b.disabled = false; });
@@ -386,6 +406,7 @@ function showItem(planned, bundle) {
       h('section', { class: 'answers' }, revealNode, reflection.el),
       h('div', { class: 'action-bar' }, nextBtn));
     status.textContent = revealNode.querySelector('.verdict').textContent;
+    keepBarClear(revealNode);
     scrollRevealIntoView(revealNode);
     onKey = event => { if (event.key === 'Enter') goNext(); };
     nextBtn.focus({ preventScroll: true });
@@ -429,6 +450,20 @@ function reflectionForm(outcome) {
   };
   showPrompt();
   return { el, finish() { if (picks.length) log(); } };
+}
+
+// The Next bar floats at the bottom only while everything fits on the screen;
+// when the feedback runs longer (or "Show all" opens), it sits after the
+// feedback, so it never covers anything to read.
+function keepBarClear(revealNode) {
+  const place = () => {
+    const bar = document.querySelector('.action-bar');
+    if (!bar) return;
+    bar.classList.remove('in-flow');
+    if (document.documentElement.scrollHeight > window.innerHeight + 1) bar.classList.add('in-flow');
+  };
+  place();
+  revealNode.addEventListener('toggle', place, true);
 }
 
 // A reveal below the fold scrolls up so the answer is the first thing read.
@@ -555,7 +590,7 @@ async function startBaseline() {
   }
 }
 
-async function renderBaselineItem() {
+async function renderBaselineItem(note) {
   const state = baseline;
   const index = state.index;
   if (index >= state.count) { finishBaseline(); return; }
@@ -577,7 +612,7 @@ async function renderBaselineItem() {
   const shownAt = activeNow();
   const appearedAt = performance.now();
   window.__trainer.current = { baselineIndex: index, bundle, shownAt, appearedAt };
-  const errorSlot = h('p', { class: 'hint error', role: 'alert' });
+  const errorSlot = h('p', { class: 'hint error', role: 'alert' }, note || null);
 
   async function submit(raw) {
     if (locked || performance.now() - appearedAt < MIN_ANSWER_MS) return;
@@ -589,6 +624,10 @@ async function renderBaselineItem() {
       let outcome = bundle.graded[raw];
       if (!outcome) {
         const graded = await engine.call('baseline_grade', index, raw);
+        if (staleQuestion(bundle, graded)) {
+          if (baseline === state && state.index === index) renderBaselineItem(STALE_NOTE);
+          return;
+        }
         if (graded.invalid) {
           errorSlot.textContent = graded.invalid;
           locked = false;
@@ -711,7 +750,7 @@ async function beginCheckup(info, resume) {
   }
 }
 
-async function renderCheckupItem() {
+async function renderCheckupItem(note) {
   const state = checkup;
   if (!state) return;
   const leave = { label: 'Stop', action: finishCheckup };
@@ -743,7 +782,7 @@ async function renderCheckupItem() {
   const shownAt = activeNow();
   const appearedAt = performance.now();
   window.__trainer.current = { checkSlot: slot, number: next.number, skill: state.skill, form: state.form, run: state.run, bundle, shownAt, appearedAt };
-  const errorSlot = h('p', { class: 'hint error', role: 'alert' });
+  const errorSlot = h('p', { class: 'hint error', role: 'alert' }, note || null);
   const pendingSlot = h('p', { class: 'hint', role: 'status', 'data-pending': '' });
 
   async function submit(raw) {
@@ -760,6 +799,11 @@ async function renderCheckupItem() {
         const stopPending = showPending(pendingSlot);
         const graded = await engine.call('check_grade', state.skill, state.form, slot, state.run, raw, response)
           .finally(stopPending);
+        if (staleQuestion(bundle, graded)) {
+          onKey = keys;
+          if (checkup === state) renderCheckupItem(STALE_NOTE);
+          return;
+        }
         if (graded.invalid) {
           errorSlot.textContent = graded.invalid;
           locked = false;

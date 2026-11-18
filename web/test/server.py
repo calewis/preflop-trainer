@@ -15,6 +15,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def translate_path(self, path):
         clean = path.split("?")[0].split("#")[0]
+        # Set mid-test to stand for a new release published while the page runs.
+        if clean == "/app/trainer.wasm" and self.server.wasm_override:
+            return str(self.server.wasm_override)
         if clean == "/app/crash-worker.js":
             return str(LEGACY.parent / "crash-worker.js")
         if self.server.legacy:
@@ -37,6 +40,7 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
     legacy = False
+    wasm_override = None
 
 
 def start(port):

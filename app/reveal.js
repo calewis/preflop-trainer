@@ -205,6 +205,21 @@ function answerLine(text) {
 
 function p(...children) { return h('p', { class: 'reveal-line' }, ...children); }
 
+// Secondary detail stays one tap away, so a result fits a phone screen without
+// scrolling and the Next button covers nothing.
+function more(label, ...children) {
+  const body = children.flat(Infinity).filter(Boolean);
+  if (!body.length) return null;
+  return h('details', { class: 'more' }, h('summary', {}, label), body);
+}
+
+// A list showing its first `keep` entries, the rest behind "Show all".
+function shortList(items, keep, cls = 'facts') {
+  if (items.length <= keep + 1) return h('ul', { class: cls }, items);
+  return [h('ul', { class: cls }, items.slice(0, keep)),
+    more(`Show all ${items.length}`, h('ul', { class: cls }, items.slice(keep)))];
+}
+
 function revealBody(r) {
   switch (r.kind) {
     case 'preflop': return [answerLine(r.answer), p(r.why), r.chart ? h('p', { class: 'hint' }, r.chart) : null];
@@ -281,14 +296,21 @@ function beatsMeReveal(r) {
 }
 
 function outsReveal(r) {
+  // Cards with the same effect share a line: "4♠ 4♦ 4♣ give you a pair of fours".
+  const groups = [];
+  for (const t of r.tempting) {
+    const text = `${t.rank}${t.ties ? ' (you would tie)' : ''}`;
+    const group = groups.find(g => g.text === text);
+    if (group) group.cards.push(t.card); else groups.push({ text, cards: [t.card] });
+  }
   return [
     answerLine(r.answer),
     p(`You have ${r.hero} and they have ${r.villain}. There are ${r.unseen} unseen cards.`),
-    labelled('Outs', h('div', { class: 'mini-cards wrap' }, r.outs.map(c => card(c, 'small')))),
-    r.tempting.length ? [
-      p('Tempting non-outs (they improve you but don\'t put you ahead):'),
-      h('ul', { class: 'facts' }, r.tempting.map(t => h('li', {},
-        holdingCards([t.card]), ` gives you ${t.rank}${t.ties ? ' (you would tie)' : ''}.`))),
+    labelled('Outs', r.outs.length ? h('div', { class: 'mini-cards wrap' }, r.outs.map(c => card(c, 'small'))) : h('p', { class: 'reveal-line' }, 'None.')),
+    groups.length ? [
+      h('p', { class: 'reveal-line tempting-title' }, 'Tempting non-outs (they improve you but don\'t put you ahead):'),
+      shortList(groups.map(g => h('li', {}, holdingCards(g.cards),
+        ` ${g.cards.length === 1 ? 'gives' : 'give'} you ${g.text}.`)), 3),
     ] : null,
   ];
 }
@@ -321,14 +343,15 @@ function spotReveal(r) {
     p(r.matched
       ? 'You chose the better action.'
       : `That is ${r.band}.`),
-    p(`Averaged over ${r.combos} possible combos${r.sampled ? ` (estimated from a ${r.sample_size}-outcome sample)` : ''}.`),
-    r.groups.map(line => p(line)),
     r.break_even === null || r.break_even === undefined ? null
       : r.break_even === '' ? p('Calling already breaks even without winning anything more.')
         : p(`You would need to win about ${r.break_even} more when you hit for calling to break even.`),
-    p('This decision was averaged over all possible remaining cards and combos, so the actual next card doesn\'t matter.'),
-    r.flip_call ? p(r.flip_call) : null,
-    r.flip_cards ? p(r.flip_cards) : null,
+    more('How this was worked out',
+      p(`Averaged over ${r.combos} possible combos${r.sampled ? ` (estimated from a ${r.sample_size}-outcome sample)` : ''}.`),
+      r.groups.map(line => p(line)),
+      p('This decision was averaged over all possible remaining cards and combos, so the actual next card doesn\'t matter.'),
+      r.flip_call ? p(r.flip_call) : null,
+      r.flip_cards ? p(r.flip_cards) : null),
   ];
 }
 
@@ -343,10 +366,7 @@ function tableReveal(r) {
     h('ul', { class: 'table-options' }, r.options.map(o => h('li', { class: o.is_chosen ? 'chosen' : '' },
       h('div', { class: 'tl-head' }, h('strong', {}, o.label), o.is_best ? h('span', { class: 'pill good' }, 'Best') : null),
       h('div', { class: 'hint' }, `${o.ev_bb}, ${o.ev_pct}, ${o.share}`)))),
-    r.archetypes.length ? [
-      h('h3', { class: 'sub-title' }, 'By opponent type'),
-      h('ul', { class: 'facts' }, r.archetypes.map(line => h('li', {}, line))),
-    ] : null,
+    r.archetypes.length ? more('By opponent type', h('ul', { class: 'facts' }, r.archetypes.map(line => h('li', {}, line)))) : null,
     h('p', { class: 'hint' }, r.note),
   ];
 }

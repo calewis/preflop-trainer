@@ -21,7 +21,7 @@ use poker_trainer::grade::{grade_choices, grade_timed};
 use poker_trainer::item::{Item, Skill};
 use poker_trainer::log::{asks_confidence, format_attempt, parse_log, Attempt, CheckRef, Confidence, ItemRef, Mode, LOG_HEADER};
 use poker_trainer::preflop::{chart_for, preflop_answer, Action, Seat, Situation, CARD};
-use poker_trainer::groups::{group_of, Group};
+use poker_trainer::groups::{group_of, is_dealt, Group};
 use poker_trainer::progress::{
     all_stats, baseline_runs, drill_skills, has_baseline, next_baseline_run, pass_mark, reliability_table, BaselineRun,
     SkillStats, WindowMetrics, MIN_ATTEMPTS, PASS_ATTEMPTS,
@@ -109,6 +109,26 @@ fn planned_json(p: Planned) -> V {
     }
 }
 
+/// A fingerprint of what the player is shown for `item`. Every bundle carries it
+/// and every grade reply returns the one for the item it graded, so the page can
+/// refuse a reveal that is about a different question from the one on screen
+/// (as when a worker started later runs a newer build of the engine).
+fn question_check(item: &Item) -> String {
+    question_check_of(&present::question(&item.question))
+}
+
+fn question_check_of(question: &V) -> String {
+    let mut text = String::new();
+    question.write(&mut text);
+    // FNV-1a, 64 bits: plenty to tell two questions apart, and no dependency.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
 /// An item with its question, answer format and every choice already graded.
 /// `board_type` is left ungraded: its answer depends on the response time, so
 /// it is graded when the answer arrives. `table` is left ungraded so the page
@@ -134,6 +154,7 @@ fn bundle(item: &Item, origin: Option<Origin>, make_template: &dyn Fn(&poker_tra
         "format": present::format(&item.question),
         "graded": V::Obj(graded),
         "confidence": (asks_confidence(item.skill) && origin.is_some()).then(present::confidence_levels),
+        "check": question_check(item),
     }
 }
 
@@ -306,10 +327,10 @@ impl Engine {
         let now_ms = fields.get(1).and_then(|t| t.parse().ok()).unwrap_or(0);
         let stats = all_stats(&self.attempts);
         let checkups = checkup_runs(&self.attempts);
-        // Every skill dealt today, and a retired one only while it has history to show.
+        // Every skill dealt today, and a retired or hidden one only while it has history to show.
         let skills: Vec<V> = stats
             .iter()
-            .filter(|s| group_of(s.skill).is_some() || s.total_attempts > 0)
+            .filter(|s| (group_of(s.skill).is_some() && is_dealt(s.skill)) || s.total_attempts > 0)
             .map(stats_json)
             .collect();
         let runs = baseline_runs(&self.attempts, BASELINE_SIZE);
@@ -542,7 +563,7 @@ impl Engine {
                     .map_or(Origin::New, |p| p.origin);
                 let planned = Planned { skill, seed, origin };
                 let template = drill_template(planned, &outcome);
-                Ok(obj! { "outcome": graded_outcome(&item, &outcome, Some(origin), template, response) })
+                Ok(obj! { "outcome": graded_outcome(&item, &outcome, Some(origin), template, response), "check": question_check(&item) })
             }
             Err(invalid) => Ok(obj! { "invalid": invalid.0 }),
         }
@@ -635,7 +656,7 @@ impl Engine {
         match grade_timed(&entry.item, raw, 0) {
             Ok(outcome) => {
                 let template = format_attempt(&Attempt::from_baseline(0, entry, &outcome, 0, 0));
-                Ok(obj! { "outcome": present::outcome(&entry.item, &outcome, template, 0, V::Null) })
+                Ok(obj! { "outcome": present::outcome(&entry.item, &outcome, template, 0, V::Null), "check": question_check(&entry.item) })
             }
             Err(invalid) => Ok(obj! { "invalid": invalid.0 }),
         }
@@ -692,7 +713,7 @@ impl Engine {
         let table = kind == CheckupKind::Skill(Skill::Table);
         let intro = match kind {
             CheckupKind::Mixed => format!(
-                "{MIXED_CHECKUP_LEN} new questions from all seven practice groups. No feedback until the end. It is optional, gates nothing, and comes round every {MIXED_CHECKUP_EVERY_DAYS} days."
+                "{MIXED_CHECKUP_LEN} new questions from across the practice groups. No feedback until the end. It is optional, gates nothing, and comes round every {MIXED_CHECKUP_EVERY_DAYS} days."
             ),
             CheckupKind::Skill(_) => format!(
                 "{total} questions: {CHECKUP_ORIGINALS} new ones and {CHECKUP_REPEATS} repeats. No feedback until the end."
@@ -777,7 +798,7 @@ impl Engine {
             Ok(outcome) => {
                 let check = CheckRef { run, form, slot: slot as u32 };
                 let template = format_attempt(&Attempt::from_check(check, entry.skill, entry.seed, &outcome, 0, 0));
-                Ok(obj! { "outcome": present::outcome(&item, &outcome, template, response, V::Null) })
+                Ok(obj! { "outcome": present::outcome(&item, &outcome, template, response, V::Null), "check": question_check(&item) })
             }
             Err(invalid) => Ok(obj! { "invalid": invalid.0 }),
         }
@@ -1614,11 +1635,12 @@ mod tests {
         let home = dispatch(&format!("home\x1f{now}"));
         assert!(home.contains("\"kind\":\"mixed\"") && home.contains("\"resume\":false"), "{home}");
         let info = dispatch("check_info\x1fmixed");
-        assert!(info.contains("\"total\":40") && info.contains("all seven practice groups"), "{info}");
+        let len = super::MIXED_CHECKUP_LEN;
+        assert!(info.contains(&format!("\"total\":{len}")) && info.contains("across the practice groups"), "{info}");
         let begun = dispatch("check_begin\x1fmixed\x1f0");
         let (run, form) = (number(&begun, "run"), number(&begun, "form"));
         assert_eq!((run, form), (1, 1_000_000), "{begun}");
-        for slot in 0..40u32 {
+        for slot in 0..len as u32 {
             let next = dispatch(&format!("check_next\x1fmixed\x1f{run}"));
             assert_eq!(number(&next, "slot"), slot, "{next}");
             let committed = answer_check_slot("mixed", form, slot, run, now + u64::from(slot));
@@ -1631,9 +1653,9 @@ mod tests {
         }
         assert!(dispatch(&format!("check_next\x1fmixed\x1f{run}")).contains("\"done\":true"));
         let report = dispatch(&format!("check_report\x1f{run}"));
-        assert!(report.contains("Monthly checkup") && report.contains("Scored on all 40 questions"), "{report}");
+        assert!(report.contains("Monthly checkup") && report.contains(&format!("Scored on all {len} questions")), "{report}");
         assert!(report.contains("Whole hands") && report.contains("\"answered\":4"), "{report}");
-        let finished = now + 39;
+        let finished = now + len as u64 - 1;
         assert!(dispatch(&format!("home\x1f{}", finished + 29 * DAY)).contains("\"checkup\":null"), "not again within the month");
         assert!(dispatch(&format!("home\x1f{}", finished + 30 * DAY)).contains("\"kind\":\"mixed\""), "offered again after 30 days");
         // A one-skill checkup can't take a mixed run's number, and a slot is kept once.
@@ -1887,5 +1909,65 @@ mod tests {
         let odd = "1\tdrill\t\tprice\t7\t1\t1\t0\t\t1000\ta\x1fb\n";
         let reply = dispatch(&format!("load\x1f{odd}2\tdrill\t\tprice\t8\t1\t1\t0\t\t1000\tc\n"));
         assert!(reply.contains("\"count\":2"), "{reply}");
+    }
+
+    /// The fingerprint at the end of a bundle or grade reply.
+    fn check_of(reply: &str) -> String {
+        let start = reply.rfind("\"check\":\"").unwrap_or_else(|| panic!("no check in {reply}")) + 9;
+        reply[start..start + 16].to_string()
+    }
+
+    fn field(reply: &str, key: &str) -> String {
+        let start = reply.find(&format!("\"{key}\":\"")).unwrap_or_else(|| panic!("no {key} in {reply}")) + key.len() + 4;
+        reply[start..].split('"').next().unwrap().to_string()
+    }
+
+    /// The first of a few answers the item accepts, graded through `grade`.
+    fn graded_reply(grade: impl Fn(&str) -> String) -> String {
+        const ANSWERS: [&str; 21] = ["check", "fold", "call", "c", "f", "4", "25", "AKs", "Ax", "top", "none", "a", "fs", "td", "r", "6", "e", "hc", "board", "AA", "22"];
+        let replies: Vec<String> = ANSWERS.iter().map(|a| grade(a)).collect();
+        if let Some(reply) = replies.iter().find(|reply| reply.contains("\"outcome\"")) {
+            return reply.clone();
+        }
+        // Items with their own codes say which they take.
+        let hint = replies.iter().find_map(|r| r.split("Answer one of ").nth(1)).unwrap_or_else(|| panic!("no answer accepted: {:?}", &replies[..3]));
+        grade(hint.split([',', '.']).next().unwrap().trim())
+    }
+
+    #[test]
+    fn every_grade_names_the_question_that_was_dealt() {
+        // A drill: what `prepare` deals (the prep worker's job) and what `grade`
+        // marks (the engine's) must be the same question, chain stages included.
+        dispatch("session_open\x1f20261117\x1f1763400000000");
+        dispatch("session_start\x1f15");
+        let mut chains = 0;
+        for _ in 0..120 {
+            let next = dispatch("session_next\x1f0");
+            if next.contains("\"finished\"") {
+                break;
+            }
+            let (skill, seed) = (field(&next, "skill"), field(&next, "seed"));
+            chains += usize::from(skill == "chain");
+            let bundle = dispatch(&format!("prepare\x1f{skill}\x1f{seed}\x1fnew"));
+            let reply = graded_reply(|a| dispatch(&format!("grade\x1f{skill}\x1f{seed}\x1f{a}\x1f0")));
+            assert_eq!(check_of(&bundle), check_of(&reply), "{skill} {seed}: the grade is about another question");
+        }
+        assert!(chains >= 4, "the drill dealt no whole hand");
+        // A different question has a different fingerprint.
+        let a = dispatch("prepare\x1fchain\x1f1001\x1fnew");
+        let b = dispatch("prepare\x1fchain\x1f1005\x1fnew");
+        assert_ne!(check_of(&a), check_of(&b));
+        // The monthly checkup and the baseline do the same.
+        for slot in 0..super::MIXED_CHECKUP_LEN {
+            let bundle = dispatch(&format!("prepare_check\x1fmixed\x1f1000000\x1f{slot}\x1f1"));
+            let reply = graded_reply(|a| dispatch(&format!("check_grade\x1fmixed\x1f1000000\x1f{slot}\x1f1\x1f{a}\x1f0")));
+            assert_eq!(check_of(&bundle), check_of(&reply), "checkup slot {slot}");
+        }
+        dispatch("baseline_open\x1f77");
+        for index in 0..super::BASELINE_SIZE {
+            let bundle = dispatch(&format!("prepare_baseline\x1f77\x1f{index}"));
+            let reply = graded_reply(|a| dispatch(&format!("baseline_grade\x1f{index}\x1f{a}")));
+            assert_eq!(check_of(&bundle), check_of(&reply), "baseline question {index}");
+        }
     }
 }

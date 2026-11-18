@@ -2,8 +2,26 @@
 // stays responsive; `prep` does the slow item generation in the background.
 const workerUrl = new URL('./worker.js', import.meta.url);
 
+// Every worker this page starts, including replacements started much later, runs
+// the same build of the engine: the page fetches it once and hands each worker a
+// copy. A replacement that fetched it itself could get a newer build from an
+// updated service worker, and then deal questions the engine grades differently.
+// If the fetch fails, each worker fetches the file itself, as before.
+const wasmBytes = fetch(new URL('./trainer.wasm', import.meta.url))
+  .then(response => (response.ok ? response.arrayBuffer() : null))
+  .catch(() => null);
+
+function spawn() {
+  const worker = new Worker(workerUrl);
+  wasmBytes.then(bytes => {
+    const copy = bytes ? bytes.slice(0) : null;
+    worker.postMessage({ wasm: copy }, copy ? [copy] : []);
+  });
+  return worker;
+}
+
 function client(onFatal) {
-  let worker = new Worker(workerUrl);
+  let worker = spawn();
   let nextId = 1;
   let dead = null;
   const pending = new Map();
@@ -32,13 +50,19 @@ function client(onFatal) {
     pending.clear();
   }
 
+  // Commands wait until the worker has been handed the engine, so they arrive after it.
+  function post(message) {
+    const target = worker;
+    wasmBytes.then(() => target.postMessage(message));
+  }
+
   function send(args) {
     if (dead) return Promise.reject(new Error(dead));
     const id = nextId++;
     return new Promise((resolve, reject) => {
       const message = { id, args: args.map(String) };
       pending.set(id, { resolve, reject, message });
-      worker.postMessage(message);
+      post(message);
     });
   }
 
@@ -48,17 +72,17 @@ function client(onFatal) {
     restart() {
       worker.terminate();
       rejectPending('the worker restarted');
-      worker = new Worker(workerUrl);
+      worker = spawn();
       attach();
     },
     /** Swaps in a fresh worker and resends everything still waiting, after `setup` (which may send first). */
     revive(setup) {
       const waiting = [...pending.values()].map(entry => entry.message);
       worker.terminate();
-      worker = new Worker(workerUrl);
+      worker = spawn();
       attach();
       setup();
-      waiting.forEach(message => worker.postMessage(message));
+      waiting.forEach(post);
     },
     /** Gives up on this worker: everything waiting or to come fails with `reason`. */
     stop(reason) {
@@ -98,11 +122,21 @@ const CACHE_LIMIT = 64;
 let queue = [];
 let busy = false;
 
+// Set once a grade came back about a different question from the one dealt: from
+// then on this page deals from the engine that grades, so the two always agree.
+let prepOnEngine = false;
+
+/** Deals every later question from the grading engine and forgets what the prep worker made. */
+export function distrustPrep() {
+  prepOnEngine = true;
+  bundles.clear();
+}
+
 function pump() {
   if (busy || queue.length === 0) return;
   busy = true;
   const job = queue.shift();
-  prepWorker.timed(...job.args).then(
+  (prepOnEngine ? engine : prepWorker).timed(...job.args).then(
     ({ reply }) => { prepRestarts = 0; job.resolve(reply); },
     err => job.reject(err),
   ).finally(() => { busy = false; pump(); });

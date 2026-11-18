@@ -64,7 +64,7 @@
 
 [hidden] { display: none !important; }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; touch-action: manipulation; }
 body {
   margin: 0;
   background: var(--bg);
@@ -74,6 +74,11 @@ body {
 }
 main {
   max-width: 560px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  /* Nothing inside may widen the page: on iOS a page wider than the screen once
+     stays wider, cutting off the right edge of every later screen. */
+  overflow-x: clip;
   margin: 0 auto;
   padding: calc(8px + var(--top-inset)) 16px calc(24px + var(--bottom-inset));
   min-height: 100dvh;
@@ -99,7 +104,7 @@ a { color: var(--accent); }
   padding-top: var(--top-inset);
   margin-top: calc(-1 * var(--top-inset));
   display: grid;
-  grid-template-columns: 64px 1fr auto;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   min-height: 48px;
@@ -177,14 +182,14 @@ a { color: var(--accent); }
 }
 .seg[aria-pressed="true"] { background: var(--surface-2); border-color: var(--accent); font-weight: 600; }
 
-.group-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.group-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .group-list .btn { white-space: normal; }
 .step-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .step-head h3 { font-size: 16px; }
 .pill { font-size: 13px; padding: 2px 10px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
 .pill.good { background: var(--good-bg); color: var(--good); }
 
-.home-links { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.home-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .home-link {
   min-height: 48px;
   display: flex;
@@ -278,7 +283,7 @@ a { color: var(--accent); }
 /* Answers */
 .answers { display: flex; flex-direction: column; gap: 10px; }
 .choice-grid { display: grid; gap: 8px; }
-.choice-grid.two { grid-template-columns: 1fr 1fr; }
+.choice-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .choice-grid.large .choice { min-height: 60px; font-size: 19px; font-weight: 600; }
 .choice { justify-content: flex-start; position: relative; padding-left: 16px; }
 .toggle[aria-pressed="true"] { background: var(--surface-2); border-color: var(--accent); font-weight: 600; }
@@ -311,7 +316,7 @@ a { color: var(--accent); }
 .slots { display: flex; flex-direction: column; gap: 6px; }
 .slot {
   display: grid;
-  grid-template-columns: 42px 44px repeat(4, 44px) minmax(44px, 1fr);
+  grid-template-columns: minmax(28px, 42px) repeat(5, minmax(0, 44px)) minmax(40px, 1fr);
   align-items: center;
   gap: 4px;
   padding: 4px 6px;
@@ -356,7 +361,7 @@ a { color: var(--accent); }
 .mini-cards { display: inline-flex; gap: 2px; align-items: center; vertical-align: middle; }
 .mini-cards.wrap { flex-wrap: wrap; gap: 4px; }
 .holdings { display: inline-flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.stat-list { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin: 0; font-size: 15px; }
+.stat-list { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; margin: 0; font-size: 15px; }
 .stat-list dt { color: var(--muted); }
 .stat-list dd { margin: 0; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
 .big-score { font-size: 26px; font-weight: 700; }
@@ -446,3 +451,101 @@ button:focus-visible, a:focus-visible, label:focus-visible { outline: 2px solid 
 .btn.cue-skip { min-height: 44px; }
 .beats-me-hands { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
 .slot-rank.any { font-size: 0.75rem; }
+
+/* Phone layout: a question, its answer controls and the feedback fit on one
+   screen, so nothing needs scrolling and the Next bar covers nothing. Shown
+   after an answer, the question shrinks to one strip of small cards. */
+.more summary { cursor: pointer; color: var(--accent); font-size: 14px; min-height: 44px; display: flex; align-items: center; }
+.more[open] summary { margin-bottom: 4px; }
+@media (max-width: 699px) {
+  main:has(.reveal) { gap: 8px; }
+  .question.revealed { gap: 4px; }
+  .question > .stack { flex-direction: row; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px; }
+  .question > .stack > :not(.labelled) { flex-basis: 100%; }
+  .question > .stack .stack:not(.beats-me-hands) { flex-direction: column; }
+  main:has(.question:not(.revealed)) { gap: 10px; }
+  .card-hero { --card-w: 56px; }
+  .card-board { --card-w: 48px; }
+  .card-opp { --card-w: 44px; }
+  .stack.compact .card-hero { --card-w: 52px; }
+  .stack.compact .card-board { --card-w: 46px; }
+  .beats-me-hands .card-board { --card-w: 40px; }
+  .beats-me-hands { gap: 6px 12px; }
+  .prompt { font-size: 17px; line-height: 1.3; }
+  .keypad { gap: 6px; }
+  .key { min-height: 46px; }
+  .keypad-display { font-size: 28px; min-height: 40px; }
+  .answers { gap: 8px; }
+  .question.revealed > .stack { gap: 4px 12px; }
+  .question.revealed .labelled { gap: 1px; }
+  .question.revealed .label { font-size: 11px; letter-spacing: .03em; }
+  .question.revealed .card-hero, .question.revealed .card-board, .question.revealed .card-opp { --card-w: 32px; border-radius: 5px; }
+  .question.revealed .card-row { gap: 3px; flex-wrap: nowrap; }
+  .question.revealed .card-rank { top: 2px; left: 3px; }
+  .question.revealed .chain-part, .question.revealed .anchor-label { display: none; }
+  .question.revealed .beats-me-hands { display: none; }
+  .question.revealed .chips { gap: 6px; }
+  .question.revealed .chip { min-width: 0; padding: 2px 8px; border-radius: 8px; }
+  .question.revealed .chip-label { font-size: 11px; }
+  .question.revealed .chip-value { font-size: 15px; }
+  .question.revealed .context, .question.revealed .prompt { font-size: 13px; line-height: 1.3; }
+  .question.revealed .facts { font-size: 13px; gap: 2px; line-height: 1.3; }
+  .question.revealed .opp-row { gap: 4px 12px; }
+  .timeline { gap: 4px; }
+  .tl-street { padding: 4px 8px; gap: 2px; }
+  .tl-head { font-size: 13px; gap: 6px; }
+  .tl-actions { font-size: 13px; gap: 0 8px; }
+  .tl-head .card-small { --card-w: 22px; }
+  .tl-head .card-small .card-rank { font-size: 12px; top: 1px; left: 2px; }
+  .question.revealed .timeline { gap: 2px; }
+  .question.revealed .tl-street { padding: 2px 6px; flex-direction: row; flex-wrap: wrap; align-items: center; column-gap: 8px; }
+  .question.revealed .tl-head, .question.revealed .tl-actions { font-size: 12px; }
+  .question.revealed .tl-head .card-small { --card-w: 18px; }
+  .question.revealed .tl-head .card-small .card-rank { font-size: 10px; }
+  .question.revealed .tl-pot { margin-left: 0; }
+  .reveal .table-options li { padding: 3px 8px; gap: 0; }
+  .reveal .table-options .hint { font-size: 13px; line-height: 1.3; }
+  .reveal { padding: 10px 12px; gap: 6px; }
+  .verdict { font-size: 18px; line-height: 1.25; }
+  .verdict .you { font-size: 13px; }
+  .reveal-answer { font-size: 16px; }
+  .reveal-answer strong { font-size: 18px; }
+  .reveal-line { font-size: 15px; line-height: 1.35; }
+  .reveal .facts { font-size: 14px; gap: 3px; line-height: 1.35; }
+  .reveal .stat-list { font-size: 14px; gap: 2px 10px; }
+  .reveal .card-small { --card-w: 24px; }
+  .reveal .card-small .card-rank { font-size: 13px; top: 1px; left: 2px; }
+  .reveal .mini-cards.wrap { gap: 3px; }
+  .reveal .labelled { gap: 3px; }
+  .reveal .table-options { gap: 4px; }
+  .reveal .table-options li { padding: 4px 8px; }
+  .reveal-tie { margin-top: 2px; }
+  .reflect { margin-top: 8px; padding-top: 8px; }
+  main:has(.reveal) .action-bar { padding-top: 6px; padding-bottom: calc(6px + var(--bottom-inset)); }
+}
+/* Short phones (iPhone SE and the like). */
+@media (max-width: 699px) and (max-height: 740px) {
+  main { gap: 8px; }
+  .card-hero { --card-w: 48px; }
+  .card-board, .stack.compact .card-board { --card-w: 42px; }
+  .stack.compact .card-hero { --card-w: 46px; }
+  .card-opp, .beats-me-hands .card-board { --card-w: 38px; }
+  .label { font-size: 12px; }
+  .question { gap: 8px; }
+  .question > .stack { gap: 6px 14px; }
+  .chip { padding: 4px 10px; min-width: 0; }
+  .chip-value { font-size: 17px; }
+  .prompt { font-size: 16px; }
+  .context, .facts { font-size: 14px; line-height: 1.35; }
+  .btn { min-height: 44px; padding: 8px 14px; }
+  .key { min-height: 42px; font-size: 20px; }
+  .keypad-display { font-size: 24px; min-height: 34px; }
+  .choice-grid { gap: 6px; }
+  .choice-grid.large .choice { min-height: 50px; font-size: 18px; }
+  .top-bar { min-height: 44px; }
+  .question.revealed .card-hero, .question.revealed .card-board, .question.revealed .card-opp { --card-w: 30px; }
+}
+
+/* When the feedback still runs past the screen, Next sits after it instead of
+   floating over it. */
+.action-bar.in-flow { position: static; background: none; }

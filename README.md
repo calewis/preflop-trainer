@@ -33,7 +33,7 @@ exhaustive 7-card count and regenerating the anchor deck with its full preflop s
 - `drill [--skill NAME]... [--minutes N] [--items N] [--seed N]`: defaults to 10 minutes.
   `--skill` deals only the named skills. Without it, every practice group is dealt at its
   fixed share (see "Practice groups" below).
-- `check`: the mixed held-out checkup, 40 items across the groups with no feedback until
+- `check`: the mixed held-out checkup, 40 items (36 while "Call or fold" is hidden) across the groups with no feedback until
   the end, then a score by group. `check --skill NAME` takes the older one-skill checkup:
   40 new items plus 10 repeats, scored against the skill's pass mark.
 - `progress`: last-40 stats against the pass marks, baseline and checkup history, and how
@@ -59,6 +59,12 @@ groups at fixed shares of the items (`src/groups.rs`, starting guesses):
 | Board reading | 15% | `nuts`, `possible`, `made`, `board_type`, `beats_me` |
 | Outs | 10% | `outs` (3), `hit` (2) |
 | Spots | 10% | `spot` (2), `spot_mw` (2), `table` (1) |
+
+The two "Call or fold" drills (`spot`, `spot_mw`) are switched off for now: `HIDDEN_SKILLS` in
+`src/groups.rs` lists them, and nothing deals a listed drill (no group, mixed drill, review or
+monthly checkup), so the Spots group deals only `table`. Their code, data and logged answers
+stay, Progress still shows their history, and `--skill spot` still deals them by name. Empty
+the list to bring them back.
 
 Each new item's group is picked at random, weighted by how far the group is behind its share of
 the items dealt so far plus one item of slack (`SHARE_SLACK_ITEMS`), so the shares hold at every
@@ -135,7 +141,9 @@ anything.
 
 The monthly checkup is mixed: 40 held-out items across the groups, near the drill's shares
 (preflop 8, read the price 7, equity 5 and anchors 2, one whole hand of 4 stages, board reading
-6, outs 4, spots 4; `MIXED_CHECKUP_MIX` in `src/checkup.rs`). `table` is left out. A hand's
+6, outs 4, spots 4; `MIXED_CHECKUP_MIX` in `src/checkup.rs`). `table` is left out, and so are
+the hidden drills' items (36 items while "Call or fold" is off; a run begun before that is
+scored on the 40 it followed). A hand's
 stages stay together and in order; there are no repeats. It is scored as the percent right
 (close answers count) with a standard error, and by group. Its forms are stored from
 `MIXED_FORM_BASE` (1,000,000) up, so its rows need no new log column. Home offers it, as an

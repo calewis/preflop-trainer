@@ -1,5 +1,5 @@
 """Full browser test suite: python3 web/test/run.py [sections...]
-Sections: native libgroups groups libresearch libreadprice readprice libcli research researchshots (on request only) libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card preflopspots libpreflop offline nostorage legacy screens
+Sections: samebuild phonefit hiddendrills native libgroups groups libresearch libreadprice readprice libcli research researchshots (on request only) libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card preflopspots libpreflop offline nostorage legacy screens
 Results go to target/webtest/results.json and screenshots to target/webtest/screens/."""
 import itertools, json, os, pathlib, random, re, shutil, subprocess, sys, time
 
@@ -573,8 +573,11 @@ def drill_session(page, inspector, want_all, max_items, keyboard=False, label_pr
 
 # Every skill the default drill deals except `table`, which comes too rarely to
 # promise both a right and a wrong answer. `price` and `beats` are no longer dealt.
-ALL_SKILLS = ["preflop", "nuts", "possible", "made", "beats_me", "read_price", "outs", "hit", "spot", "spot_mw",
+# `spot` and `spot_mw` are hidden for now (HIDDEN_SKILLS in src/groups.rs), so never dealt.
+ALL_SKILLS = ["preflop", "nuts", "possible", "made", "beats_me", "read_price", "outs", "hit",
               "board_type", "equity", "anchor", "chain"]
+# The monthly checkup without the hidden drills' four items.
+MIXED_LEN = 36
 RETIRED_SKILLS = ["price", "beats"]
 LOG_COLUMNS = "timestamp_ms\tmode\tbaseline_run\tskill\titem\tgen_version\tcorrect\tclose\tev_loss_pct\tresponse_ms\tanswer"
 PASSING_SKILLS = [("nuts", "AKs"), ("possible", "f"), ("made", "top"), ("beats_me", "a"), ("board_type", "td"),
@@ -1088,6 +1091,8 @@ def table_outcomes(page, bundle):
 
 
 def check_table_reveal(page, verdict, want_correct, outcome, where):
+    # The breakdown by opponent type sits behind a toggle: read it opened.
+    page.eval("document.querySelectorAll('.reveal details').forEach(d => { d.open = true; })")
     reveal = page.eval("document.querySelector('.reveal').innerText")
     check(page.eval("document.querySelector('.verdict').textContent").startswith("Correct" if want_correct else "Not quite"),
           f"{where}: verdict line {reveal[:80]}")
@@ -1206,6 +1211,7 @@ def run_research(viewport=(390, 844), mobile=True, theme="light", port_offset=0)
         open_limited_drill(page, "spot")
         answer_drill_item(page, False)
         wait_rows(page, 1)
+        page.eval("document.querySelectorAll('.reveal details').forEach(d => { d.open = true; })")
         text = page.eval("document.querySelector('.reveal').innerText")
         check(re.search(r"Calling stops being right above about \$\d+\.", text), f"no flip call line: {text}")
         check(re.search(r"\d+ of 4[67] next cards put you ahead of the price\.", text), f"no flip card line: {text}")
@@ -1218,6 +1224,7 @@ def run_research(viewport=(390, 844), mobile=True, theme="light", port_offset=0)
         seed_log(page, port, LOG_COLUMNS + "\n")
         open_limited_drill(page, "spot_mw")
         answer_drill_item(page, True)
+        page.eval("document.querySelectorAll('.reveal details').forEach(d => { d.open = true; })")
         text = page.eval("document.querySelector('.reveal').innerText")
         check("Calling stops being right above about" in text, f"multiway has no flip call line: {text}")
         check("next cards put you ahead" not in text, f"multiway must not show the card count: {text}")
@@ -2064,28 +2071,28 @@ def run_checkup():
         page.eval("[...document.querySelectorAll('[data-checkup-offers] a')].find(a => a.textContent.includes('monthly')).click()")
         page.wait("!!document.querySelector('.panel .btn.primary')", 20)
         text = page.eval("document.body.innerText")
-        check("40 new questions from all seven practice groups" in text, f"checkup intro: {text[:300]}")
+        check(f"{MIXED_LEN} new questions from across the practice groups" in text, f"checkup intro: {text[:300]}")
         inspector.snapshot("checkup-intro")
         click_text(page, ".btn.primary", "Begin")
         before = len(rows_of(page))
-        answers = play_checkup(page, inspector, True, count=40, total=40, shot="checkup-item")
+        answers = play_checkup(page, inspector, True, count=MIXED_LEN, total=MIXED_LEN, shot="checkup-item")
         page.wait("!!document.querySelector('.big-score')", 30)
         text = page.eval("document.body.innerText")
         print("mixed checkup result:", text[:500].replace("\n", " | "))
         check("100% right" in text, "mixed checkup score wrong")
-        check("Scored on all 40 questions" in text, "mixed checkup scope missing")
+        check(f"Scored on all {MIXED_LEN} questions" in text, "mixed checkup scope missing")
         check(page.eval("!!document.querySelector('[data-by-group]')") and "Whole hands" in text and "4 of 4" in text and "8 of 8" in text,
               f"no result by group: {text[:500]}")
         check("Mark met" not in text and "repeated" not in text, f"a mixed checkup has no mark or repeats: {text[:300]}")
         check("first checkup" in text, "first-checkup comparison missing")
         inspector.snapshot("checkup-result")
         rows = rows_of(page)[before:]
-        check_checkup_rows(rows, 40, "mixed checkup", "1", "1000000", columns=None)
+        check_checkup_rows(rows, MIXED_LEN, "mixed checkup", "1", "1000000", columns=None)
         counts = {}
         for r in rows:
             counts[r[3]] = counts.get(r[3], 0) + 1
         check(counts == {"preflop": 8, "read_price": 7, "equity": 5, "anchor": 2, "chain": 4, "nuts": 1, "possible": 1, "made": 1,
-                         "board_type": 1, "beats_me": 2, "outs": 2, "hit": 2, "spot": 2, "spot_mw": 2}, f"mixed checkup skills: {counts}")
+                         "board_type": 1, "beats_me": 2, "outs": 2, "hit": 2}, f"mixed checkup skills (call or fold hidden): {counts}")
         # Taken: Home stops offering it for a month.
         page.eval("location.hash = '#home'")
         wait_home(page)
@@ -2185,47 +2192,47 @@ def run_checkup_quit():
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Begin')", 20)
         click_text(page, ".btn.primary", "Begin")
         before = len(rows_of(page))
-        play_checkup(page, inspector, True, start_number=1, count=4, total=40)
+        play_checkup(page, inspector, True, start_number=1, count=4, total=MIXED_LEN)
         # Stop partway: the screen must not reveal a score.
         page.wait(READY + " && __trainer.current.number === 5", 30)
         page.eval("document.querySelector('.top-bar button.back').click()")
         must_see(page, "document.body.innerText.includes('Checkup saved')", 20, "stopping a checkup did not reach the saved screen")
         text = page.eval("document.body.innerText")
-        check("4 of 40 answered" in text, f"quit screen: {text[:300]}")
+        check(f"4 of {MIXED_LEN} answered" in text, f"quit screen: {text[:300]}")
         check("correct" not in text and "plus or minus" not in text, f"a quit checkup leaked a score: {text[:300]}")
         inspector.snapshot("checkup-saved")
         # Home and Progress offer to resume, even after a reload.
         page.eval("location.hash = '#home'")
         wait_home(page)
         home = page.eval("document.body.innerText")
-        check("Resume checkup (4 of 40)" in home, f"no resume on home: {home[:400]}")
+        check(f"Resume checkup (4 of {MIXED_LEN})" in home, f"no resume on home: {home[:400]}")
         page.send("Page.reload", {})
         page.wait("!!document.querySelector('.app-title') && !!window.__trainer", 30)
-        check("Resume checkup (4 of 40)" in page.eval("document.body.innerText"), "resume lost on reload")
+        check(f"Resume checkup (4 of {MIXED_LEN})" in page.eval("document.body.innerText"), "resume lost on reload")
         page.eval("location.hash = '#progress'")
         page.wait("!!document.querySelector('.skill-row')", 20)
-        check("Resume checkup (4 of 40)" in page.eval("document.body.innerText"), "resume missing from Progress")
+        check(f"Resume checkup (4 of {MIXED_LEN})" in page.eval("document.body.innerText"), "resume missing from Progress")
         # Resume: the next question is the fifth, the first four stay as logged.
         page.eval("[...document.querySelectorAll('a.btn')].find(a => a.textContent.includes('Resume checkup')).click()")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Resume')", 20)
         check("Start over" in page.eval("document.body.innerText"), "no option to start over")
         click_text(page, ".btn.primary", "Resume")
         page.wait(READY, 30)
-        check(page.eval("document.querySelector('.top-bar .count').textContent") == "5 of 40", "resume did not continue at question 5")
+        check(page.eval("document.querySelector('.top-bar .count').textContent") == f"5 of {MIXED_LEN}", "resume did not continue at question 5")
         # Leave by the back gesture partway, then resume again and finish.
         page.eval("location.hash = '#home'")
         wait_home(page)
-        check("Resume checkup (4 of 40)" in page.eval("document.body.innerText"), "back gesture lost the checkup")
+        check(f"Resume checkup (4 of {MIXED_LEN})" in page.eval("document.body.innerText"), "back gesture lost the checkup")
         page.eval("location.hash = '#checkup:mixed'")
         must_see(page, "[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Resume')", 20, "after the back gesture the checkup was not offered to resume")
         click_text(page, ".btn.primary", "Resume")
-        answers = play_checkup(page, inspector, True, start_number=5, count=36, total=40)
+        answers = play_checkup(page, inspector, True, start_number=5, count=MIXED_LEN - 4, total=MIXED_LEN)
         page.wait("!!document.querySelector('.big-score')", 30)
         check("100% right" in page.eval("document.body.innerText"), "resumed checkup score wrong")
         rows = rows_of(page)[before:]
-        check_checkup_rows(rows, 40, "resumed checkup", "1", "1000000", columns=None)
-        check(sorted(int(r[13]) for r in rows) == list(range(40)), f"slots not 0-39: {sorted(int(r[13]) for r in rows)}")
-        results["checkup_resumed"] = 40
+        check_checkup_rows(rows, MIXED_LEN, "resumed checkup", "1", "1000000", columns=None)
+        check(sorted(int(r[13]) for r in rows) == list(range(MIXED_LEN)), f"slots not 0-{MIXED_LEN - 1}: {sorted(int(r[13]) for r in rows)}")
+        results["checkup_resumed"] = MIXED_LEN
         # Starting over leaves the old run and begins a new form; the new run is resumable.
         page.eval("location.hash = '#home'")
         wait_home(page)
@@ -2243,7 +2250,7 @@ def run_checkup_quit():
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Resume')", 20)
         click_text(page, ".btn", "Start over with new questions")
         page.wait(READY, 30)
-        check(page.eval("document.querySelector('.top-bar .count').textContent") == "1 of 40", "starting over did not reset to question 1")
+        check(page.eval("document.querySelector('.top-bar .count').textContent") == f"1 of {MIXED_LEN}", "starting over did not reset to question 1")
         current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
         check(current["form"] == 1000002 and current["run"] == 3, f"start over used form {current['form']} run {current['run']}")
         check(not browser.errors, f"checkup quit errors: {browser.errors[:5]}")
@@ -2663,7 +2670,7 @@ def capture_new_screens(page, port, inspector):
     page.eval("location.hash = '#checkup:mixed'")
     page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Resume')", 20)
     click_text(page, ".btn.primary", "Resume")
-    play_checkup(page, inspector, True, start_number=2, count=39, total=40)
+    play_checkup(page, inspector, True, start_number=2, count=MIXED_LEN - 1, total=MIXED_LEN)
     page.wait("!!document.querySelector('.big-score')", 30)
     inspector.snapshot("checkup-result")
     page.eval("location.hash = '#home'")
@@ -3208,6 +3215,292 @@ def run_preflop_spots():
         srv.shutdown()
 
 
+# --- the grade is always about the question on screen --------------------------
+VISIBLE_AGAIN = """(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); return 1; })()"""
+
+# Records every grade reply, so a test can hold it against the question shown.
+GRADE_HOOK = """(() => {
+  const e = __trainer.engine; const call = e.call;
+  window.__grades = [];
+  e.call = (...args) => { const p = call(...args); if (/grade$/.test(args[0])) p.then(r => __grades.push({ args, r })); return p; };
+  return 1; })()"""
+
+# Makes every worker but the first (the engine) deal a different item than asked
+# for, `__tamper` times: a prep worker that disagrees with the engine.
+TAMPER_PREP = """
+(() => {
+  const Original = window.Worker;
+  window.__workers = [];
+  window.__tamper = 0;
+  window.Worker = function (...args) { const w = new Original(...args); window.__workers.push(w); return w; };
+  window.Worker.prototype = Original.prototype;
+  const post = Original.prototype.postMessage;
+  Original.prototype.postMessage = function (message, ...rest) {
+    if (this !== window.__workers[0] && window.__tamper > 0 && message && message.args && message.args[0] === 'prepare') {
+      window.__tamper -= 1;
+      const args = message.args.slice();
+      args[2] = String(BigInt(args[2]) ^ 4n);
+      message = { ...message, args };
+    }
+    return post.call(this, message, ...rest);
+  };
+})();
+"""
+
+
+def shown_cards(question):
+    cards = list(question.get("board", []))
+    for key in ("hero", "villain", "hand"):
+        cards += question.get(key) or []
+    return set(cards)
+
+
+def check_grade_matches(page, bundle, where):
+    """The last grade reply is about the question shown: same fingerprint, and an
+    outs list that holds none of the cards on screen."""
+    grades = json.loads(page.eval("JSON.stringify(__grades)"))
+    mine = [g for g in grades if g["r"].get("outcome")]
+    if not mine:
+        return  # graded from the bundle itself
+    reply = mine[-1]["r"]
+    check(reply.get("check") == bundle.get("check"), f"{where}: graded {reply.get('check')} but shown {bundle.get('check')}")
+    outs = reply["outcome"]["reveal"].get("outs")
+    if outs is not None:
+        clash = set(outs) & shown_cards(bundle["question"])
+        check(not clash, f"{where}: outs {sorted(clash)} are cards on the screen")
+
+
+def run_same_build():
+    """A worker started after a new release is published still runs the page's
+    build, and a grade about another question is never shown."""
+    port = 8962 + PORT_SHIFT
+    srv = server.start(port)
+    older = OUT / "older-trainer.wasm"
+    shown = subprocess.run(["git", "show", "0e2dd11:app/trainer.wasm"], capture_output=True, cwd=ROOT)
+    if shown.returncode == 0 and shown.stdout[:4] == b"\0asm":
+        older.write_bytes(shown.stdout)  # the release before the whole-hand deal changed
+    else:
+        older = OUT / "no-such-trainer.wasm"  # without history: a release that can't be fetched
+    browser = Browser("samebuild")
+    try:
+        page = browser.page
+        boot_app(page, port)
+        # A new release goes up, then the app comes back to the foreground, which
+        # replaces the prep worker.
+        srv.wasm_override = older
+        page.eval(VISIBLE_AGAIN)
+        page.eval(GRADE_HOOK)
+        page.eval("[...document.querySelectorAll('[data-group]')].find(b => b.dataset.group === 'hands').click()")
+        outs_seen = 0
+        for i in range(8):
+            page.wait(READY, 60)
+            if i % 3 == 1:
+                page.eval(VISIBLE_AGAIN)
+            current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+            bundle = current["bundle"]
+            truth = page.eval(f"__trainer.engine.call('prepare', {json.dumps(bundle['skill'])}, {json.dumps(bundle['seed'])}, 'new').then(b => JSON.stringify(b.question))")
+            check(json.loads(truth) == bundle["question"], f"item {i}: the question shown is not the engine's {bundle['skill']} {bundle['seed']}")
+            outs_seen += bundle["question"].get("stage") == "outs"
+            page.eval("__grades.length = 0")
+            kind, answer = pick_answer(page, current, False)
+            type_answer(page, current, kind, answer)
+            page.wait("!!document.querySelector('.reveal')", 30)
+            check_grade_matches(page, bundle, f"after a restart, item {i}")
+            check("out of date" not in page.eval("document.body.innerText"), f"item {i}: the page and its workers disagreed")
+            click(page, ".action-bar .btn")
+            page.wait("!document.querySelector('.reveal')", 30)
+        check(outs_seen >= 2, f"only {outs_seen} outs questions were dealt")
+        check(not browser.errors, f"same build errors: {browser.errors[:5]}")
+    finally:
+        srv.wasm_override = None
+        browser.close()
+        srv.shutdown()
+
+    # Whatever the cause, a grade about another question is refused: the item is
+    # dealt again by the grading engine and only the answer to it is kept.
+    port = 8963 + PORT_SHIFT
+    srv = server.start(port)
+    browser = Browser("tamper")
+    try:
+        page = browser.page
+        page.send("Page.addScriptToEvaluateOnNewDocument", {"source": TAMPER_PREP})
+        for skill in ("outs", "chain"):
+            # A fresh page: once it has caught a mismatch, a page deals from the engine.
+            boot_app(page, port)
+            page.eval(GRADE_HOOK)
+            rows_before = len(rows_of(page))
+            page.eval("window.__tamper = 1000")
+            open_limited_drill(page, skill)
+            current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+            if skill == "chain":
+                # The first stage is graded from its own bundle; the second goes to the engine.
+                kind, answer = pick_answer(page, current, True)
+                type_answer(page, current, kind, answer)
+                page.wait("!!document.querySelector('.reveal')", 30)
+                wait_rows(page, rows_before + 1)
+                click(page, ".action-bar .btn")
+                page.wait(READY, 60)
+                rows_before = len(rows_of(page))
+                current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+            stale = current["bundle"]
+            check(stale["seed"] != current["planned"]["seed"], f"{skill}: the tampered item was not dealt")
+            page.eval("__grades.length = 0")
+            for ch in "3":
+                click_text(page, ".keypad .key", ch)
+            click(page, ".answers .btn.primary")
+            page.wait("document.body.innerText.includes('out of date')", 30)
+            page.wait(READY, 30)
+            check(not page.eval("!!document.querySelector('.reveal')"), f"{skill}: a reveal about another question was shown")
+            fresh = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+            check(fresh["bundle"]["seed"] == fresh["planned"]["seed"], f"{skill}: the item was not dealt again")
+            check(fresh["bundle"]["check"] != stale["check"], f"{skill}: the same wrong item came back")
+            check(len(rows_of(page)) == rows_before, f"{skill}: the answer to the wrong question was saved")
+            page.eval("__grades.length = 0")
+            kind, answer = pick_answer(page, fresh, False)
+            type_answer(page, fresh, kind, answer)
+            page.wait("!!document.querySelector('.reveal')", 30)
+            check_grade_matches(page, fresh["bundle"], f"{skill} dealt again")
+            wait_rows(page, rows_before + 1)
+            page.eval("document.querySelector('.top-bar button.back').click()")
+            page.wait("!!document.querySelector('.big-score')", 20)
+        check(not browser.errors, f"tamper errors: {browser.errors[:5]}")
+        print("same build ok")
+    finally:
+        browser.close()
+        srv.shutdown()
+
+
+# --- every screen fits a phone ----------------------------------------------------
+FIT_JS = """(() => {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const wide = [...document.querySelectorAll('body *')].filter(e => {
+    const r = e.getBoundingClientRect(); return r.width > 0 && r.right > vw + 0.5 && !e.closest('.tabs, .live-slot');
+  }).slice(0, 3).map(e => e.tagName + '.' + e.className);
+  const bar = document.querySelector('.action-bar');
+  let covered = [];
+  if (bar && getComputedStyle(bar).position === 'sticky') {
+    const top = bar.getBoundingClientRect().top;
+    covered = [...document.querySelectorAll('.reveal *, .question *, .reflect *')].filter(e => {
+      if (e.children.length || !e.textContent.trim() || e.closest('details:not([open]) > :not(summary)')) return false;
+      const r = e.getBoundingClientRect(); return r.height > 0 && r.bottom > top + 1 && r.top < vh;
+    }).slice(0, 3).map(e => e.textContent.trim().slice(0, 30));
+  }
+  return JSON.stringify({ scrollWidth: document.documentElement.scrollWidth, vw, vh, height: document.documentElement.scrollHeight, wide, covered });
+})()"""
+
+# Drills whose question and feedback must fit a 390 x 844 screen without scrolling.
+# Table spots run longer; there Next follows the feedback instead of covering it.
+FIT_SKILLS = ["preflop", "nuts", "possible", "made", "beats_me", "read_price", "outs", "hit", "board_type", "equity", "anchor", "chain"]
+
+
+def check_fit(page, where, width, must_fit):
+    info = json.loads(page.eval(FIT_JS))
+    check(info["scrollWidth"] <= width and not info["wide"], f"{where}: wider than the screen ({info['scrollWidth']}px): {info['wide']}")
+    check(info["vw"] == width, f"{where}: the page was laid out {info['vw']}px wide")
+    check(not info["covered"], f"{where}: Next covers {info['covered']}")
+    if must_fit:
+        check(info["height"] <= info["vh"], f"{where}: {info['height']}px tall on a {info['vh']}px screen")
+    return info
+
+
+def run_phone_fit():
+    port = 8964 + PORT_SHIFT
+    srv = server.start(port)
+    browser = Browser("phonefit")
+    try:
+        page = browser.page
+        tall = {}
+        for width, height in ((375, 667), (390, 844)):
+            fits = width == 390
+            boot_app(page, port, viewport=(width, height, True))
+            page.eval("localStorage.clear()")
+            boot_app(page, port, viewport=(width, height, True))
+            check_fit(page, f"{width} home", width, False)
+            # One session through every drill: the width set by a long screen must
+            # not carry over to the next (on iOS it would stay).
+            for skill in FIT_SKILLS + ["table"]:
+                page.eval("location.hash = '#home'")
+                page.wait("!!document.querySelector('.app-title')", 20)
+                open_limited_drill(page, skill)
+                for i in range(4 if skill in ("outs", "chain", "beats_me", "table") else 2):
+                    page.wait(READY, 60)
+                    current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+                    stage = current["bundle"]["question"].get("stage", "")
+                    where = f"{width} {skill}{(' ' + stage) if stage else ''} {i}"
+                    check_fit(page, f"{where} question", width, fits and skill != "table")
+                    kind, answer = pick_answer(page, current, False)
+                    type_answer(page, current, kind, answer)
+                    page.wait("!!document.querySelector('.reveal')", 30)
+                    time.sleep(0.1)
+                    info = check_fit(page, f"{where} feedback", width, fits and skill != "table")
+                    tall[where] = info["height"]
+                    # Opening every "Show all" keeps the width and the bar clear.
+                    page.eval("document.querySelectorAll('.reveal details').forEach(d => { d.open = true; })")
+                    time.sleep(0.05)
+                    check_fit(page, f"{where} feedback opened", width, False)
+                    click(page, ".action-bar .btn")
+                    page.wait("!document.querySelector('.reveal')", 30)
+                page.eval("document.querySelector('.top-bar button.back').click()")
+                page.wait("!!document.querySelector('.big-score')", 20)
+                check_fit(page, f"{width} {skill} summary", width, False)
+            for screen_hash in ("#progress", "#card", "#backup", "#checkup:mixed", "#baseline"):
+                page.eval(f"location.hash = '{screen_hash}'")
+                time.sleep(0.6)
+                check_fit(page, f"{width} {screen_hash}", width, False)
+        print("phone fit ok; tallest feedback:", sorted(tall.items(), key=lambda kv: -kv[1])[:3])
+        check(not browser.errors, f"phone fit errors: {browser.errors[:5]}")
+    finally:
+        browser.close()
+        srv.shutdown()
+
+
+# --- hidden drills ------------------------------------------------------------------
+def spot_history(count=30):
+    """Drill rows for both call-or-fold drills, as a player who answered them has."""
+    lines = []
+    for i in range(count):
+        skill = "spot" if i % 2 else "spot_mw"
+        lines.append(f"{1_700_000_000_000 + i * 60_000}\tdrill\t\t{skill}\t{1000 + i}\t6\t{i % 3 != 0:d}\t0\t\t4000\tc")
+    return "\n".join(lines) + "\n"
+
+
+def run_hidden_drills():
+    """'Call or fold' is switched off: nothing deals it, yet its history stays."""
+    port = 8965 + PORT_SHIFT
+    srv = server.start(port)
+    browser = Browser("hidden-drills")
+    try:
+        page = browser.page
+        boot_app(page, port)
+        seed_log(page, port, spot_history())
+        home = page.eval("document.body.innerText")
+        check("Call or fold" not in page.eval("[...document.querySelectorAll('[data-group]')].map(b => b.title).join(' ')"), "the picker still offers call or fold")
+        check("Spots" in home, f"the spots group (table spots) disappeared: {home[:300]}")
+        dealt = page.eval("""(async () => {
+          const seen = [];
+          for (const group of ['', 'group:spots']) {
+            await __trainer.engine.call('session_open', '99', Date.now(), group);
+            await __trainer.engine.call('session_start', '60');
+            for (let i = 0; i < 60; i++) {
+              const next = await __trainer.engine.call('session_next', 0);
+              if (next.finished) break;
+              seen.push(next.planned.skill);
+            }
+          }
+          return seen.join(',');
+        })()""", timeout=120).split(",")
+        check(len(dealt) >= 60 and not {"spot", "spot_mw"} & set(dealt), f"call or fold was dealt: {sorted(set(dealt))}")
+        check("table" in dealt, "the spots group deals no table spots")
+        page.eval("location.hash = '#progress'")
+        page.wait("document.body.innerText.includes('Call or fold')", 20)
+        check(len(rows_of(page)) == 30, "saved call-or-fold answers were lost")
+        check(not browser.errors, f"hidden drill errors: {browser.errors[:5]}")
+        print("hidden drills ok")
+    finally:
+        browser.close()
+        srv.shutdown()
+
+
 SECTIONS = {
     "native": run_native, "wasmclean": run_wasm_clean, "doubletap": run_doubletap, "twotabs": run_twotabs,
     "libresearch": run_lib_research, "libcli": run_lib_cli, "libreadprice": run_lib_read_price, "readprice": run_read_price, "research": run_research, "researchshots": run_research_shots, "libtable": run_lib_table, "tablespots": run_table_spots, "midgrade": run_mid_grade,
@@ -3217,6 +3510,7 @@ SECTIONS = {
     "newskills": run_new_skills, "noneleft": run_none_left, "checkup": run_checkup, "checkupquit": run_checkup_quit,
     "checkuptabs": run_checkup_tabs, "checkupconflict": run_checkup_conflict, "progressnew": run_progress_new,
     "libgroups": run_lib_groups, "groups": run_groups,
+    "samebuild": run_same_build, "phonefit": run_phone_fit, "hiddendrills": run_hidden_drills,
     "preflopspots": run_preflop_spots, "libpreflop": run_lib_preflop, "card": run_card, "offline": run_offline, "nostorage": run_nostorage, "legacy": run_legacy, "screens": run_screens,
 }
 

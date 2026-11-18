@@ -4,25 +4,35 @@ const decoder = new TextDecoder();
 let exports_ = null;
 let panicText = '';
 
-const ready = (async () => {
-  const imports = {
-    env: {
-      tr_panic(ptr, len) {
-        panicText = decoder.decode(new Uint8Array(exports_.memory.buffer, ptr, len));
+// The page hands over the engine's bytes first, so every worker it starts runs the
+// same build. A worker started without them (or given none) fetches the file.
+let ready = null;
+
+function start(bytes) {
+  ready = (async () => {
+    const imports = {
+      env: {
+        tr_panic(ptr, len) {
+          panicText = decoder.decode(new Uint8Array(exports_.memory.buffer, ptr, len));
+        },
       },
-    },
-  };
-  const url = new URL('trainer.wasm', self.location.href);
-  let instance;
-  try {
-    ({ instance } = await WebAssembly.instantiateStreaming(fetch(url), imports));
-  } catch (_) {
-    const bytes = await (await fetch(url)).arrayBuffer();
-    ({ instance } = await WebAssembly.instantiate(bytes, imports));
-  }
-  exports_ = instance.exports;
-  exports_.tr_init();
-})();
+    };
+    let instance;
+    if (bytes) {
+      ({ instance } = await WebAssembly.instantiate(bytes, imports));
+    } else {
+      const url = new URL('trainer.wasm', self.location.href);
+      try {
+        ({ instance } = await WebAssembly.instantiateStreaming(fetch(url), imports));
+      } catch (_) {
+        const fetched = await (await fetch(url)).arrayBuffer();
+        ({ instance } = await WebAssembly.instantiate(fetched, imports));
+      }
+    }
+    exports_ = instance.exports;
+    exports_.tr_init();
+  })();
+}
 
 function call(text) {
   const bytes = encoder.encode(text);
@@ -34,6 +44,11 @@ function call(text) {
 }
 
 self.onmessage = async event => {
+  if (event.data && 'wasm' in event.data) {
+    if (!ready) start(event.data.wasm);
+    return;
+  }
+  if (!ready) start(null);
   const { id, args } = event.data;
   try {
     await ready;

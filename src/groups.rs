@@ -4,6 +4,25 @@
 
 use crate::item::Skill;
 
+/// Drills switched off for now: nothing deals them (no drill, group, mixed
+/// session, review or monthly checkup), but their code, their data and every
+/// saved answer stay, and progress still shows their history. Empty this list to
+/// bring them back. "Call or fold" and "Call or fold, multiway" are off at the
+/// owner's request (2026-11-17).
+pub const HIDDEN_SKILLS: &[Skill] = &[Skill::Spot, Skill::SpotMw];
+
+/// False for a drill in [`HIDDEN_SKILLS`].
+pub const fn is_dealt(skill: Skill) -> bool {
+    let mut i = 0;
+    while i < HIDDEN_SKILLS.len() {
+        if HIDDEN_SKILLS[i] as u8 == skill as u8 {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Group {
     Preflop,
@@ -42,8 +61,9 @@ impl Group {
         }
     }
 
+    /// The skills this group deals today: its members minus [`HIDDEN_SKILLS`].
     pub fn skills(self) -> Vec<Skill> {
-        self.members().iter().map(|&(skill, _)| skill).collect()
+        self.members().iter().map(|&(skill, _)| skill).filter(|&skill| is_dealt(skill)).collect()
     }
 
     /// The code a front end passes to pick this group.
