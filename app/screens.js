@@ -1,6 +1,6 @@
 // The app's screens. Each `show*` function fills the page and sets the key handler.
 import { h } from './dom.js';
-import { engine, prepareDrill, prepareBaseline, prepareCheck, clearSpeculation, drillKey, distrustPrep } from './engine.js';
+import { engine, prepareDrill, prepareLeak, prepareBaseline, prepareCheck, clearSpeculation, drillKey, leakKey, syncLeaks, distrustPrep } from './engine.js';
 import { answerControls } from './answers.js';
 import { questionView, revealView } from './reveal.js';
 import * as store from './store.js';
@@ -100,7 +100,9 @@ export async function showHome() {
       h('div', { class: 'group-list' }, home.groups.map(g => h('button', {
         class: 'btn group', 'data-group': g.code, title: g.skills.join(', '),
         onclick: () => startDrill(minutes, g.code),
-      }, g.title)))),
+      }, g.title)),
+      // Your own preflop mistakes, loaded from a file on this device only.
+      h('a', { class: 'btn group', 'data-group': 'mistakes', href: '#mistakes' }, 'Preflop mistakes'))),
     home.checkup ? h('section', { class: 'panel', 'data-checkup-offers': '' },
       h('h2', { class: 'panel-title' }, 'Monthly checkup'),
       h('p', { class: 'hint' }, `${home.checkup.total} questions across every group, no feedback until the end. Optional: it gates nothing.`),
@@ -130,6 +132,24 @@ function checkupLink(offer) {
 let drill = null;
 
 let starting = false;
+
+/** Starts a personal-leaks drill session (item-count limit, no countdown clock). */
+async function startLeakDrill(total, preflopOnly = false) {
+  if (starting || drill) return;
+  starting = true;
+  try {
+    const opened = await engine.call('session_open', randomSeed(), Date.now(), preflopOnly ? 'leaks:preflop' : 'leaks');
+    prepared = opened.first;
+    if (prepared) prepareLeak(prepared, true);
+    drill = {
+      leaks: true, title: preflopOnly ? 'Preflop mistakes' : 'My leaks',
+      total: opened.total || total, startedAt: activeNow(), answered: 0, ok: 0,
+    };
+    location.hash = '#drill';
+  } finally {
+    starting = false;
+  }
+}
 
 /** Starts the prepared mixed drill, or one practice group's when `group` is given. */
 async function startDrill(minutes, group) {
@@ -167,6 +187,13 @@ function timeLeft() {
 }
 
 function drillHeader(title, tag) {
+  if (drill.leaks) {
+    const num = Math.min(drill.answered + 1, drill.total);
+    return h('header', { class: 'top-bar' },
+      h('button', { class: 'back', onclick: endDrill }, 'End'),
+      h('h1', { class: 'top-title' }, drill.title, tag ? h('span', { class: 'tag' }, tag) : null),
+      h('div', { class: 'top-right' }, h('span', { class: 'count' }, `${num} of ${drill.total}`)));
+  }
   const clock = h('span', { class: 'timer', 'aria-hidden': 'true' }, timeLeft());
   const count = h('span', { class: 'count' }, `${drill.answered} done`);
   if (drill.clock) clearInterval(drill.clock);
@@ -261,10 +288,10 @@ async function nextDrillItem() {
     if (drill !== state) return;
     if (next.finished) { await finishDrill(next.out_of_items); return; }
     const planned = next.planned;
-    const bundle = await prepareDrill(planned, true);
+    const bundle = await (state.leaks ? prepareLeak(planned, true) : prepareDrill(planned, true));
     if (drill !== state) return;
     showItem(planned, bundle);
-    speculate(planned).catch(() => {});
+    speculate(planned, state.leaks).catch(() => {});
   } catch (err) {
     if (drill === state) renderFailure(err, leave);
   } finally {
@@ -272,14 +299,14 @@ async function nextDrillItem() {
   }
 }
 
-async function speculate(planned) {
+async function speculate(planned, isLeak) {
   const [right, wrong] = await Promise.all([
     engine.call('session_peek', 1),
     engine.call('session_peek', 0),
   ]);
   const upcoming = [right.planned, wrong.planned].filter(Boolean);
-  clearSpeculation(upcoming.map(drillKey));
-  upcoming.forEach(item => prepareDrill(item, false));
+  clearSpeculation(upcoming.map(isLeak ? leakKey : drillKey));
+  upcoming.forEach(item => (isLeak ? prepareLeak(item, false) : prepareDrill(item, false)));
 }
 
 const ORIGIN_TAG = { new: '', due: 'review', retry: 'again' };
@@ -491,7 +518,11 @@ async function commitAnswer(outcome, response, confidence) {
     state.answered = result.answered;
     if (result.ok) state.ok += 1;
     const count = document.querySelector('.top-right .count');
-    if (count) count.textContent = `${result.answered} done`;
+    if (count) {
+      count.textContent = state.leaks
+        ? `${Math.min(result.answered, state.total)} of ${state.total}`
+        : `${result.answered} done`;
+    }
   }
 }
 
@@ -1140,6 +1171,9 @@ export async function showBackup() {
     downloadFile(exported);
   }
 
+  const loader = leakLoader(() => {});
+  await loader.refresh();
+
   screen(
     topBar('Backup'),
     h('section', { class: 'panel' },
@@ -1155,7 +1189,107 @@ export async function showBackup() {
       h('h2', { class: 'panel-title' }, 'Import'),
       h('p', {}, 'Adds attempts from a file exported earlier. Lines already here are skipped.'),
       h('label', { class: 'btn file-btn' }, 'Choose a file', file),
-      status));
+      status),
+    h('section', { class: 'panel', 'data-leak-panel': '' },
+      h('h2', { class: 'panel-title' }, 'My leaks'),
+      h('p', {}, 'A leak file from your hand reviews, kept on this device only. Nothing is sent anywhere.'),
+      loader.el));
+}
+
+// --- Preflop mistakes ------------------------------------------------------------
+// The hands you played wrong before the flop, from a leak file made on your
+// computer. The file stays on this device: it is never part of the app.
+
+/** File and paste controls for a leak file, with a status line. */
+function leakLoader(onChange) {
+  const status = h('p', { class: 'hint', 'data-leak-status': '' });
+  const clearBtn = h('button', {
+    class: 'btn', 'data-leak-clear': '',
+    onclick: async () => {
+      store.clearLeaks();
+      await syncLeaks('');
+      show(null);
+      status.textContent = 'Cleared your mistakes from this device.';
+      onChange(null);
+    },
+  }, 'Clear');
+  const show = info => {
+    status.classList.remove('error');
+    clearBtn.disabled = !(info && info.count > 0);
+    status.textContent = info && info.count > 0
+      ? `Loaded ${info.count} hand${info.count === 1 ? '' : 's'} (${info.preflop} preflop${info.price ? `, ${info.price} price` : ''}).`
+      : 'Nothing loaded yet.';
+  };
+  const load = async text => {
+    try {
+      const res = await syncLeaks(text);
+      store.writeLeaks(text);
+      noticeIfStorageLost();
+      show(res);
+      onChange(res);
+    } catch (err) {
+      status.classList.add('error');
+      status.textContent = `That is not a leak file: ${err.message || String(err)}`;
+    }
+  };
+  const fileInput = h('input', {
+    type: 'file', accept: '.txt,text/plain', hidden: true, 'data-leak-input': '',
+    onchange: async event => {
+      const picked = event.target.files[0];
+      if (picked) await load(await picked.text());
+      event.target.value = '';
+    },
+  });
+  const pasted = h('textarea', {
+    class: 'paste', rows: '3', 'data-leak-paste': '', autocomplete: 'off', spellcheck: 'false',
+    placeholder: 'Or paste the file\'s text here (it starts with #LEAKS v1)',
+  });
+  const pasteBtn = h('button', {
+    class: 'btn', 'data-leak-paste-load': '',
+    onclick: async () => {
+      if (!pasted.value.trim()) { status.textContent = 'Paste the text first.'; return; }
+      await load(pasted.value);
+      pasted.value = '';
+    },
+  }, 'Load pasted text');
+  const el = h('div', { class: 'stack leak-loader' },
+    h('div', { class: 'row' },
+      h('label', { class: 'btn primary file-btn', 'data-leak-load': '' }, 'Load my mistakes', fileInput),
+      clearBtn),
+    pasted, pasteBtn, status);
+  return {
+    el,
+    async refresh() {
+      const home = await engine.call('home', Date.now());
+      show(home.leaks);
+      return home.leaks;
+    },
+  };
+}
+
+export async function showMistakes() {
+  await syncFromStorage();
+  const body = h('div', { class: 'stack' });
+  const render = info => {
+    const ready = info && info.preflop > 0;
+    body.replaceChildren(
+      ready
+        ? h('section', { class: 'panel', 'data-mistakes-ready': '' },
+          h('p', {}, `${info.preflop} hand${info.preflop === 1 ? '' : 's'} you played wrong before the flop: the same cards, seat, table size and action. Your answer is judged against the preflop card.`),
+          h('p', { class: 'hint' }, 'The ones you keep getting wrong come back sooner and more often; ones you get right in a row fade.'),
+          h('button', { class: 'btn primary', 'data-mistakes-start': '', onclick: () => startLeakDrill(info.session_items, true) },
+            `Start (${info.session_items} questions)`))
+        : h('section', { class: 'panel', 'data-mistakes-empty': '' },
+          h('p', {}, 'No mistakes loaded on this device yet.'),
+          h('ol', { class: 'facts' },
+            h('li', {}, 'On your computer, make the file with leak_drills.py --preflop-only.'),
+            h('li', {}, 'Send it to this phone (AirDrop, Messages or email, then Save to Files).'),
+            h('li', {}, 'Tap Load my mistakes and pick it, or paste its text below.'))),
+      h('section', { class: 'panel' }, h('h2', { class: 'panel-title' }, ready ? 'Replace or clear' : 'Load'), loader.el));
+  };
+  const loader = leakLoader(render);
+  render(await loader.refresh());
+  screen(topBar('Preflop mistakes'), body);
 }
 
 // --- Notices ------------------------------------------------------------------

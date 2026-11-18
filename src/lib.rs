@@ -21,6 +21,7 @@ pub mod groups;
 pub mod grade;
 pub mod item;
 pub mod ladder;
+pub mod leaks;
 pub mod log;
 pub mod money;
 pub mod preflop;

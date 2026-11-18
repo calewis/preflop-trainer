@@ -157,6 +157,8 @@ function tableQuestion(q) {
 
 function readPriceQuestion(q) {
   return h('div', { class: 'stack' },
+    q.hero ? hand(q.hero) : null,
+    q.board ? labelled(`Board (${q.street || 'postflop'})`, cardRow(q.board, 'board')) : null,
     h('div', { class: 'chips' },
       chip('Pot before the bet', money(q.pot_before)),
       q.bet === null ? null : chip('Bet', money(q.bet)),
@@ -418,5 +420,8 @@ export function revealView(outcome) {
   return h('div', { class: `reveal ${tone}` },
     h('p', { class: 'verdict' }, verdict, ' ', h('span', { class: 'you' }, `You answered ${outcome.picked}.`)),
     revealBody(outcome.reveal),
+    outcome.leak ? h('div', { class: 'leak-note', 'data-leak-note': '' },
+      h('p', { class: 'leak-when' }, `In your hand · ${outcome.leak.when}`),
+      h('p', { class: 'leak-did' }, `${outcome.leak.did} ${outcome.leak.cost}`)) : null,
     outcome.tie_line ? h('p', { class: 'reveal-tie' }, outcome.tie_line) : null);
 }

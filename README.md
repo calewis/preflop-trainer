@@ -106,6 +106,22 @@ and 4-bets (about 1.5%) are rare.
 Attempts go to `$POKER_TRAINER_HOME/attempts.tsv` (default `~/.poker-trainer/`), an
 append-only log. Colour is used only on a terminal with `NO_COLOR` unset.
 
+## Preflop mistakes
+
+"Preflop mistakes" in the web app's group picker drills the hands you played wrong before
+the flop, from a `#LEAKS v1` file made on your computer from your logged hands
+(`postflop-lab/tools/leak_drills.py --preflop-only`). Each question is the hand as it was:
+your cards, seat, table size and the action you faced, and your answer is judged against the
+preflop card. The app only loads a file in which the card grades every leak as written
+(the action you took wrong, the expected one right; `verify_leaks` in `src/leaks.rs`). A session is 15 questions; leaks you
+missed come back three to five questions later, and across sessions a leak's weight shrinks
+with each right answer in a row and grows after a miss (`STREAK_DECAY`, `MISS_BOOST`).
+
+The file is personal: it is never part of the app or this repository (`.gitignore` skips
+`leaks*.txt`). On the phone, tap Load my mistakes and pick the file in Files, or paste its
+text; it is kept in that browser's storage only, and Clear (there or under Backup) removes it.
+Answers are logged with mode `leak` and an anonymous family tag, with no hand ids or dates.
+
 ## What the spot grading assumes
 
 `spot` and `spot_mw` state each opponent as a tight, average or loose player and a mix of

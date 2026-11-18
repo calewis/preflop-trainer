@@ -101,10 +101,14 @@ export const engine = client(message => fatalHandler(message));
 // A crashed prep worker is replaced, but not forever if it can't even start.
 const MAX_PREP_RESTARTS = 5;
 let prepRestarts = 0;
+let leaksText = '';
 const prepWorker = client(message => {
   prepRestarts += 1;
   if (prepRestarts > MAX_PREP_RESTARTS) prepWorker.stop(message);
-  else prepWorker.restart();
+  else {
+    prepWorker.restart();
+    if (leaksText) prepWorker.call('load_leaks', leaksText).catch(() => {});
+  }
 });
 
 // iOS can bring a home-screen app back from the background with its workers
@@ -167,6 +171,21 @@ export function prepareDrill(planned, urgent) {
   return request(`d:${planned.skill}:${planned.seed}`, ['prepare', planned.skill, planned.seed, planned.origin], urgent);
 }
 
+export function prepareLeak(planned, urgent) {
+  return request(`l:${planned.seed}:${planned.origin}`, ['prepare_leak', planned.seed, planned.origin], urgent);
+}
+
+export async function syncLeaks(text) {
+  bundles.clear();
+  queue.splice(0);
+  leaksText = text || '';
+  const [reply] = await Promise.all([
+    engine.call('load_leaks', leaksText),
+    prepWorker.call('load_leaks', leaksText),
+  ]);
+  return reply;
+}
+
 export function prepareBaseline(seed, index, urgent) {
   return request(`b:${seed}:${index}`, ['prepare_baseline', seed, index], urgent);
 }
@@ -184,6 +203,8 @@ export function clearSpeculation(keepKeys) {
 }
 
 export function drillKey(planned) { return `d:${planned.skill}:${planned.seed}`; }
+
+export function leakKey(planned) { return `l:${planned.seed}:${planned.origin}`; }
 
 /** For tests and timing: the milliseconds a prepare call took inside the worker. */
 export function timePrepare(args) { return prepWorker.timed(...args); }

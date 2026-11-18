@@ -1,6 +1,6 @@
-import { engine, onFatalError, prepareDrill } from './engine.js';
+import { engine, onFatalError, prepareDrill, syncLeaks } from './engine.js';
 import * as store from './store.js';
-import { showHome, showDrill, showBaseline, showCheckup, showCard, showProgress, showBackup,
+import { showHome, showDrill, showBaseline, showCheckup, showCard, showProgress, showBackup, showMistakes,
   drillActive, baselineActive, checkupActive, endEverything, noticeIfStorageLost, showFatalNotice, activeNow } from './screens.js';
 
 const fatal = showFatalNotice;
@@ -15,6 +15,7 @@ const routes = {
   card: showCard,
   progress: showProgress,
   backup: showBackup,
+  mistakes: showMistakes,
 };
 
 async function route() {
@@ -38,6 +39,10 @@ window.addEventListener('hashchange', route);
   noticeIfStorageLost();
   const log = store.readLog();
   await engine.call('load', log);
+  const leaks = store.readLeaks();
+  if (leaks) {
+    try { await syncLeaks(leaks); } catch (_) { store.clearLeaks(); await syncLeaks(''); }
+  }
   await route();
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});

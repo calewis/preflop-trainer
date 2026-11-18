@@ -549,3 +549,11 @@ button:focus-visible, a:focus-visible, label:focus-visible { outline: 2px solid 
 /* When the feedback still runs past the screen, Next sits after it instead of
    floating over it. */
 .action-bar.in-flow { position: static; background: none; }
+
+.leak-note { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; font-size: 14.5px; line-height: 1.35; }
+.leak-when { font-weight: 600; color: var(--ink); }
+.leak-did { color: var(--muted); }
+
+/* Preflop mistakes: loading a leak file kept on this device. */
+.leak-loader { gap: 8px; }
+.paste { width: 100%; min-height: 64px; font: 16px/1.35 ui-monospace, Menlo, monospace; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px; resize: vertical; }

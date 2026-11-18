@@ -37,6 +37,8 @@ pub enum Mode {
     /// Not an attempt: the player's answers to a reflection form. Everything that
     /// counts attempts filters by the modes above, so these rows are invisible to it.
     Reflect,
+    /// A personal-leak drill item loaded from a local leak export.
+    Leak,
 }
 
 impl Mode {
@@ -47,6 +49,7 @@ impl Mode {
             Mode::DrillRetry => "drill-retry",
             Mode::Check => "check",
             Mode::Reflect => "reflect",
+            Mode::Leak => "leak",
         }
     }
 
@@ -57,6 +60,7 @@ impl Mode {
             "drill-retry" => Some(Mode::DrillRetry),
             "check" => Some(Mode::Check),
             "reflect" => Some(Mode::Reflect),
+            "leak" => Some(Mode::Leak),
             _ => None,
         }
     }
@@ -198,6 +202,22 @@ impl Attempt {
         let mut attempt =
             Attempt::record(Mode::Check, None, skill, ItemRef::Seed(seed), outcome, timestamp_ms, response_ms);
         attempt.extra.check = Some(check);
+        attempt
+    }
+
+    /// The log record for an answered personal-leak drill item.
+    pub fn from_leak(
+        skill: Skill,
+        seed: u64,
+        family_tag: String,
+        outcome: &Outcome,
+        timestamp_ms: u64,
+        response_ms: u32,
+    ) -> Attempt {
+        let mut attempt =
+            Attempt::record(Mode::Leak, None, skill, ItemRef::Seed(seed), outcome, timestamp_ms, response_ms);
+        attempt.gen_version = crate::leaks::LEAK_GEN_VERSION;
+        attempt.extra.family = Some(family_tag);
         attempt
     }
 

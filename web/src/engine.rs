@@ -19,6 +19,10 @@ use poker_trainer::equity_skill::{
 use poker_trainer::generate::generate;
 use poker_trainer::grade::{grade_choices, grade_timed};
 use poker_trainer::item::{Item, Skill};
+use poker_trainer::leaks::{
+    decode_leak_seed, family_log_tag, parse_leaks, verify_leaks, LeakCounts, LeakLibrary, LeakRevealNote, LeakSession,
+    DEFAULT_LEAK_ITEMS,
+};
 use poker_trainer::log::{asks_confidence, format_attempt, parse_log, Attempt, CheckRef, Confidence, ItemRef, Mode, LOG_HEADER};
 use poker_trainer::preflop::{chart_for, preflop_answer, Action, Seat, Situation, CARD};
 use poker_trainer::groups::{group_of, is_dealt, Group};
@@ -45,7 +49,7 @@ thread_local! {
 /// Runs one command and returns its JSON answer.
 pub fn dispatch(input: &str) -> String {
     // The log text is one field, whatever bytes it happens to contain.
-    let fields: Vec<&str> = if input.starts_with("load\x1f") || input.starts_with("merge\x1f") {
+    let fields: Vec<&str> = if input.starts_with("load\x1f") || input.starts_with("merge\x1f") || input.starts_with("load_leaks\x1f") {
         input.splitn(2, '\x1f').collect()
     } else {
         input.split('\x1f').collect()
@@ -79,6 +83,8 @@ fn seed_text(seed: u64) -> V {
 struct Engine {
     attempts: Vec<Attempt>,
     session: Option<LiveSession>,
+    leak_session: Option<LiveLeakSession>,
+    leaks: Option<LeakLibrary>,
     baseline: Option<LiveBaseline>,
 }
 
@@ -88,6 +94,12 @@ struct LiveSession {
     current: Option<Planned>,
     /// Finished items, for the session summary.
     done: Vec<(Planned, bool, u32)>,
+}
+
+struct LiveLeakSession {
+    real: LeakSession,
+    current: Option<Planned>,
+    done: Vec<(Planned, bool)>,
 }
 
 struct LiveBaseline {
@@ -183,9 +195,11 @@ impl Engine {
     fn run(&mut self, fields: &[&str]) -> Reply {
         match fields.first().copied().unwrap_or("") {
             "prepare" => self.prepare(fields),
+            "prepare_leak" => self.prepare_leak(fields),
             "prepare_baseline" => self.prepare_baseline(fields),
             "prepare_check" => self.prepare_check(fields),
             "load" => self.load(arg(fields, 1)?),
+            "load_leaks" => self.load_leaks(fields.get(1).copied().unwrap_or("")),
             "export" => Ok(obj! { "text": self.log_text() }),
             "merge" => self.merge(arg(fields, 1)?),
             "home" => Ok(self.home(fields)),
@@ -212,6 +226,49 @@ impl Engine {
             "check_report" => self.check_report(fields),
             other => Err(format!("unknown command {other}")),
         }
+    }
+
+    fn load_leaks(&mut self, text: &str) -> Reply {
+        if text.trim().is_empty() {
+            self.leaks = None;
+            self.leak_session = None;
+            return Ok(obj! { "loaded": false, "count": 0usize, "preflop": 0usize, "price": 0usize, "session_items": DEFAULT_LEAK_ITEMS });
+        }
+        let lib = parse_leaks(text)?;
+        let counts: LeakCounts = verify_leaks(&lib).map_err(|errs| errs.into_iter().next().unwrap_or_default())?;
+        self.leaks = Some(lib);
+        Ok(obj! {
+            "loaded": true,
+            "count": counts.total,
+            "preflop": counts.preflop,
+            "price": counts.price,
+            "session_items": DEFAULT_LEAK_ITEMS,
+        })
+    }
+
+    fn prepare_leak(&self, fields: &[&str]) -> Reply {
+        let seed = parse_u64(arg(fields, 1)?, "seed")?;
+        let lib = self.leaks.as_ref().ok_or("no leak file loaded")?;
+        let (id, _) = decode_leak_seed(seed);
+        let entry = lib.get(id).ok_or("unknown leak id")?;
+        let item = entry.item_for_seed(seed);
+        let mut question = present::question(&item.question);
+        if let (V::Obj(ref mut map), Some((hero, board, street))) = (&mut question, entry.cards_for_seed(seed)) {
+            map.push(("hero".to_string(), present::holding_value(&hero)));
+            map.push(("board".to_string(), present::cards_value(&board)));
+            map.push(("street".to_string(), V::from(street)));
+        }
+        Ok(obj! {
+            "skill": item.skill.name(),
+            "seed": seed_text(item.seed),
+            "title": "My leaks",
+            "question": question,
+            "format": present::format(&item.question),
+            "graded": V::Obj(Vec::new()),
+            "confidence": Option::<V>::None,
+            "leak": true,
+            "check": question_check(&item),
+        })
     }
 
     fn prepare(&mut self, fields: &[&str]) -> Reply {
@@ -315,11 +372,20 @@ impl Engine {
     /// The second field is the time now, which the checkup offer depends on.
     fn home(&self, fields: &[&str]) -> V {
         let now_ms = fields.get(1).and_then(|t| t.parse().ok()).unwrap_or(0);
+        let leaks = self.leaks.as_ref().map(|lib| {
+            obj! {
+                "count": lib.counts.total,
+                "preflop": lib.counts.preflop,
+                "price": lib.counts.price,
+                "session_items": DEFAULT_LEAK_ITEMS,
+            }
+        });
         obj! {
             "has_baseline": has_baseline(&self.attempts),
             "baseline_size": BASELINE_SIZE,
             "groups": groups_json(),
             "checkup": checkup_offer_json(mixed_checkup_offer(&self.attempts, now_ms)),
+            "leaks": leaks,
         }
     }
 
@@ -456,6 +522,26 @@ impl Engine {
     fn session_open(&mut self, fields: &[&str]) -> Reply {
         let seed = parse_u64(arg(fields, 1)?, "seed")?;
         let now_ms = parse_u64(arg(fields, 2)?, "now")?;
+        // `leaks` deals every loaded leak; `leaks:preflop` only the preflop ones
+        // (the "Preflop mistakes" drill).
+        let pick = fields.get(3).copied();
+        if pick == Some("leaks") || pick == Some("leaks:preflop") {
+            let lib = self.leaks.clone().ok_or("no leak file loaded")?;
+            let mut real = LeakSession::new(lib, &self.attempts, seed, Some(DEFAULT_LEAK_ITEMS));
+            if pick == Some("leaks:preflop") {
+                real = real.preflop_only();
+                if real.eligible_count() == 0 {
+                    return Err("no preflop mistakes are loaded".to_string());
+                }
+            }
+            let total = real.total_items();
+            let mut preview = real.clone();
+            let first = preview.try_next_item().map(planned_json);
+            self.session = None;
+            self.leak_session = Some(LiveLeakSession { real, current: None, done: Vec::new() });
+            return Ok(obj! { "first": first, "total": total, "leaks": true });
+        }
+        self.leak_session = None;
         // Nothing is the default mixed drill; `group:CODE` deals one practice group;
         // a comma-separated list of skills deals exactly those.
         let real = match fields.get(3).copied().unwrap_or("") {
@@ -487,12 +573,26 @@ impl Engine {
 
     fn session_start(&mut self, fields: &[&str]) -> Reply {
         let minutes = parse_u64(arg(fields, 1)?, "minutes")?;
+        if self.leak_session.is_some() {
+            return Ok(obj! { "minutes": minutes as u32 });
+        }
         let live = self.session.as_mut().ok_or("no session is open")?;
         live.limits = SessionLimits::resolve(Some(minutes), None);
         Ok(obj! { "minutes": minutes as u32 })
     }
 
     fn session_next(&mut self, fields: &[&str]) -> Reply {
+        if let Some(live) = self.leak_session.as_mut() {
+            let Some(planned) = live.real.try_next_item() else {
+                return Ok(obj! { "finished": true, "out_of_items": false });
+            };
+            live.current = Some(planned);
+            return Ok(obj! {
+                "planned": planned_json(planned),
+                "answered": live.done.len(),
+                "total": live.real.total_items(),
+            });
+        }
         let elapsed = parse_u64(arg(fields, 1)?, "elapsed")?;
         let live = self.session.as_mut().ok_or("no session is open")?;
         // A hand in progress finishes before the session's time runs out.
@@ -509,6 +609,14 @@ impl Engine {
     /// The item that would follow the current one if it were answered `ok`.
     fn session_peek(&mut self, fields: &[&str]) -> Reply {
         let ok = arg(fields, 1)? == "1";
+        if let Some(live) = self.leak_session.as_ref() {
+            let Some(current) = live.current else {
+                return Ok(obj! { "planned": V::Null });
+            };
+            let mut copy = live.real.clone();
+            copy.record(current, ok);
+            return Ok(obj! { "planned": copy.try_next_item().map(planned_json) });
+        }
         let live = self.session.as_ref().ok_or("no session is open")?;
         let Some(current) = live.current else {
             return Ok(obj! { "planned": V::Null });
@@ -525,6 +633,31 @@ impl Engine {
     }
 
     fn session_summary(&self) -> Reply {
+        if let Some(live) = self.leak_session.as_ref() {
+            let mut rows: Vec<(Skill, usize, usize)> = Vec::new();
+            let mut ok_total = 0usize;
+            for &(planned, ok) in &live.done {
+                if !rows.iter().any(|r| r.0 == planned.skill) {
+                    rows.push((planned.skill, 0, 0));
+                }
+                let row = rows.iter_mut().find(|r| r.0 == planned.skill).expect("added above");
+                row.1 += 1;
+                row.2 += usize::from(ok);
+                ok_total += usize::from(ok);
+            }
+            let by_skill: Vec<V> = rows
+                .iter()
+                .map(|&(skill, answered, ok)| {
+                    obj! { "title": present::skill_title(skill), "answered": answered, "ok": ok }
+                })
+                .collect();
+            return Ok(obj! {
+                "answered": live.done.len(),
+                "ok": ok_total,
+                "by_skill": by_skill,
+                "leaks": true,
+            });
+        }
         let live = self.live()?;
         let mut rows: Vec<(Skill, usize, usize)> = Vec::new();
         let mut ok_total = 0;
@@ -551,6 +684,25 @@ impl Engine {
         let seed = parse_u64(arg(fields, 2)?, "seed")?;
         let raw = arg(fields, 3)?;
         let response = response_field(fields, 4)?;
+        if let Some(live) = self.leak_session.as_ref() {
+            let entry = live.real.entry_for_seed(seed).ok_or("unknown leak id")?;
+            let item = entry.item_for_seed(seed);
+            return match grade_timed(&item, raw, response) {
+                Ok(outcome) => {
+                    let template = Attempt::from_leak(skill, seed, family_log_tag(&entry.family), &outcome, 0, 0);
+                    let mut out = present::outcome(&item, &outcome, format_attempt(&template), response, V::Null);
+                    let note: LeakRevealNote = entry.reveal_note();
+                    if let V::Obj(ref mut map) = out {
+                        map.push((
+                            "leak".to_string(),
+                            obj! { "when": note.when, "did": note.did, "cost": note.cost },
+                        ));
+                    }
+                    Ok(obj! { "outcome": out, "check": question_check(&item) })
+                }
+                Err(invalid) => Ok(obj! { "invalid": invalid.0 }),
+            };
+        }
         let item = self.session_item(skill, seed);
         match grade_timed(&item, raw, response) {
             Ok(outcome) => {
@@ -590,6 +742,19 @@ impl Engine {
         let now = parse_u64(arg(fields, 2)?, "now")?;
         let response = parse_u64(arg(fields, 3)?, "response")?.min(u64::from(u32::MAX)) as u32;
         let mut attempt = Self::attempt_from_template(arg(fields, 1)?, now, response)?;
+        if let Some(live) = self.leak_session.as_mut() {
+            attempt.mode = Mode::Leak;
+            let expected = live.current.is_some_and(|p| p.skill == attempt.skill && attempt.item == ItemRef::Seed(p.seed));
+            let ok = attempt.ok();
+            let line = format_attempt(&attempt);
+            self.attempts.push(attempt);
+            if expected {
+                let planned = live.current.take().ok_or("no item is waiting for an answer")?;
+                live.real.record(planned, ok);
+                live.done.push((planned, ok));
+            }
+            return Ok(obj! { "line": line, "ok": ok, "answered": live.done.len() });
+        }
         // A fourth field carries the optional confidence tap.
         if asks_confidence(attempt.skill) {
             attempt.extra.confidence = fields.get(4).and_then(|code| Confidence::from_code(code));
@@ -1969,5 +2134,67 @@ mod tests {
             let reply = graded_reply(|a| dispatch(&format!("baseline_grade\x1f{index}\x1f{a}")));
             assert_eq!(check_of(&bundle), check_of(&reply), "baseline question {index}");
         }
+    }
+
+    #[test]
+    fn leaks_bridge_loads_deals_without_spoilers_and_clears_cleanly() {
+        load("");
+        assert!(dispatch("load_leaks\x1f").contains("\"loaded\":false"));
+        assert!(dispatch("home\x1f1000").contains("\"leaks\":null"));
+        assert!(dispatch("session_open\x1f7\x1f1000\x1fleaks").contains("\"error\":"));
+
+        let sample = "#LEAKS v1\n\
+#meta generated_at=2026-01-15T12:00:00 hands=2 leaks=2 preflop=1 price=1 half_life_days=14\n\
+LEAK|0|preflop|leak:pf:early:limpers:ATo|4000|1|2026-01-15|2026-01-15a|synth-01|4.00|-18.5|You raised to 4bb from UTG+1 (over 1 limper)|Put in 4.0bb here; lost 18.5bb on the hand|players=9|hero_pos=UTG+1|behind=7|sit=limpers:1|hand=AcTd|hero_act=r|expect=f\n\
+LEAK|1|price|leak:price:call_below:river|3500|1|2026-01-15|2026-01-15a|synth-02|20.00|-20.0|You called 20bb into 120bb on the river (needed 14%, had 2%-4%)|Put in 20.0bb here; lost 20.0bb on the hand|street=river|hero_pos=BB|board=4sQc3s5s3c|hand=As9h|pot_before=100|bet=20|callers=0|share_pct=3|tight_pct=2|loose_pct=4|hero_act=c|expect=f\n";
+        let loaded = dispatch(&format!("load_leaks\x1f{sample}"));
+        assert!(loaded.contains("\"loaded\":true") && loaded.contains("\"count\":2"), "{loaded}");
+        assert!(dispatch("home\x1f1000").contains("\"preflop\":1,\"price\":1"), "home must summarize leaks");
+
+        let opened = dispatch("session_open\x1f99\x1f1000\x1fleaks");
+        assert!(opened.contains("\"total\":15") && opened.contains("\"leaks\":true"), "{opened}");
+        for step in 0..15u64 {
+            let next = dispatch(&format!("session_next\x1f{}", step * 500));
+            let seed_needle = "\"seed\":\"";
+            let start = next.find(seed_needle).unwrap() + seed_needle.len();
+            let seed = &next[start..start + next[start..].find('"').unwrap()];
+            let skill_needle = "\"skill\":\"";
+            let k_start = next.find(skill_needle).unwrap() + skill_needle.len();
+            let skill = &next[k_start..k_start + next[k_start..].find('"').unwrap()];
+            let prep = dispatch(&format!("prepare_leak\x1f{seed}\x1fnew"));
+            assert!(prep.contains("\"graded\":{}"), "bundle must not hold pre-graded answers: {prep}");
+            assert!(!prep.contains("Put in"), "bundle must not leak reveal notes before answering: {prep}");
+            let graded = dispatch(&format!("grade\x1f{skill}\x1f{seed}\x1ff\x1f500"));
+            assert!(graded.contains("\"correct\":true") && graded.contains("\"leak\":{"), "{graded}");
+            let tmpl = template(&graded);
+            let committed = dispatch(&format!("commit\x1f{tmpl}\x1f{}\x1f500", 2000 + step));
+            assert!(committed.contains(&format!("\"answered\":{}", step + 1)), "{committed}");
+        }
+        assert!(dispatch("session_next\x1f9000").contains("\"finished\":true"));
+
+        // "Preflop mistakes" deals only the preflop leak, and its grades name the question shown.
+        let opened = dispatch("session_open\x1f5\x1f1000\x1fleaks:preflop");
+        assert!(opened.contains("\"total\":15"), "{opened}");
+        for step in 0..15u64 {
+            let next = dispatch("session_next\x1f0");
+            assert!(next.contains("\"skill\":\"preflop\""), "a price leak in Preflop mistakes: {next}");
+            let seed = field(&next, "seed");
+            let prep = dispatch(&format!("prepare_leak\x1f{seed}\x1fnew"));
+            let graded = dispatch(&format!("grade\x1fpreflop\x1f{seed}\x1f{}\x1f500", if step % 2 == 0 { "r" } else { "f" }));
+            assert_eq!(check_of(&prep), check_of(&graded), "{graded}");
+            let committed = dispatch(&format!("commit\x1f{}\x1f{}\x1f500", template(&graded), 3000 + step));
+            assert!(committed.contains("\"line\""), "{committed}");
+        }
+        // A file with no preflop leaks has no Preflop mistakes to deal.
+        let price_only: String = sample
+            .lines()
+            .filter(|l| !l.contains("|preflop|"))
+            .map(|l| format!("{}\n", l.replace("LEAK|1|price", "LEAK|0|price")))
+            .collect();
+        assert!(dispatch(&format!("load_leaks\x1f{price_only}")).contains("\"loaded\":true"));
+        assert!(dispatch("session_open\x1f5\x1f1000\x1fleaks:preflop").contains("\"error\""));
+
+        assert!(dispatch("load_leaks\x1f").contains("\"loaded\":false"));
+        assert!(dispatch("home\x1f1000").contains("\"leaks\":null"));
     }
 }

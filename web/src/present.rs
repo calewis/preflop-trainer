@@ -107,6 +107,14 @@ fn street_name(board_len: usize) -> &'static str {
     }
 }
 
+pub fn cards_value(list: &[Card]) -> V {
+    cards(list)
+}
+
+pub fn holding_value(h: &Holding) -> V {
+    holding(h)
+}
+
 pub fn question(q: &Question) -> V {
     match q {
         Question::Preflop { players, behind, situation, hand } => {

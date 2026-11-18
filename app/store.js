@@ -1,9 +1,11 @@
 // The attempt log lives in localStorage as the library's TSV text.
 const KEY = 'poker-trainer.attempts.v1';
+const LEAKS_KEY = 'poker-trainer.leaks.v1';
 const MINUTES_KEY = 'poker-trainer.minutes';
 const CONFIDENCE_KEY = 'poker-trainer.confidence';
 
 let memory = '';
+let leaksMemory = '';
 let available = true;
 // True when the newest log text only reached `memory`: stored text is then older.
 let unsaved = false;
@@ -63,4 +65,21 @@ export function readConfidence() {
 
 export function writeConfidence(on) {
   safely(() => localStorage.setItem(CONFIDENCE_KEY, on ? '1' : '0'));
+}
+
+export function readLeaks() {
+  const text = safely(() => localStorage.getItem(LEAKS_KEY), null);
+  if (text !== null) leaksMemory = text;
+  else if (available) leaksMemory = '';
+  return leaksMemory;
+}
+
+export function writeLeaks(text) {
+  leaksMemory = text;
+  safely(() => localStorage.setItem(LEAKS_KEY, text));
+}
+
+export function clearLeaks() {
+  leaksMemory = '';
+  safely(() => localStorage.removeItem(LEAKS_KEY));
 }

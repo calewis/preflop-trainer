@@ -14,6 +14,9 @@ use poker_trainer::checkup::{checkup_runs, next_checkup_run, next_form, plan_for
 use poker_trainer::equity_skill::equity_bias;
 use poker_trainer::grade::{grade_timed, Outcome};
 use poker_trainer::item::{Item, Skill};
+use poker_trainer::leaks::{
+    family_log_tag, parse_leaks, verify_leaks, LeakRevealNote, LeakSession, DEFAULT_LEAK_ITEMS,
+};
 use poker_trainer::log::{format_attempt, parse_log, Attempt, CheckRef, LOG_HEADER};
 use poker_trainer::progress::{all_stats, baseline_runs, drill_skills, has_baseline, next_baseline_run};
 use poker_trainer::rng::Rng;
@@ -29,6 +32,10 @@ Usage:
   poker-trainer drill [--skill NAME]... [--minutes N] [--items N] [--seed N]
                             run a drill (10 minutes by default); with no
                             --skill it mixes every practice group
+  poker-trainer drill --leaks [--file PATH] [--items N] [--seed N]
+                            practise from a local #LEAKS v1 export (15 items default)
+  poker-trainer check-leaks PATH
+                            verify every exported leak agrees with the trainer's grader
   poker-trainer check [--skill NAME]
                             take the mixed held-out checkup, or the older
                             one for a single skill
@@ -47,6 +54,7 @@ fn main() -> ExitCode {
             Ok(())
         }
         Some("drill") => parse_drill_args(&args[1..]).and_then(run_drill),
+        Some("check-leaks") if args.len() == 2 => run_check_leaks(Path::new(&args[1])),
         Some("check") => parse_check_args(&args[1..]).and_then(run_check),
         Some("progress") if args.len() == 1 => run_progress(),
         Some("gen-anchors") if args.len() == 1 => {
@@ -73,6 +81,8 @@ struct DrillArgs {
     minutes: Option<u64>,
     items: Option<u64>,
     seed: Option<u64>,
+    leaks: bool,
+    leak_file: Option<PathBuf>,
 }
 
 fn parse_skill(name: &str) -> Result<Skill, String> {
@@ -91,7 +101,14 @@ fn parse_check_args(args: &[String]) -> Result<CheckupKind, String> {
 }
 
 fn parse_drill_args(args: &[String]) -> Result<DrillArgs, String> {
-    let mut parsed = DrillArgs { skills: Vec::new(), minutes: None, items: None, seed: None };
+    let mut parsed = DrillArgs {
+        skills: Vec::new(),
+        minutes: None,
+        items: None,
+        seed: None,
+        leaks: false,
+        leak_file: None,
+    };
     let mut iter = args.iter();
     while let Some(flag) = iter.next() {
         let mut value = || iter.next().ok_or_else(|| format!("{flag} needs a value"));
@@ -100,6 +117,8 @@ fn parse_drill_args(args: &[String]) -> Result<DrillArgs, String> {
             "--skill" => {
                 parsed.skills.push(parse_skill(value()?)?);
             }
+            "--leaks" => parsed.leaks = true,
+            "--file" => parsed.leak_file = Some(PathBuf::from(value()?)),
             "--minutes" => parsed.minutes = Some(positive(flag, number(value()?)?)?),
             "--items" => parsed.items = Some(positive(flag, number(value()?)?)?),
             "--seed" => parsed.seed = Some(number(value()?)?),
@@ -237,7 +256,76 @@ fn ask(item: &Item, input: &mut impl BufRead, stdout: &mut impl Write) -> Asked 
     }
 }
 
+fn load_verified_leaks(path: &Path) -> Result<poker_trainer::leaks::LeakLibrary, String> {
+    let text = fs::read_to_string(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    let lib = parse_leaks(&text)?;
+    if let Err(errs) = verify_leaks(&lib) {
+        return Err(format!("leak agreement check failed ({} error(s)):\n{}", errs.len(), errs.join("\n")));
+    }
+    Ok(lib)
+}
+
+fn run_check_leaks(path: &Path) -> Result<(), String> {
+    let lib = load_verified_leaks(path)?;
+    println!(
+        "ok: {} leaks verified ({} preflop, {} price) from {}",
+        lib.counts.total,
+        lib.counts.preflop,
+        lib.counts.price,
+        path.display()
+    );
+    Ok(())
+}
+
+fn run_leak_drill(args: DrillArgs) -> Result<(), String> {
+    let path = match args.leak_file {
+        Some(p) => p,
+        None => home_dir()?.join("leaks.txt"),
+    };
+    let lib = load_verified_leaks(&path)?;
+    let store = Store::open()?;
+    let attempts = store.load();
+    let max_items = args.items.map_or(DEFAULT_LEAK_ITEMS, |n| n as usize);
+    let seed = args.seed.unwrap_or_else(clock_seed);
+    let mut session = LeakSession::new(lib, &attempts, seed, Some(max_items));
+    let total = session.total_items();
+    let style = style();
+    let stdin = io::stdin();
+    let mut input = stdin.lock();
+    let mut stdout = io::stdout();
+    let (mut asked_count, mut ok_count) = (0usize, 0usize);
+
+    while let Some(planned) = session.try_next_item() {
+        let item = session.item_for(planned);
+        let entry = session.entry_for_seed(planned.seed).expect("valid leak entry").clone();
+        let tag = if planned.origin == Origin::SessionRetry { " (again)" } else { "" };
+        println!("\n--- My leaks {} of {total}{tag} ---", asked_count + 1);
+        if let Some((hand, board, street)) = entry.cards_for_seed(planned.seed) {
+            println!("Your hand: {} · Board ({street}): {}", style.holding(hand), style.cards(&board));
+        }
+        println!("{}", render::question(&item, style));
+        let (outcome, response_ms) = match ask(&item, &mut input, &mut stdout) {
+            Asked::Quit => break,
+            Asked::Answered { outcome, response_ms } => (outcome, response_ms),
+        };
+        let attempt = Attempt::from_leak(planned.skill, planned.seed, family_log_tag(&entry.family), &outcome, now_ms(), response_ms);
+        store.append(&attempt);
+        let ok = outcome.ok();
+        session.record(planned, ok);
+        asked_count += 1;
+        ok_count += usize::from(ok);
+        println!("{}", render::reveal(&outcome, style));
+        let note: LeakRevealNote = entry.reveal_note();
+        println!("In your hand ({}): {} {}", note.when, note.did, note.cost);
+    }
+    println!("\nSession done: {ok_count} of {asked_count} right. Saved to {}.", store.path.display());
+    Ok(())
+}
+
 fn run_drill(args: DrillArgs) -> Result<(), String> {
+    if args.leaks {
+        return run_leak_drill(args);
+    }
     let store = Store::open()?;
     let attempts = store.load();
     if !has_baseline(&attempts) {

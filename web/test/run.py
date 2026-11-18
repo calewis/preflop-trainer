@@ -1793,7 +1793,8 @@ def run_groups():
         inspector = Inspector(page, (390, 844), "light", False)
         home = page.eval("document.body.innerText")
         codes = page.eval("[...document.querySelectorAll('[data-group]')].map(b => b.dataset.group)")
-        check(codes == list(GROUP_SKILLS), f"group picker on a first visit: {codes}")
+        # The seven groups, then your own Preflop mistakes.
+        check(codes == list(GROUP_SKILLS) + ["mistakes"], f"group picker on a first visit: {codes}")
         check("Step " not in home and "Locked" not in home, f"home still shows steps: {home[:300]}")
         check("preflop 20%" in home and "spots 10%" in home, f"the mix is not described: {home[:300]}")
         check(not page.eval("!!document.querySelector('[data-checkup-offers]')"), "a checkup was offered on day one")
@@ -3501,6 +3502,115 @@ def run_hidden_drills():
         srv.shutdown()
 
 
+def run_leaks(leak_file=None, saved_log=None):
+    """Preflop mistakes: says how to load when empty, loads a #LEAKS v1 file from the
+    Files picker or pasted text (on this device only), drills only the preflop
+    leaks, and clears cleanly. `leak_file` runs it on a real file instead."""
+    port = 8992 + PORT_SHIFT
+    srv = server.start(port)
+    browser = Browser("leaks")
+    try:
+        page = browser.page
+        boot_app(page, port, viewport=(390, 844, True))
+        if saved_log:
+            seed_log(page, port, saved_log)
+        rows_before = len(rows_of(page))
+        inspector = Inspector(page, (390, 844), "light", False)
+        home_reply = page.eval("__trainer.engine.call('home', Date.now())")
+        check(home_reply.get("leaks") is None, f"home leaks not null when unloaded: {home_reply}")
+        # 1. The picker entry is there, and with nothing loaded it says how to load.
+        check(page.eval("[...document.querySelectorAll('[data-group]')].some(b => b.textContent === 'Preflop mistakes')"), "no Preflop mistakes entry in the picker")
+        page.eval("document.querySelector('[data-group=mistakes]').click()")
+        page.wait("!!document.querySelector('[data-mistakes-empty]')", 20)
+        text = page.eval("document.body.innerText")
+        check("No mistakes loaded" in text and "Load my mistakes" in text and "paste" in text.lower(), f"empty state: {text[:400]}")
+        check_fit(page, "mistakes empty", 390, True)
+        inspector.snapshot("mistakes-empty")
+
+        # 2. A bad paste is refused; a good file loads from the picker.
+        page.eval("document.querySelector('[data-leak-paste]').value = 'not a leak file'")
+        page.eval("document.querySelector('[data-leak-paste-load]').click()")
+        page.wait("(document.querySelector('[data-leak-status]') || {}).textContent.includes('not a leak file')", 10)
+        if leak_file is None:
+            leak_path = OUT / "synthetic-leaks.txt"
+            leak_path.write_text(
+                "#LEAKS v1\n"
+                "#meta generated_at=2026-01-15T12:00:00 hands=2 leaks=2 preflop=1 price=1 half_life_days=14\n"
+                "LEAK|0|preflop|leak:pf:early:limpers:ATo|9000|1|2026-01-15|2026-01-15a|synth-01|4.00|-18.5|You raised to 4bb from UTG+1 (over 1 limper)|Put in 4.0bb here; lost 18.5bb on the hand|players=9|hero_pos=UTG+1|behind=7|sit=limpers:1|hand=AcTd|hero_act=r|expect=f\n"
+                "LEAK|1|price|leak:price:call_below:river|9000|1|2026-01-15|2026-01-15a|synth-02|20.00|-20.0|You called 20bb into 120bb on the river (needed 14%, had 2%-4%)|Put in 20.0bb here; lost 20.0bb on the hand|street=river|hero_pos=BB|board=4sQc3s5s3c|hand=As9h|pot_before=100|bet=20|callers=0|share_pct=3|tight_pct=2|loose_pct=4|hero_act=c|expect=f\n"
+            )
+        else:
+            leak_path = pathlib.Path(leak_file)
+        text = leak_path.read_text()
+        hand_ids = [line.split("|")[8] for line in text.splitlines() if line.startswith("LEAK|")]
+        preflop = sum(1 for line in text.splitlines() if line.startswith("LEAK|") and line.split("|")[2] == "preflop")
+        page.send("DOM.enable")
+        doc = page.send("DOM.getDocument")
+        node = page.send("DOM.querySelector", {"nodeId": doc["root"]["nodeId"], "selector": "input[data-leak-input]"})
+        page.send("DOM.setFileInputFiles", {"nodeId": node["nodeId"], "files": [str(leak_path)]})
+        page.wait("!!document.querySelector('[data-mistakes-ready]')", 30)
+        status = page.eval("document.querySelector('[data-leak-status]').textContent")
+        check(f"{preflop} preflop" in status, f"load status: {status}")
+        check_fit(page, "mistakes loaded", 390, True)
+        inspector.snapshot("mistakes-ready")
+
+        # 3. It stays loaded across a reload; pasting the text loads it as well.
+        page.send("Page.reload", {})
+        page.wait("!!document.querySelector('[data-mistakes-ready]') && !!window.__trainer", 30)
+        page.eval("document.querySelector('[data-leak-clear]').click()")
+        page.wait("!!document.querySelector('[data-mistakes-empty]')", 10)
+        page.eval(f"document.querySelector('[data-leak-paste]').value = {json.dumps(text)}")
+        page.eval("document.querySelector('[data-leak-paste-load]').click()")
+        page.wait("!!document.querySelector('[data-mistakes-ready]')", 30)
+        page.eval("document.querySelector('[data-mistakes-start]').click()")
+
+        # 4. Only preflop leaks, nothing graded in advance, the counter, and the note from your hand.
+        seen_skills = set()
+        count = 0
+        for idx in range(15):
+            page.wait(READY + " || !!document.querySelector('.big-score')", 30)
+            if page.eval("!!document.querySelector('.big-score')"):
+                break
+            current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+            check(not current["bundle"]["graded"], f"leak item {idx} shipped pre-graded answers")
+            check(page.eval("document.querySelector('.top-title').textContent").startswith("Preflop mistakes"), "title")
+            counter = page.eval("document.querySelector('.top-bar .count').textContent")
+            check(counter == f"{idx + 1} of 15", f"leak counter {counter} at step {idx}")
+            seen_skills.add(current["bundle"]["skill"])
+            check_fit(page, f"mistake {idx} question", 390, True)
+            # Half wrong (the play he made), half right, so misses come back.
+            options = [o["code"] for o in current["bundle"]["format"]["options"]]
+            type_answer(page, current, "choice", options[idx % len(options)])
+            page.wait("!!document.querySelector('.reveal [data-leak-note]')", 30)
+            note = page.eval("document.querySelector('.reveal [data-leak-note]').innerText")
+            check("In your hand" in note and ("Put in" in note or "Cost" in note or "Folded" in note), f"leak reveal note missing details: {note}")
+            check_fit(page, f"mistake {idx} feedback", 390, True)
+            if idx == 0:
+                inspector.snapshot("mistakes-r", full=True)
+            count += 1
+            click(page, ".action-bar .btn")
+            page.wait("!document.querySelector('.reveal')", 30)
+        check(count == 15, f"only {count} mistakes were dealt")
+        check(seen_skills == {"preflop"}, f"Preflop mistakes dealt {seen_skills}")
+        page.wait("!!document.querySelector('.big-score')", 20)
+
+        # 5. Rows say only "leak" and an anonymous tag: no hand ids or dates from the file.
+        rows = rows_of(page)
+        check(len(rows) == rows_before + 15, f"{len(rows) - rows_before} leak rows saved")
+        log_text = page.eval(f"localStorage.getItem({json.dumps(LOG_KEY)}) || ''")
+        check("\tleak\t" in log_text and not any(h in log_text for h in hand_ids), "leak rows leaked hand ids into the attempt log")
+        page.eval("location.hash = '#backup'")
+        page.wait("!!document.querySelector('[data-leak-clear]')", 20)
+        page.eval("document.querySelector('[data-leak-clear]').click()")
+        page.wait("(document.querySelector('[data-leak-status]') || {}).textContent.includes('Cleared')", 10)
+        page.eval("location.hash = '#mistakes'")
+        page.wait("!!document.querySelector('[data-mistakes-empty]')", 20)
+        check(not browser.errors, f"leaks browser errors: {browser.errors[:5]}")
+        print("leaks ok", f"({len(hand_ids)} leaks, {preflop} preflop)")
+    finally:
+        browser.close()
+        srv.shutdown()
+
 SECTIONS = {
     "native": run_native, "wasmclean": run_wasm_clean, "doubletap": run_doubletap, "twotabs": run_twotabs,
     "libresearch": run_lib_research, "libcli": run_lib_cli, "libreadprice": run_lib_read_price, "readprice": run_read_price, "research": run_research, "researchshots": run_research_shots, "libtable": run_lib_table, "tablespots": run_table_spots, "midgrade": run_mid_grade,
@@ -3509,7 +3619,7 @@ SECTIONS = {
     "differential": run_differential, "timing": run_timing, "e2e": run_e2e, "baseline": run_baseline,
     "newskills": run_new_skills, "noneleft": run_none_left, "checkup": run_checkup, "checkupquit": run_checkup_quit,
     "checkuptabs": run_checkup_tabs, "checkupconflict": run_checkup_conflict, "progressnew": run_progress_new,
-    "libgroups": run_lib_groups, "groups": run_groups,
+    "libgroups": run_lib_groups, "groups": run_groups, "leaks": run_leaks,
     "samebuild": run_same_build, "phonefit": run_phone_fit, "hiddendrills": run_hidden_drills,
     "preflopspots": run_preflop_spots, "libpreflop": run_lib_preflop, "card": run_card, "offline": run_offline, "nostorage": run_nostorage, "legacy": run_legacy, "screens": run_screens,
 }
