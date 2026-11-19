@@ -5,7 +5,7 @@ use crate::beats_me::{self, kinds_analysis, mix_standing, standing, BeatKind, Ki
 use crate::answer::MAX_OUTS;
 use crate::board_type::{classify_flop, BoardCategory, BOARD_TYPE_MISS_MS};
 use crate::cards::{holding_mask, mask_of, rank_from_byte, suit_from_byte, unseen_cards, unseen_holdings, Card, Holding};
-use crate::classes::{combos_in_class, made_class, matches_opp_class, mix_combos, rank_of, MadeClass, OppMix};
+use crate::classes::{combos_in_class, made_class, matches_opp_class, mix_combos, opponent_role, rank_of, MadeClass, OppMix};
 use crate::equity::{equity_all_in, equity_next_card, share_by_next_card, Equity};
 use crate::equity_skill::EquityBand;
 use crate::eval::{straight_top, Category, HandRank};
@@ -1264,6 +1264,7 @@ pub fn spot_analysis(q: &SpotQuestion, seed: u64) -> Option<SpotAnalysis> {
 /// ways add up to the combos averaged. `shown` is any other cards already visible.
 fn groups_used(mixes: &[OppMix], hero: Holding, board: &[Card], shown: u64) -> Vec<String> {
     let many = mixes.len() > 1;
+    let callers = mixes.len().saturating_sub(1);
     mixes
         .iter()
         .enumerate()
@@ -1285,7 +1286,7 @@ fn groups_used(mixes: &[OppMix], hero: Holding, board: &[Card], shown: u64) -> V
                     format!("{} ({ways} {})", class.in_a_list(), if ways == 1 { "way" } else { "ways" })
                 })
                 .collect();
-            let lead = if many { format!("Opponent {}", index + 1) } else { "Hands counted".to_string() };
+            let lead = if many { opponent_role(index + 1, callers) } else { "Hands counted".to_string() };
             format!("{lead}: {}.", counts.join(", "))
         })
         .collect()

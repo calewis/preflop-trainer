@@ -282,19 +282,25 @@ impl OppMix {
         self.assumption_among(opponent, 1)
     }
 
+    /// Name for the `opponent`-th seat in a multiway spot (1-based: the bettor
+    /// first, then the caller or Caller 1, Caller 2, ...).
     pub fn assumption_among(&self, opponent: Option<usize>, callers: usize) -> String {
-        let who = match opponent {
-            None => None,
-            Some(1) => Some("The bettor".to_string()),
-            Some(_) if callers <= 1 => Some("The caller".to_string()),
-            Some(n) => Some(format!("Caller {}", n - 1)),
-        };
+        let who = opponent.map(|n| opponent_role(n, callers));
         match (self.player, who) {
             (None, None) => format!("Assume they have {}.", self.classes[0].description()),
             (None, Some(who)) => format!("Assume {} has {}.", lower_first(&who), self.classes[0].description()),
             (Some(player), None) => format!("The bettor is {}.", player.described()),
             (Some(player), Some(who)) => format!("{who} is {}.", player.described()),
         }
+    }
+}
+
+/// Role label for a 1-based opponent when `callers` opponents called behind the bettor.
+pub fn opponent_role(opponent: usize, callers: usize) -> String {
+    match opponent {
+        1 => "The bettor".to_string(),
+        _ if callers <= 1 => "The caller".to_string(),
+        n => format!("Caller {}", n - 1),
     }
 }
 

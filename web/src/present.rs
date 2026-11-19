@@ -550,11 +550,12 @@ fn spot_question(q: &SpotQuestion) -> V {
         (OpponentLabel::Average, true) => "average players",
         (OpponentLabel::CallingStation, true) => "calling stations",
     };
+    let callers = q.opponents.len().saturating_sub(1);
     let opponents: Vec<V> = q
         .opponents
         .iter()
         .enumerate()
-        .map(|(i, mix)| V::from(mix.assumption(many.then_some(i + 1))))
+        .map(|(i, mix)| V::from(mix.assumption_among(many.then_some(i + 1), callers)))
         .collect();
     let label = if q.opponents.iter().any(|m| m.player.is_some()) { "" } else { label };
     obj! {
@@ -825,11 +826,7 @@ fn reveal(item: &Item, o: &Outcome, response_ms: u32) -> V {
         Reveal::Table(graded) => table_reveal(graded),
         Reveal::River(graded) => river_reveal(graded),
         Reveal::BeatsMe(reveal) => beats_me_reveal(reveal),
-        Reveal::ReadPrice(r) => obj! {
-            "kind": "read_price",
-            "answer": r.answer.as_str(),
-            "lines": r.lines.iter().map(|l| V::from(l.as_str())).collect::<Vec<V>>(),
-        },
+        Reveal::ReadPrice(r) => read_price_reveal(item, r),
         Reveal::Equity { analysis, reason, choice, close, estimate_pct, signed_error, band, hit } => {
             equity_reveal(analysis, reason, *choice, *close, *estimate_pct, *signed_error, *band, *hit)
         }
@@ -1363,5 +1360,214 @@ fn preflop_why(seat: Seat, action: Action, reason: PreflopReason) -> String {
             "In the big blind with limpers, check anything outside {RAISE_ISO_NAME} ({raise_iso}). Checking is free."
         ),
         PreflopReason::Chart { chart, kind } => why_line(chart, action, kind).to_string(),
+    }
+}
+
+const STANDARD_BETS: [(u32, u32, &str); 9] = [
+    (1, 4, "\u{00bc} pot"),
+    (1, 3, "\u{2153}"),
+    (1, 2, "\u{00bd}"),
+    (2, 3, "\u{2154}"),
+    (3, 4, "\u{00be}"),
+    (1, 1, "1\u{00d7} pot"),
+    (3, 2, "1\u{00bd}\u{00d7}"),
+    (2, 1, "2\u{00d7}"),
+    (3, 1, "3\u{00d7}"),
+];
+const STANDARD_BET_REL_TOL: f64 = 0.03;
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct PriceTableRow {
+    bet_vs_pot: String,
+    need: String,
+    marked: bool,
+}
+
+fn one_bet_need_pct(pot_before: f64, bet: f64) -> f64 {
+    100.0 * bet / (pot_before + 2.0 * bet)
+}
+
+fn rounded_need_text(pct: f64) -> String {
+    if pct < 0.5 {
+        "under 1%".to_string()
+    } else {
+        format!("{}%", pct.round() as u32)
+    }
+}
+
+/// Builds the reference table of standard bet sizes and needed equity for a
+/// single bet into `pot_before` with no callers, marking either the matching
+/// standard row (within 3% relative) or an inserted `(this bet)` row.
+fn price_table_reveal(pot_before: u32, bet: u32) -> (String, String, Vec<PriceTableRow>) {
+    let total = u64::from(pot_before) + 2 * u64::from(bet);
+    let answer = rounded_need_text(one_bet_need_pct(f64::from(pot_before), f64::from(bet)));
+    let sum = format!("{bet} \u{00f7} {total}");
+    let ratio = f64::from(bet) / f64::from(pot_before);
+    let mut rows: Vec<PriceTableRow> = STANDARD_BETS
+        .iter()
+        .map(|&(num, den, label)| PriceTableRow {
+            bet_vs_pot: label.to_string(),
+            need: rounded_need_text(one_bet_need_pct(f64::from(den), f64::from(num))),
+            marked: false,
+        })
+        .collect();
+    let matched = STANDARD_BETS.iter().position(|&(num, den, _)| {
+        let std_ratio = f64::from(num) / f64::from(den);
+        (ratio - std_ratio).abs() / std_ratio <= STANDARD_BET_REL_TOL + 1e-12
+    });
+    if let Some(idx) = matched {
+        rows[idx].marked = true;
+    } else {
+        let pos = STANDARD_BETS.partition_point(|&(num, den, _)| f64::from(num) / f64::from(den) < ratio);
+        rows.insert(
+            pos,
+            PriceTableRow {
+                bet_vs_pot: format!("{:.1}\u{00d7} (this bet)", (ratio * 10.0).round() / 10.0),
+                need: answer.clone(),
+                marked: true,
+            },
+        );
+    }
+    (answer, sum, rows)
+}
+
+fn read_price_reveal(item: &Item, r: &poker_trainer::read_price::ReadPriceReveal) -> V {
+    match &item.question {
+        Question::ReadPrice(q) if matches!(q.ask, ReadPriceAsk::Number) && q.callers == 0 => {
+            let (answer, sum, rows) = price_table_reveal(q.pot_before, q.bet);
+            let table: Vec<V> = rows
+                .into_iter()
+                .map(|row| {
+                    obj! {
+                        "bet": row.bet_vs_pot,
+                        "need": row.need,
+                        "marked": row.marked,
+                    }
+                })
+                .collect();
+            obj! {
+                "kind": "read_price",
+                "answer": answer,
+                "sum": sum,
+                "lines": V::Arr(Vec::new()),
+                "table": table,
+            }
+        }
+        _ => obj! {
+            "kind": "read_price",
+            "answer": r.answer.as_str(),
+            "sum": V::Null,
+            "lines": r.lines.iter().map(|l| V::from(l.as_str())).collect::<Vec<V>>(),
+            "table": V::Null,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use poker_trainer::cards::{parse_cards, parse_holding};
+    use poker_trainer::classes::{OppClass, OppMix, PlayerType};
+    use poker_trainer::grade::grade;
+    use poker_trainer::read_price::DrawKind;
+
+    #[test]
+    fn price_table_standard_values_and_inserted_row() {
+        let (answer, sum, rows) = price_table_reveal(11, 25);
+        assert_eq!(answer, "41%");
+        assert_eq!(sum, "25 \u{00f7} 61");
+        let expected: Vec<(&str, &str, bool)> = vec![
+            ("\u{00bc} pot", "17%", false),
+            ("\u{2153}", "20%", false),
+            ("\u{00bd}", "25%", false),
+            ("\u{2154}", "29%", false),
+            ("\u{00be}", "30%", false),
+            ("1\u{00d7} pot", "33%", false),
+            ("1\u{00bd}\u{00d7}", "38%", false),
+            ("2\u{00d7}", "40%", false),
+            ("2.3\u{00d7} (this bet)", "41%", true),
+            ("3\u{00d7}", "43%", false),
+        ];
+        let got: Vec<(&str, &str, bool)> = rows
+            .iter()
+            .map(|r| (r.bet_vs_pot.as_str(), r.need.as_str(), r.marked))
+            .collect();
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn price_table_relative_three_percent_threshold_and_ends() {
+        for (pot, bet, idx, label) in [
+            (20, 10, 2, "\u{00bd}"),
+            (100, 51, 2, "\u{00bd}"),
+            (100, 97, 5, "1\u{00d7} pot"),
+        ] {
+            let (_, _, rows) = price_table_reveal(pot, bet);
+            assert_eq!(rows.len(), 9, "pot={pot} bet={bet}: {rows:?}");
+            let marked: Vec<(usize, &PriceTableRow)> = rows.iter().enumerate().filter(|(_, r)| r.marked).collect();
+            assert_eq!(marked.len(), 1);
+            assert_eq!(marked[0].0, idx);
+            assert_eq!(marked[0].1.bet_vs_pot, label);
+        }
+
+        // Just outside 3% of 0.5x (+4%) inserts between 1/2 and 2/3.
+        let (_, _, outside) = price_table_reveal(100, 52);
+        assert_eq!(outside.len(), 10);
+        assert!(outside[3].marked);
+        assert_eq!(outside[3].bet_vs_pot, "0.5\u{00d7} (this bet)");
+
+        // Smaller than 1/4 pot goes first; bigger than 3x goes last.
+        let (_, _, small) = price_table_reveal(20, 2);
+        assert_eq!(small.len(), 10);
+        assert!(small[0].marked && small[0].bet_vs_pot == "0.1\u{00d7} (this bet)");
+        assert_eq!(small[1].bet_vs_pot, "\u{00bc} pot");
+
+        let (_, _, big) = price_table_reveal(10, 35);
+        assert_eq!(big.len(), 10);
+        assert_eq!(big[8].bet_vs_pot, "3\u{00d7}");
+        assert!(big[9].marked && big[9].bet_vs_pot == "3.5\u{00d7} (this bet)");
+    }
+
+    #[test]
+    fn read_price_table_only_replaces_single_bet_number_reveal() {
+        let single_num = Item {
+            skill: Skill::ReadPrice,
+            seed: 1,
+            question: Question::ReadPrice(ReadPriceQuestion { pot_before: 11, bet: 25, callers: 0, ask: ReadPriceAsk::Number }),
+        };
+        let o = grade(&single_num, "41").unwrap();
+        let json = outcome(&single_num, &o, String::new(), 1000, V::Null).into_string();
+        assert!(json.contains("\"sum\":\"25 \u{00f7} 61\"") && json.contains("\"lines\":[]") && json.contains("2.3\u{00d7} (this bet)"), "{json}");
+
+        for (ask, callers, ans) in [
+            (ReadPriceAsk::Number, 1, "20"),
+            (ReadPriceAsk::Band, 0, "c"),
+            (ReadPriceAsk::SetPrice { kind: DrawKind::Flush, options: [4, 11, 13, 18] }, 0, "b"),
+        ] {
+            let item = Item {
+                skill: Skill::ReadPrice,
+                seed: 1,
+                question: Question::ReadPrice(ReadPriceQuestion { pot_before: 28, bet: 7, callers, ask }),
+            };
+            let o = grade(&item, ans).unwrap();
+            let json = outcome(&item, &o, String::new(), 1000, V::Null).into_string();
+            assert!(json.contains("\"table\":null") && json.contains("\"sum\":null"), "{json}");
+        }
+    }
+
+    #[test]
+    fn spot_mw_question_names_callers_matching_reveal() {
+        let mix = |player| OppMix { player: Some(player), classes: vec![OppClass::Top, OppClass::Mid] };
+        let q = SpotQuestion {
+            hero: parse_holding("AhQh").unwrap(),
+            board: parse_cards("Kh7h2c").unwrap(),
+            pot: 200,
+            call: 50,
+            mode: SpotMode::AllIn,
+            opponents: vec![mix(PlayerType::Tight), mix(PlayerType::Loose), mix(PlayerType::Average)],
+        };
+        let encoded = spot_question(&q).into_string();
+        assert!(encoded.contains("The bettor is a tight player.") && encoded.contains("Caller 1 is") && encoded.contains("Caller 2 is"), "{encoded}");
+        assert!(!encoded.contains("Opponent "), "{encoded}");
     }
 }

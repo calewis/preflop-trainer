@@ -418,6 +418,13 @@ a { color: var(--accent); }
 .mini-table th { text-align: left; font-size: 13px; font-weight: 600; color: var(--muted); padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); }
 .mini-table td { padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
 .mini-table tr:last-child td { border-bottom: none; }
+.price-sum { margin-left: 6px; font-size: 15px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.price-table { width: 100%; border-collapse: collapse; font-size: 13.5px; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.price-table th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 2px 6px 3px; border-bottom: 1px solid var(--line); }
+.price-table th:last-child, .price-table td:last-child { text-align: right; }
+.price-table td { padding: 2px 6px; border-bottom: 1px solid var(--line); }
+.price-table tbody tr:last-child td { border-bottom: none; }
+.price-table tr.marked td { color: var(--accent); font-weight: 700; background: var(--surface-2); }
 .target { display: flex; flex-direction: column; gap: 4px; }
 .target-text { font-size: 14px; color: var(--muted); }
 .target-track { display: block; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
@@ -519,6 +526,9 @@ button:focus-visible, a:focus-visible, label:focus-visible { outline: 2px solid 
   .reveal .labelled { gap: 3px; }
   .reveal .table-options { gap: 4px; }
   .reveal .table-options li { padding: 4px 8px; }
+  .price-sum { font-size: 14px; }
+  .price-table { font-size: 13px; line-height: 1.2; }
+  .price-table th, .price-table td { padding: 1.5px 6px; }
   .reveal-tie { margin-top: 2px; }
   .reflect { margin-top: 8px; padding-top: 8px; }
   main:has(.reveal) .action-bar { padding-top: 6px; padding-bottom: calc(6px + var(--bottom-inset)); }

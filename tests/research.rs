@@ -1192,11 +1192,35 @@ mod spot_mixes {
     #[test]
     fn the_reveal_lists_the_groups_used() {
         let mix = OppMix { player: Some(PlayerType::Tight), classes: vec![OppClass::Over, OppClass::Top] };
-        let q = SpotQuestion { hero: hand("AhQh"), board: cards("Kh7h2c"), pot: 100, call: 50, mode: SpotMode::AllIn, opponents: vec![mix] };
+        let q = SpotQuestion { hero: hand("AhQh"), board: cards("Kh7h2c"), pot: 100, call: 50, mode: SpotMode::AllIn, opponents: vec![mix.clone()] };
         let a = spot_analysis(&q, 1).unwrap();
         assert_eq!(a.groups.len(), 1);
         assert!(a.groups[0].starts_with("Hands counted: an overpair ("), "{}", a.groups[0]);
         assert!(a.groups[0].contains("top pair ("), "{}", a.groups[0]);
+
+        let two = SpotQuestion {
+            hero: hand("AhQh"),
+            board: cards("Kh7h2c"),
+            pot: 150,
+            call: 50,
+            mode: SpotMode::AllIn,
+            opponents: vec![mix.clone(), OppMix { player: Some(PlayerType::Loose), classes: vec![OppClass::Mid, OppClass::Nothing] }],
+        };
+        let a2 = spot_analysis(&two, 1).unwrap();
+        assert_eq!(a2.groups.len(), 2);
+        assert!(a2.groups[0].starts_with("The bettor: ") && a2.groups[1].starts_with("The caller: "), "{:?}", a2.groups);
+
+        let three = SpotQuestion {
+            hero: hand("AhQh"),
+            board: cards("Kh7h2c"),
+            pot: 200,
+            call: 50,
+            mode: SpotMode::AllIn,
+            opponents: vec![mix.clone(), mix.clone(), mix],
+        };
+        let a3 = spot_analysis(&three, 1).unwrap();
+        assert_eq!(a3.groups.len(), 3);
+        assert!(a3.groups[0].starts_with("The bettor: ") && a3.groups[1].starts_with("Caller 1: ") && a3.groups[2].starts_with("Caller 2: "), "{:?}", a3.groups);
     }
 
     fn ways(line: &str) -> usize {

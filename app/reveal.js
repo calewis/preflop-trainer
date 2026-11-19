@@ -214,6 +214,23 @@ function holdingsLine(list) {
     list.more > 0 ? h('span', {}, `and ${list.more} more`) : null);
 }
 
+function readPriceReveal(r) {
+  if (r.table) {
+    return [
+      h('p', { class: 'reveal-answer' }, 'Answer: ', h('strong', {}, r.answer),
+        '  ', h('span', { class: 'price-sum' }, `(${r.sum})`)),
+      h('table', { class: 'price-table' },
+        h('thead', {}, h('tr', {},
+          h('th', { scope: 'col' }, 'Bet vs pot'),
+          h('th', { scope: 'col' }, 'Need'))),
+        h('tbody', {}, r.table.map(row => h('tr', { class: row.marked ? 'marked' : '' },
+          h('td', {}, row.marked ? `\u25b6 ${row.bet}` : row.bet),
+          h('td', {}, row.need))))),
+    ];
+  }
+  return [answerLine(r.answer), r.lines.map(line => p(line))];
+}
+
 function answerLine(text) {
   return h('p', { class: 'reveal-answer' }, 'Answer: ', h('strong', {}, text));
 }
@@ -243,7 +260,7 @@ function revealBody(r) {
     case 'made': return [answerLine(r.answer), p(r.description), p(`Your best five cards make ${r.rank}.`)];
     case 'beats': return beatsReveal(r);
     case 'beats_me': return beatsMeReveal(r);
-    case 'read_price': return [answerLine(r.answer), r.lines.map(line => p(line))];
+    case 'read_price': return readPriceReveal(r);
     case 'outs': return outsReveal(r);
     case 'price': return [
       answerLine(r.required),

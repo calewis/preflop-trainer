@@ -110,6 +110,7 @@ fn spot_mw_prompt_states_nobody_can_raise() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("Everyone else has acted and nobody can raise."), "{stdout}");
     assert!(stdout.contains("The bettor is a"), "{stdout}");
+    assert!(stdout.contains("The bettor:") && !stdout.contains("Opponent 1"), "{stdout}");
     assert!(stdout.contains("averaged over all possible remaining cards and combos"), "{stdout}");
     let _ = fs::remove_dir_all(&home);
 }

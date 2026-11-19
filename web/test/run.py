@@ -1288,6 +1288,8 @@ def run_research(viewport=(390, 844), mobile=True, theme="light", port_offset=0)
         page.eval("document.querySelectorAll('.reveal details').forEach(d => { d.open = true; })")
         text = page.eval("document.querySelector('.reveal').innerText")
         check("Calling stops being right above about" in text, f"multiway has no flip call line: {text}")
+        check("The bettor:" in text and ("The caller:" in text or "Caller 1:" in text) and "Opponent 1" not in text,
+              f"multiway reveal must name bettor/caller: {text}")
         check("next cards put you ahead" not in text, f"multiway must not show the card count: {text}")
         page.eval("location.hash = '#home'")
         wait_home(page)
@@ -1424,6 +1426,7 @@ def run_research(viewport=(390, 844), mobile=True, theme="light", port_offset=0)
         seed_log(page, port, LOG_COLUMNS + "\n")
         open_limited_drill(page, "made")
         current, kind, answer = answer_drill_item(page, True)
+        wait_rows(page, 1)
         check(page.eval("!document.querySelector('.confidence-ask')"), "confidence asked while the setting is off")
         check(not rows_of(page)[0][22:][0], "confidence logged while the setting is off")
         page.eval("location.hash = '#home'")
@@ -1947,7 +1950,11 @@ def run_read_price():
                 answer_drill_item(page, False)
                 wait_rows(page, READ_PRICE_PASS_RUN * rung + 1)
                 reveal_text = page.eval("document.querySelector('.reveal').innerText")
-                check(("to win $" in reveal_text and "\u00f7" in reveal_text) if rung != 4 else "They call $" in reveal_text, f"rung {rung} reveal has no sum: {reveal_text}")
+                if rung == 1 and question["callers"] == 0:
+                    check("Bet vs pot" in reveal_text and "Need" in reveal_text and "\u25b6" in reveal_text and "\u00f7" in reveal_text
+                          and "to win $" not in reveal_text, f"rung 1 table reveal wrong: {reveal_text}")
+                else:
+                    check(("to win $" in reveal_text and "\u00f7" in reveal_text) if rung != 4 else "They call $" in reveal_text, f"rung {rung} reveal has no sum: {reveal_text}")
                 check("Answer" in reveal_text, f"rung {rung} reveal has no answer: {reveal_text}")
                 if rung == 0:
                     check("a third to three-quarters" in reveal_text, f"no shortcut: {reveal_text}")
@@ -1968,6 +1975,32 @@ def run_read_price():
                 wait_rows(page, READ_PRICE_PASS_RUN * rung + 1)
                 check(page.eval("document.querySelector('.reveal').classList.contains('good')"), f"rung {rung}: right answer not graded right")
                 check(page.eval("document.querySelector('.reveal').innerText").count(wanted[rung]) >= 1, f"rung {rung}: reveal lacks {wanted[rung]!r}")
+                page.eval("location.hash = '#home'")
+                wait_home(page)
+            if width == 390 and theme == "light":
+                seen_standard = seen_inserted = False
+                seed_log(page, port, read_price_log(1))
+                open_limited_drill(page, "read_price")
+                for _ in range(40):
+                    page.wait(READY, 60)
+                    current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+                    q1 = current["bundle"]["question"]
+                    answer_drill_item(page, True)
+                    page.wait("!!document.querySelector('.reveal')", 30)
+                    if q1["callers"] == 0:
+                        info = page.eval("({sw: document.documentElement.scrollWidth, sh: document.documentElement.scrollHeight, rows: document.querySelectorAll('.price-table tbody tr').length, marked: document.querySelector('.price-table tr.marked')?.innerText || '', rbot: document.querySelector('.reveal').getBoundingClientRect().bottom, btop: document.querySelector('.action-bar').getBoundingClientRect().top})")
+                        check(info["sw"] <= 390 and info["sh"] <= 844 and info["rbot"] <= info["btop"] + 0.5, f"read_price table does not fit phone: {info}")
+                        if "(this bet)" in info["marked"]:
+                            check(info["rows"] == 10, f"inserted table should have 10 rows: {info}")
+                            seen_inserted = True
+                        else:
+                            check(info["rows"] == 9 and info["marked"], f"standard table should have 9 rows: {info}")
+                            seen_standard = True
+                    if seen_standard and seen_inserted:
+                        break
+                    click(page, ".action-bar .btn")
+                    page.wait("!document.querySelector('.reveal')", 30)
+                check(seen_standard and seen_inserted, f"did not see both price table shapes: standard={seen_standard} inserted={seen_inserted}")
                 page.eval("location.hash = '#home'")
                 wait_home(page)
             # The Progress panel shows the rung and recent accuracy.

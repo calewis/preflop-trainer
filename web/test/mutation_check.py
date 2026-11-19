@@ -356,6 +356,8 @@ MUTATIONS = [
      "pub const SPOT_MIN_SHARE: f64 = 0.15;", "pub const SPOT_MIN_SHARE: f64 = 0.02;", "libresearch", "spots_exclude_hopeless"),
     ("the reveal hides the groups", "src/grade.rs",
      "        groups: groups_used(&q.opponents, hero, &board, 0),\n", "        groups: Vec::new(),\n", "libresearch", "the_reveal_lists_the_groups_used"),
+    ("multiway groups revert to Opponent numbers", "src/grade.rs",
+     "let lead = if many { opponent_role(index + 1, callers) }", "let lead = if many { format!(\"Opponent {}\", index + 1) }", "libresearch", "the_reveal_lists_the_groups_used"),
     ("low pairs are not a class", "src/classes.rs",
      "            0 if a < min => Some(OppClass::Low),\n", "", "libresearch", "new_classes_are_what_they_say"),
     ("a draw counts as nothing", "src/classes.rs",
@@ -449,6 +451,7 @@ MUTATIONS = [
     ("the Progress panel is gone", "app/screens.js", "    readPricePanel(data.read_price),\n", "", "readprice", "no read the price panel"),
     ("the question hides its context", "app/reveal.js", "    q.context.map(line => h('p', { class: 'context' }, line)),\n", "", "readprice", "the context lines are not shown"),
     ("rung 3 shows its share", "src/read_price.rs", "lines.push(format!(\"{}, {}. Assume your outs win and nothing else does.\", kind.label(), cards_to_come(street)));", "lines.push(format!(\"{}, {}: about 20%. Assume your outs win and nothing else does.\", kind.label(), cards_to_come(street)));", "readprice", "rung 3 shows the share", True),
+    ("the 3% standard-bet tolerance widens", "web/src/present.rs", "const STANDARD_BET_REL_TOL: f64 = 0.03;", "const STANDARD_BET_REL_TOL: f64 = 0.30;", "native", "price_table", True),
     # --- the nuts
     ("the nuts are only the best rank", "src/grade.rs",
      "let is_nut = |h: &Holding| analysis.nuts.contains(h);", "let is_nut = |h: &Holding| rank_of(*h, board) == analysis.top;", "libresearch", "card_removal_makes_a_lesser_holding"),
