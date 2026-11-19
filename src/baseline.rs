@@ -46,6 +46,7 @@ fn item_line(entry: &BaselineItem) -> String {
         | Question::Anchor { .. }
         | Question::Table(_)
         | Question::River(_)
+        | Question::Limpers(_)
         | Question::Chain(_)
         | Question::BeatsMe(_)
         | Question::ReadPrice(_)
@@ -146,7 +147,7 @@ fn parse_line(line: &str) -> Result<BaselineItem, String> {
     let fields = Fields(pairs);
     let seed: u64 = fields.get("seed")?.parse().map_err(|_| "bad seed")?;
     let question = match skill {
-        Skill::Preflop | Skill::BoardType | Skill::Equity | Skill::Anchor | Skill::Table | Skill::Chain | Skill::BeatsMe | Skill::ReadPrice | Skill::River => {
+        Skill::Preflop | Skill::BoardType | Skill::Equity | Skill::Anchor | Skill::Table | Skill::Chain | Skill::BeatsMe | Skill::ReadPrice | Skill::River | Skill::Limpers => {
             return Err(format!("{skill_name} is not part of the baseline"));
         }
         Skill::Nuts => Question::Nuts { board: fields.board()? },

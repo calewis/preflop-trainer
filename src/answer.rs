@@ -4,6 +4,7 @@ use crate::beats_me::{BeatKind, MixBand};
 use crate::classes::MadeClass;
 use crate::equity_skill::EquityBand;
 use crate::item::{BeatsMeAsk, BeatsMeQuestion, ChainQuestion, ChainStage, Question, ReadPriceAsk, ReadPriceQuestion};
+use crate::limpers::{LimperSeat, LimpersQuestion};
 use crate::preflop::{action_label, Action, Seat, Situation};
 use crate::read_price::{dollar_label, PriceBand, PriceCall};
 
@@ -94,12 +95,25 @@ fn k_index(kind: BeatKind) -> usize {
     BeatKind::ALL.iter().position(|k| *k == kind).expect("in ALL")
 }
 
+fn limpers_options(q: &LimpersQuestion) -> Vec<AnswerOption> {
+    if q.seat == LimperSeat::Bb {
+        vec![option(Action::Raise.code(), "Raise"), option(Action::Call.code(), "Check")]
+    } else {
+        vec![
+            option(Action::Raise.code(), "Raise"),
+            option(Action::Call.code(), "Call"),
+            option(Action::Fold.code(), "Fold"),
+        ]
+    }
+}
+
 /// How the given question is answered.
 pub fn answer_format(question: &Question) -> AnswerFormat {
     match question {
         Question::Preflop { behind, situation, .. } => {
             AnswerFormat::Choice(preflop_options(*behind, *situation))
         }
+        Question::Limpers(q) => AnswerFormat::Choice(limpers_options(q)),
         Question::Nuts { .. } => AnswerFormat::Holding,
         Question::Possible { .. } => AnswerFormat::MultiSelect {
             options: vec![

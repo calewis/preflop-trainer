@@ -1,5 +1,5 @@
 """Full browser test suite: python3 web/test/run.py [sections...]
-Sections: river libriver samebuild phonefit hiddendrills native libgroups groups libresearch libreadprice readprice libcli research researchshots (on request only) libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card preflopspots libpreflop offline nostorage legacy screens
+Sections: river libriver limpers liblimpers samebuild phonefit hiddendrills native libgroups groups libresearch libreadprice readprice libcli research researchshots (on request only) libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card preflopspots libpreflop offline nostorage legacy screens
 Results go to target/webtest/results.json and screenshots to target/webtest/screens/."""
 import itertools, json, os, pathlib, random, re, shutil, subprocess, sys, time
 
@@ -112,6 +112,8 @@ def check_differential_coverage(commands, replies):
     def count(kind, test=lambda f: True):
         return sum(1 for f in fields if f[0] == kind and test(f))
     check(count("prepare", lambda f: f[1] == "read_price") >= 50, "differential: read_price prepares missing")
+    check(count("prepare", lambda f: f[1] == "limpers") >= 50, "differential: limpers prepares missing")
+    check(count("grade", lambda f: f[1] == "limpers") >= 50, "differential: limpers grades missing")
     for rung in range(5):
         check(sum(f'"kind":"read_price","rung":{rung}' in r for r in replies) >= 5, f"differential: read_price rung {rung} never compared")
     check(count("check_grade", lambda f: f[1] == "read_price") >= 5, "differential: no read_price checkup answers")
@@ -241,7 +243,7 @@ def run_timing():
     try:
         page = browser.page
         boot_app(page, 8952 + PORT_SHIFT)
-        skills = ["preflop", "nuts", "possible", "made", "beats", "outs", "price", "hit", "board_type", "anchor", "read_price"]
+        skills = ["preflop", "limpers", "nuts", "possible", "made", "beats", "outs", "price", "hit", "board_type", "anchor", "read_price"]
         fast = page.eval(f"({TIMING})({json.dumps(skills)}, 200)")
         slow = page.eval(f"({TIMING})(['spot'], 200)")
         mw = page.eval(f"({TIMING})(['spot_mw'], 150)")
@@ -577,7 +579,7 @@ def drill_session(page, inspector, want_all, max_items, keyboard=False, label_pr
 # Every skill the default drill deals except `table`, which comes too rarely to
 # promise both a right and a wrong answer. `price` and `beats` are no longer dealt.
 # `spot` and `spot_mw` are hidden for now (HIDDEN_SKILLS in src/groups.rs), so never dealt.
-ALL_SKILLS = ["preflop", "nuts", "possible", "made", "beats_me", "read_price", "outs", "hit",
+ALL_SKILLS = ["preflop", "limpers", "nuts", "possible", "made", "beats_me", "read_price", "outs", "hit",
               "board_type", "equity", "anchor", "chain"]
 # The monthly checkup without the hidden drills' four items.
 MIXED_LEN = 36
@@ -1841,7 +1843,7 @@ def run_lib_groups():
 
 
 GROUP_SKILLS = {
-    "preflop": {"preflop"}, "read_price": {"read_price"}, "equity": {"equity", "anchor"}, "hands": {"chain"},
+    "preflop": {"preflop", "limpers"}, "read_price": {"read_price"}, "equity": {"equity", "anchor"}, "hands": {"chain"},
     "board": {"nuts", "possible", "made", "board_type", "beats_me"}, "outs": {"outs", "hit"}, "spots": {"spot", "spot_mw", "table"},
 }
 
@@ -1874,11 +1876,11 @@ def run_groups():
             end_drill_summary(page, inspector)
             page.eval("location.hash = '#home'")
             wait_home(page)
-        # The default drill opens with preflop, which keeps its floor from the first item.
+        # The default drill opens with the preflop group, which keeps its floor from the first item.
         before = len(rows_of(page))
         start_drill(page)
         first = page.eval("__trainer.current.bundle.skill")
-        check(first == "preflop", f"the mixed drill opened with {first}")
+        check(first in ("preflop", "limpers"), f"the mixed drill opened with {first}")
         items, seen, _ = drill_session(page, inspector, False, 30, label_prefix="mixed-")
         groups = {code for code, skills in GROUP_SKILLS.items() if skills & set(seen)}
         check(len(groups) >= 5, f"30 mixed items reached only {sorted(groups)}")
@@ -2194,7 +2196,7 @@ def run_checkup():
         counts = {}
         for r in rows:
             counts[r[3]] = counts.get(r[3], 0) + 1
-        check(counts == {"preflop": 8, "read_price": 7, "equity": 5, "anchor": 2, "chain": 4, "nuts": 1, "possible": 1, "made": 1,
+        check(counts == {"preflop": 4, "limpers": 4, "read_price": 7, "equity": 5, "anchor": 2, "chain": 4, "nuts": 1, "possible": 1, "made": 1,
                          "board_type": 1, "beats_me": 2, "outs": 2, "hit": 2}, f"mixed checkup skills (call or fold hidden): {counts}")
         # Taken: Home stops offering it for a month.
         page.eval("location.hash = '#home'")
@@ -3494,7 +3496,7 @@ FIT_JS = """(() => {
 # Drills whose question and feedback must fit a 390 x 844 screen without scrolling.
 # Table spots run longer; there Next follows the feedback instead of covering it.
 # River questions must fit as well; River feedback usually does (see run_river).
-FIT_SKILLS = ["preflop", "nuts", "possible", "made", "beats_me", "read_price", "outs", "hit", "board_type", "equity", "anchor", "chain"]
+FIT_SKILLS = ["preflop", "limpers", "nuts", "possible", "made", "beats_me", "read_price", "outs", "hit", "board_type", "equity", "anchor", "chain"]
 
 
 def check_fit(page, where, width, must_fit):
@@ -3643,15 +3645,16 @@ def run_leaks(leak_file=None, saved_log=None):
             leak_path = OUT / "synthetic-leaks.txt"
             leak_path.write_text(
                 "#LEAKS v1\n"
-                "#meta generated_at=2026-01-15T12:00:00 hands=2 leaks=2 preflop=1 price=1 half_life_days=14\n"
+                "#meta generated_at=2026-01-15T12:00:00 hands=3 leaks=3 preflop=2 price=1 half_life_days=14\n"
                 "LEAK|0|preflop|leak:pf:early:limpers:ATo|9000|1|2026-01-15|2026-01-15a|synth-01|4.00|-18.5|You raised to 4bb from UTG+1 (over 1 limper)|Put in 4.0bb here; lost 18.5bb on the hand|players=9|hero_pos=UTG+1|behind=7|sit=limpers:1|hand=AcTd|hero_act=r|expect=f\n"
                 "LEAK|1|price|leak:price:call_below:river|9000|1|2026-01-15|2026-01-15a|synth-02|20.00|-20.0|You called 20bb into 120bb on the river (needed 14%, had 2%-4%)|Put in 20.0bb here; lost 20.0bb on the hand|street=river|hero_pos=BB|board=4sQc3s5s3c|hand=As9h|pot_before=100|bet=20|callers=0|share_pct=3|tight_pct=2|loose_pct=4|hero_act=c|expect=f\n"
+                "LEAK|2|limpers|leak:limpers:btn:1:K7s|9000|1|2026-01-16|2026-01-16a|synth-03|4.00|-12.0|You raised K7s over a CO limp on the button|Put in 4.0bb here; lost 12.0bb on the hand|players=5|seat=BTN|limpers=CO|hand=Ks7s|hero_act=r|expect=f\n"
             )
         else:
             leak_path = pathlib.Path(leak_file)
         text = leak_path.read_text()
         hand_ids = [line.split("|")[8] for line in text.splitlines() if line.startswith("LEAK|")]
-        preflop = sum(1 for line in text.splitlines() if line.startswith("LEAK|") and line.split("|")[2] == "preflop")
+        preflop = sum(1 for line in text.splitlines() if line.startswith("LEAK|") and line.split("|")[2] in ("preflop", "limpers"))
         page.send("DOM.enable")
         doc = page.send("DOM.getDocument")
         node = page.send("DOM.querySelector", {"nodeId": doc["root"]["nodeId"], "selector": "input[data-leak-input]"})
@@ -3699,7 +3702,9 @@ def run_leaks(leak_file=None, saved_log=None):
             click(page, ".action-bar .btn")
             page.wait("!document.querySelector('.reveal')", 30)
         check(count == 15, f"only {count} mistakes were dealt")
-        check(seen_skills == {"preflop"}, f"Preflop mistakes dealt {seen_skills}")
+        check(seen_skills <= {"preflop", "limpers"} and bool(seen_skills), f"Preflop mistakes dealt {seen_skills}")
+        if leak_file is None:
+            check(seen_skills == {"preflop", "limpers"}, f"synthetic Preflop mistakes dealt only {seen_skills}")
         page.wait("!!document.querySelector('.big-score')", 20)
 
         # 5. Rows say only "leak" and an anonymous tag: no hand ids or dates from the file.
@@ -3921,6 +3926,99 @@ def run_river():
         browser.close()
         srv.shutdown()
 
+def run_lib_limpers():
+    done = subprocess.run(["cargo", "test", "--release", "--test", "limpers"], capture_output=True, text=True, cwd=ROOT)
+    print(done.stdout[-3000:])
+    if done.returncode != 0:
+        print(done.stderr[-1500:])
+    check(done.returncode == 0, f"library limpers tests failed: {done.stdout[-400:]}")
+
+
+def run_limpers():
+    """Limpers drill: compact question & reveal, phone fit at 390x844, BB Check, raise sizing, Details block."""
+    port = 8995 + PORT_SHIFT
+    srv = server.start(port)
+    browser = Browser("limpers")
+    try:
+        page = browser.page
+        boot_app(page, port, viewport=(390, 844, True))
+        inspector = Inspector(page, (390, 844), "light", False)
+        before = len(rows_of(page))
+        open_limited_drill(page, "limpers")
+        saw_bb = False
+        saw_non_bb = False
+        saw_raise = False
+        saw_call_or_fold = False
+        saved_q = False
+        saved_r = False
+        total = 24
+        for step in range(total):
+            page.wait(READY, 30)
+            current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+            q = current["bundle"]["question"]
+            check(q["kind"] == "limpers", f"expected limpers question, got {q}")
+            check(q["players"] in (5, 6), f"bad table size: {q}")
+            check(1 <= q["limpers_count"] <= 3, f"bad limpers count: {q}")
+            # One short context line only (no extra .context paragraph).
+            check(page.eval("document.querySelectorAll('.question .context').length") == 0, "limpers question has extra context paragraph")
+            prompt_text = page.eval("document.querySelector('.question .prompt').textContent")
+            check("You are " in prompt_text and "limp" in prompt_text, f"bad limpers context: {prompt_text!r}")
+            labels = page.eval("[...document.querySelectorAll('.answers .choice')].map(b => b.childNodes[b.childNodes.length - 1].textContent.trim())")
+            if q["seat_short"] == "BB":
+                check(labels == ["Raise", "Check"], f"BB options were {labels}")
+                saw_bb = True
+            else:
+                check(labels == ["Raise", "Call", "Fold"], f"non-BB options were {labels}")
+                saw_non_bb = True
+            check_fit(page, f"limpers question {step}", 390, True)
+            inspector.snapshot(f"limpers-q-{step}")
+            if not saved_q:
+                page.screenshot("/tmp/limper-question.png", full=False)
+                saved_q = True
+
+            kind, answer = pick_answer(page, current, step % 3 != 0)
+            type_answer(page, current, kind, answer)
+            page.wait("!!document.querySelector('.reveal')", 30)
+            time.sleep(0.05)
+            reveal_text = page.eval("document.querySelector('.reveal').innerText")
+            check("Best: " in reveal_text, f"limpers reveal missing Best line: {reveal_text}")
+            details_closed = page.eval("document.querySelectorAll('.reveal details.more:not([open])').length")
+            check(details_closed == 1, f"limpers reveal details block not collapsed: {details_closed}")
+            best_text = page.eval("document.querySelector('.reveal .reveal-answer strong').textContent")
+            if best_text.startswith("Raise to "):
+                check(re.fullmatch(r"Raise to (6|7|8|9|10|11)bb", best_text), f"unexpected raise size: {best_text!r}")
+                saw_raise = True
+                if not saved_r:
+                    page.screenshot("/tmp/limper-reveal.png", full=False)
+                    saved_r = True
+            else:
+                check(best_text in ("Call", "Check", "Fold"), f"unexpected best text: {best_text!r}")
+                saw_call_or_fold = True
+            check_fit(page, f"limpers reveal {step}", 390, True)
+            inspector.snapshot(f"limpers-r-{step}")
+            # Expanding Details keeps horizontal fit.
+            page.eval("document.querySelector('.reveal details.more').open = true")
+            time.sleep(0.05)
+            expanded_text = page.eval("document.querySelector('.reveal details.more').innerText")
+            check("Size rule:" in expanded_text, f"limpers details missing size rule: {expanded_text}")
+            check_fit(page, f"limpers reveal expanded {step}", 390, False)
+            next_drill_item(page)
+
+        if not saved_r:
+            page.screenshot("/tmp/limper-reveal.png", full=False)
+        check(saw_bb and saw_non_bb, f"saw_bb={saw_bb} saw_non_bb={saw_non_bb}")
+        check(saw_raise and saw_call_or_fold, f"saw_raise={saw_raise} saw_call_or_fold={saw_call_or_fold}")
+        rows = rows_of(page)[before:]
+        check(len(rows) == total and all(r[3] == "limpers" for r in rows), f"limpers log rows: {len(rows)}")
+        page.eval("location.hash = '#progress'")
+        page.wait("document.body.innerText.includes('Limpers')", 20)
+        check(not browser.errors, f"limpers browser errors: {browser.errors[:5]}")
+        print("limpers ok")
+    finally:
+        browser.close()
+        srv.shutdown()
+
+
 SECTIONS = {
     "native": run_native, "wasmclean": run_wasm_clean, "doubletap": run_doubletap, "twotabs": run_twotabs,
     "libresearch": run_lib_research, "libcli": run_lib_cli, "libreadprice": run_lib_read_price, "readprice": run_read_price, "research": run_research, "researchshots": run_research_shots, "libtable": run_lib_table, "tablespots": run_table_spots, "midgrade": run_mid_grade,
@@ -3930,6 +4028,7 @@ SECTIONS = {
     "newskills": run_new_skills, "noneleft": run_none_left, "checkup": run_checkup, "checkupquit": run_checkup_quit,
     "checkuptabs": run_checkup_tabs, "checkupconflict": run_checkup_conflict, "progressnew": run_progress_new,
     "libgroups": run_lib_groups, "groups": run_groups, "leaks": run_leaks, "river": run_river, "libriver": run_lib_river,
+    "liblimpers": run_lib_limpers, "limpers": run_limpers,
     "samebuild": run_same_build, "phonefit": run_phone_fit, "hiddendrills": run_hidden_drills,
     "preflopspots": run_preflop_spots, "libpreflop": run_lib_preflop, "card": run_card, "offline": run_offline, "nostorage": run_nostorage, "legacy": run_legacy, "screens": run_screens,
 }

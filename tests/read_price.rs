@@ -120,7 +120,8 @@ fn existing_skills_keep_their_positions_and_the_generator_version() {
     assert_eq!(Skill::BeatsMe as u64, 15, "existing positions seed their generators");
     assert_eq!(Skill::ReadPrice as u64, 16);
     assert_eq!(Skill::River as u64, 17, "river came after read_price");
-    assert_eq!(Skill::ALL.last(), Some(&Skill::River));
+    assert_eq!(Skill::Limpers as u64, 18, "limpers came after river");
+    assert_eq!(Skill::ALL.last(), Some(&Skill::Limpers));
 }
 
 #[test]
@@ -833,7 +834,7 @@ fn default_shares(sessions: u64, items: u64, miss_one_in: u64) -> (f64, f64) {
         for _ in 0..items {
             let planned = session.try_next_item().expect("always an item");
             read_price += u64::from(planned.skill == Skill::ReadPrice);
-            preflop += u64::from(planned.skill == Skill::Preflop);
+            preflop += u64::from(poker_trainer::groups::group_of(planned.skill) == Some(poker_trainer::groups::Group::Preflop));
             total += 1;
             let ok = miss_one_in == 0 || !misses.chance(1, miss_one_in);
             session.record(planned, ok);
@@ -863,7 +864,7 @@ fn preflop_never_falls_below_its_floor_at_any_point() {
         let (mut preflop, mut dealt) = (0u64, 0u64);
         for _ in 0..80 {
             let planned = session.try_next_item().unwrap();
-            preflop += u64::from(planned.skill == Skill::Preflop);
+            preflop += u64::from(poker_trainer::groups::group_of(planned.skill) == Some(poker_trainer::groups::Group::Preflop));
             dealt += 1;
             assert!(preflop * 100 >= dealt * MIN_PREFLOP_PERCENT, "seed {seed}: {preflop} of {dealt}");
             session.record(planned, !misses.chance(1, 4));

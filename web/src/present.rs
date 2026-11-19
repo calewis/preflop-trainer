@@ -16,6 +16,7 @@ use poker_trainer::item::{
     ChainHand, ChainQuestion, ChainStage, EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question,
     ReadPriceAsk, ReadPriceQuestion, Skill, SpotMode, SpotQuestion, CHAIN_STAGES,
 };
+use poker_trainer::limpers::{LimperGrade, LimpersQuestion, SIZE_RULE_NOTE};
 use poker_trainer::log::Confidence;
 use poker_trainer::progress::{ReliabilityRow, RELIABILITY_MIN_RATINGS};
 use poker_trainer::read_price;
@@ -46,6 +47,7 @@ pub fn skill_title(skill: Skill) -> &'static str {
         Skill::BeatsMe => "What beats you?",
         Skill::ReadPrice => "Read the price",
         Skill::River => "River",
+        Skill::Limpers => "Limpers",
     }
 }
 
@@ -181,7 +183,32 @@ pub fn question(q: &Question) -> V {
         },
         Question::Table(q) => table_question(q),
         Question::River(q) => river_question(q),
+        Question::Limpers(q) => limpers_question(q),
         Question::Chain(q) => chain_question(q),
+    }
+}
+
+/// A limpers question: compact table, seat, limpers count, cards, and one context line.
+fn limpers_question(q: &LimpersQuestion) -> V {
+    obj! {
+        "kind": "limpers",
+        "players": q.players,
+        "seat_short": q.seat.short(),
+        "seat_title": q.seat.title(),
+        "limpers_count": q.limper_count(),
+        "limpers": q.limpers_short_list(),
+        "hand": holding(&q.hand),
+        "context": q.context_line(),
+    }
+}
+
+fn limpers_reveal(g: &LimperGrade) -> V {
+    obj! {
+        "kind": "limpers",
+        "best": g.best_text(),
+        "why": g.reason.text(),
+        "summary": g.row_summary,
+        "size_note": SIZE_RULE_NOTE,
     }
 }
 
@@ -825,6 +852,7 @@ fn reveal(item: &Item, o: &Outcome, response_ms: u32) -> V {
         }
         Reveal::Table(graded) => table_reveal(graded),
         Reveal::River(graded) => river_reveal(graded),
+        Reveal::Limpers(graded) => limpers_reveal(graded),
         Reveal::BeatsMe(reveal) => beats_me_reveal(reveal),
         Reveal::ReadPrice(r) => read_price_reveal(item, r),
         Reveal::Equity { analysis, reason, choice, close, estimate_pct, signed_error, band, hit } => {

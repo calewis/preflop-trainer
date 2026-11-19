@@ -41,8 +41,8 @@ Usage:
                             one for a single skill
   poker-trainer progress    show results against the pass marks
 
-Skills: preflop, nuts, possible, made, beats, board_type, outs, price, hit, equity,
-anchor, spot, spot_mw, chain, table
+Skills: preflop, limpers, nuts, possible, made, beats, board_type, outs, price, hit,
+equity, anchor, spot, spot_mw, chain, table, beats_me, read_price
 Type q at any question to quit and save.";
 
 fn main() -> ExitCode {

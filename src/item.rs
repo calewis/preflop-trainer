@@ -3,6 +3,7 @@
 use crate::board_type::BoardCategory;
 use crate::cards::{Card, Holding};
 use crate::classes::{OppClass, OppMix, PlayerType};
+use crate::limpers::LimpersQuestion;
 use crate::preflop::{Seat, Situation};
 use crate::read_price::DrawKind;
 use crate::river::RiverQuestion;
@@ -128,10 +129,11 @@ pub enum Skill {
     BeatsMe,
     ReadPrice,
     River,
+    Limpers,
 }
 
 impl Skill {
-    pub const ALL: [Skill; 18] = [
+    pub const ALL: [Skill; 19] = [
         Skill::Preflop,
         Skill::Nuts,
         Skill::Possible,
@@ -150,6 +152,7 @@ impl Skill {
         Skill::BeatsMe,
         Skill::ReadPrice,
         Skill::River,
+        Skill::Limpers,
     ];
 
     pub fn name(self) -> &'static str {
@@ -172,6 +175,7 @@ impl Skill {
             Skill::BeatsMe => "beats_me",
             Skill::ReadPrice => "read_price",
             Skill::River => "river",
+            Skill::Limpers => "limpers",
         }
     }
 
@@ -532,6 +536,8 @@ pub enum Question {
     ReadPrice(ReadPriceQuestion),
     /// A river spot from the solver-graded library, with its seed's suit permutation applied.
     River(RiverQuestion),
+    /// Facing one or more limpers, graded from Q7's limper ranges.
+    Limpers(LimpersQuestion),
 }
 
 impl Question {
@@ -587,6 +593,7 @@ impl Question {
             }),
             Question::Table(q) => Question::Table(q.with_suit_perm(perm)),
             Question::River(q) => Question::River(q.with_suit_perm(perm)),
+            Question::Limpers(q) => Question::Limpers(q.with_suit_perm(perm)),
             Question::BeatsMe(q) => Question::BeatsMe(BeatsMeQuestion {
                 hero: holding(&q.hero),
                 board: board(&q.board),

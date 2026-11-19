@@ -1537,8 +1537,9 @@ mod beats_me {
             for _ in 0..800 {
                 let planned = session.try_next_item().unwrap();
                 total += 1;
-                preflop += u64::from(planned.skill == Skill::Preflop);
-                session.record(planned, planned.skill != Skill::Preflop);
+                let is_pf = poker_trainer::groups::group_of(planned.skill) == Some(poker_trainer::groups::Group::Preflop);
+                preflop += u64::from(is_pf);
+                session.record(planned, !is_pf);
                 assert!(preflop * 100 + 25 >= total * MIN_PREFLOP_PERCENT, "seed {seed}: {preflop} of {total}");
             }
         }
@@ -1552,7 +1553,7 @@ mod beats_me {
             for _ in 0..15 {
                 let planned = session.try_next_item().unwrap();
                 total += 1;
-                preflop += u64::from(planned.skill == Skill::Preflop);
+                preflop += u64::from(poker_trainer::groups::group_of(planned.skill) == Some(poker_trainer::groups::Group::Preflop));
                 session.record(planned, true);
             }
             assert!(preflop * 100 >= total * MIN_PREFLOP_PERCENT, "seed {seed}: {preflop} of {total}");
@@ -1742,20 +1743,25 @@ mod beats_me {
                     let planned = session.try_next_item().unwrap();
                     if waiting {
                         waits += 1;
-                        let preflop = dealt.iter().filter(|&&s| s == Skill::Preflop).count() as u64;
+                        let is_pf = |s: Skill| poker_trainer::groups::group_of(s) == Some(poker_trainer::groups::Group::Preflop);
+                        let preflop = dealt.iter().filter(|&&s| is_pf(s)).count() as u64;
                         let total = dealt.len() as u64;
                         let fits = preflop * 100 >= (total + CHAIN_STAGES) * MIN_PREFLOP_PERCENT;
                         let owed = preflop * 100 < (total + 1) * MIN_PREFLOP_PERCENT;
-                        let blocked = dealt.ends_with(&[Skill::Preflop, Skill::Preflop]);
+                        let last_blocked = match dealt.as_slice() {
+                            [.., a, b] if a == b => Some(*a),
+                            _ => None,
+                        };
+                        let blocked = allowed.iter().all(|&s| !is_pf(s) || Some(s) == last_blocked);
                         held += u64::from(!fits);
                         held_unowed += u64::from(!fits && !owed && !blocked);
                         let at = format!("rotation {r} seed {seed} item {i}: {:?}", planned.skill);
                         if fits {
                             assert_eq!(planned.skill, Skill::Chain, "{at}");
                         } else if blocked {
-                            assert!(planned.skill != Skill::Preflop && planned.skill != Skill::Chain, "{at}");
+                            assert!(!is_pf(planned.skill) && planned.skill != Skill::Chain, "{at}");
                         } else {
-                            assert_eq!(planned.skill, Skill::Preflop, "{at}");
+                            assert!(is_pf(planned.skill), "{at}");
                         }
                     }
                     dealt.push(planned.skill);
@@ -1779,7 +1785,7 @@ mod beats_me {
             for i in 0..60u64 {
                 let planned = session.try_next_item().unwrap();
                 total += 1;
-                preflop += u64::from(planned.skill == Skill::Preflop);
+                preflop += u64::from(poker_trainer::groups::group_of(planned.skill) == Some(poker_trainer::groups::Group::Preflop));
                 chain_items += u64::from(planned.skill == Skill::Chain);
                 items += 1;
                 assert!(preflop * 100 >= total * MIN_PREFLOP_PERCENT, "seed {seed}: {preflop} of {total}");

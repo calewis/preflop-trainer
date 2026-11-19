@@ -145,7 +145,7 @@ MUTATIONS = [
     ("a picked chain is dropped when the floor is short", "src/schedule.rs",
      "            self.chain_waiting = true;\n", "", "libresearch", "a_chain_waiting_for_the_floor"),
     ("a waiting chain lets other items in first", "src/schedule.rs",
-     "self.preflop_owed(blocked) || (self.chain_waiting && blocked != Some(Skill::Preflop));", "self.preflop_owed(blocked);", "libresearch", "a_chain_waiting_for_the_floor"),
+     "self.preflop_owed(blocked) || (self.chain_waiting && !self.preflop_pool(blocked).is_empty());", "self.preflop_owed(blocked);", "libresearch", "a_chain_waiting_for_the_floor"),
     ("a waiting chain starts before it fits", "src/schedule.rs",
      "if self.chain_waiting && self.chain_fits_preflop_floor() {", "if self.chain_waiting {", "libresearch", "a_chain_waiting_for_the_floor"),
     ("a retry or review is speculated", "web/src/engine.rs",
@@ -424,7 +424,7 @@ MUTATIONS = [
     ("new items ignore the player's rung", "src/schedule.rs", "            Skill::ReadPrice => seed = read_price_seed_with_rung(seed, self.read_price_rung),\n", "", "libreadprice", "a_new_item_is_dealt_at_the_players_rung"),
     ("every rung gets the form", "src/reflection.rs", "matches!(q.rung(), 2 | 3) && !outcome.ok()", "!outcome.ok()", "libreadprice", "reflection_is_offered"),
     ("a group pick jumps ahead of an owed preflop", "src/schedule.rs",
-     "        let mut skill = if preflop_owed { Skill::Preflop } else { self.choose(&eligible, blocked) };",
+     "        let mut skill = if preflop_owed && !preflop_pool.is_empty() {\n            self.pick_preflop(&preflop_pool, blocked)\n        } else {\n            self.choose(&eligible, blocked)\n        };",
      "        let mut skill = self.choose(&eligible, blocked);",
      "libreadprice", "preflop_never_falls_below_its_floor"),
     ("sibling search ignores the rung", "src/family.rs",
@@ -637,6 +637,19 @@ MUTATIONS += [
      "    home.checkup ? h('section', { class: 'panel', 'data-checkup-offers': '' },", "    false ? h('section', { class: 'panel', 'data-checkup-offers': '' },", "checkup", "checkup not offered on Home"),
     ("the mixed result hides the groups", "app/screens.js",
      "        ? h('dl', { class: 'stat-list', 'data-by-group': '' }, r.groups.map(g => row(g.title, `${g.ok} of ${g.answered}`)))", "        ? null", "checkup", "no result by group"),
+    # --- limpers preflop drill
+    ("limpers raise size omits the blind surcharge", "src/limpers.rs",
+     "4 + 2 * limpers + if seat.is_blind() { 1 } else { 0 }", "4 + 2 * limpers", "liblimpers", "raise_size_rule_matches_limpers_and_position"),
+    ("limpers deals BB vs lone SB complete", "src/limpers.rs",
+     "if seat == LimperSeat::Bb && count == 1 {", "if false && seat == LimperSeat::Bb && count == 1 {", "liblimpers", "generator_obeys_invariants_and_never_deals_unspecified_hands"),
+    ("limpers accepts fold in the big blind", "src/grade.rs",
+     '"f" if q.seat != LimperSeat::Bb => Action::Fold,', '"f" => Action::Fold,', "liblimpers", "grading_accepts_only_valid_actions_and_rejects_fold_in_bb_and_unspecified_hands"),
+    ("limpers boundary hands are weighted like interior hands", "src/limpers.rs",
+     "pub const BOUNDARY_WEIGHT: u64 = 3;", "pub const BOUNDARY_WEIGHT: u64 = 10;", "liblimpers", "boundary_hands_are_asked_less_often_than_interior_hands"),
+    ("limpers reveal opens Details by default", "app/reveal.js",
+     "    more('Details',\n      p(r.summary),", "    h('details', { class: 'more', open: 'open' }, h('summary', {}, 'Details'),\n      p(r.summary),", "limpers", "details block not collapsed"),
+    ("limpers reveal drops Best line", "app/reveal.js",
+     "    h('p', { class: 'reveal-answer' }, 'Best: ', h('strong', {}, r.best)),\n", "", "limpers", "limpers reveal missing Best line"),
 ]
 
 # A broken browser or harness is not a caught bug: these failures prove nothing.

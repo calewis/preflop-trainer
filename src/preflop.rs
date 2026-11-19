@@ -647,6 +647,81 @@ impl Range {
         self.grid[row as usize] |= 1 << column;
         self
     }
+
+    pub const ALL: Range = Range { grid: [0x1FFF; 13] };
+
+    pub const ALL_SUITED: Range = {
+        let mut grid = [0u16; 13];
+        let mut high = 1usize;
+        while high < 13 {
+            grid[high] = (1u16 << high) - 1;
+            high += 1;
+        }
+        Range { grid }
+    };
+
+    pub const ALL_OFFSUIT: Range = {
+        let mut grid = [0u16; 13];
+        let mut low = 0usize;
+        while low < 12 {
+            grid[low] = 0x1FFF & !((1u16 << (low + 1)) - 1);
+            low += 1;
+        }
+        Range { grid }
+    };
+
+    pub const fn with_class(self, rank_a: u8, rank_b: u8, suited: bool) -> Range {
+        let (high, low) = if rank_a >= rank_b { (rank_a, rank_b) } else { (rank_b, rank_a) };
+        let (row, column) = if high == low || suited { (high, low) } else { (low, high) };
+        self.with(row, column)
+    }
+
+    pub const fn contains_const(self, rank_a: u8, rank_b: u8, suited: bool) -> bool {
+        let (high, low) = if rank_a >= rank_b { (rank_a, rank_b) } else { (rank_b, rank_a) };
+        let (row, column) = if high == low || suited { (high, low) } else { (low, high) };
+        (self.grid[row as usize] >> column) & 1 == 1
+    }
+
+    pub const fn union_const(self, other: Range) -> Range {
+        let mut grid = self.grid;
+        let mut row = 0;
+        while row < 13 {
+            grid[row] |= other.grid[row];
+            row += 1;
+        }
+        Range { grid }
+    }
+
+    pub const fn without_const(self, other: Range) -> Range {
+        let mut grid = self.grid;
+        let mut row = 0;
+        while row < 13 {
+            grid[row] &= !other.grid[row];
+            row += 1;
+        }
+        Range { grid }
+    }
+
+    pub const fn intersect_const(self, other: Range) -> Range {
+        let mut grid = self.grid;
+        let mut row = 0;
+        while row < 13 {
+            grid[row] &= other.grid[row];
+            row += 1;
+        }
+        Range { grid }
+    }
+
+    pub const fn is_empty(self) -> bool {
+        let mut row = 0;
+        while row < 13 {
+            if self.grid[row] != 0 {
+                return false;
+            }
+            row += 1;
+        }
+        true
+    }
 }
 
 /// A range together with its notation as written on the card.

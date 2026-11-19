@@ -14,6 +14,7 @@ use crate::item::{
     beats_me_rung_of_seed, chain_hand_seed, chain_stage_of_seed, equity_rung_of_seed, ChainHand, ChainQuestion, EquityOpponents, EquityQuestion,
     HitStreet, Item, Question, Skill, SpotMode, SpotQuestion,
 };
+use crate::limpers::gen_limpers;
 use crate::money;
 use crate::preflop::{chart_for, Range, Seat, Situation, CARD};
 use crate::read_price::gen_read_price;
@@ -129,6 +130,7 @@ pub fn generate(skill: Skill, seed: u64) -> Item {
         Skill::BeatsMe => Question::BeatsMe(gen_beats_me(&mut rng, seed)),
         Skill::ReadPrice => Question::ReadPrice(gen_read_price(&mut rng, seed)),
         Skill::River => Question::River(crate::river::question_for_seed(seed)),
+        Skill::Limpers => Question::Limpers(gen_limpers(&mut rng)),
     };
     Item { skill, seed, question }
 }

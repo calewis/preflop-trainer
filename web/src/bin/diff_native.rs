@@ -8,8 +8,8 @@ use std::time::Instant;
 
 use trainer_web::dispatch;
 
-const SKILLS: [&str; 17] = [
-    "preflop", "nuts", "possible", "made", "beats", "outs", "price", "hit", "spot", "spot_mw",
+const SKILLS: [&str; 18] = [
+    "preflop", "limpers", "nuts", "possible", "made", "beats", "outs", "price", "hit", "spot", "spot_mw",
     "board_type", "equity", "anchor", "table", "chain", "beats_me", "read_price",
 ];
 /// Answers tried for items that aren't simple choices.
@@ -43,6 +43,7 @@ fn main() {
     table_session(&mut out);
     table_checkup(&mut out);
     preflop_charts(&mut out);
+    limpers_drills(&mut out);
     for (command, reply) in out.commands {
         // One request per output line: a JSON reply never holds a raw newline.
         assert!(!reply.contains('\n'), "a reply holds a raw newline: {reply}");
@@ -147,7 +148,7 @@ fn exact_equity_drills(out: &mut Out) {
 
 /// The optional origin on `prepare`: it decides whether a miss offers a reflection.
 fn origins(out: &mut Out) {
-    for skill in ["made", "beats", "spot", "spot_mw", "preflop", "chain"] {
+    for skill in ["made", "beats", "spot", "spot_mw", "preflop", "limpers", "chain"] {
         for i in 0..6u64 {
             let seed = (i * 2_654_435_761 + 71).to_string();
             for origin in ["new", "due", "retry", "unknown"] {
@@ -457,6 +458,16 @@ fn preflop_charts(out: &mut Out) {
         out.call(&["prepare", "preflop", &seed]);
         for answer in ["r", "c", "f"] {
             out.call(&["grade", "preflop", &seed, answer, "0"]);
+        }
+    }
+}
+
+fn limpers_drills(out: &mut Out) {
+    for i in 0..120u64 {
+        let seed = (i * 2_654_435_761 + 9).to_string();
+        out.call(&["prepare", "limpers", &seed]);
+        for answer in ["r", "c", "f"] {
+            out.call(&["grade", "limpers", &seed, answer, "0"]);
         }
     }
 }

@@ -429,22 +429,42 @@ impl Session {
         self.exact_equity = exact;
     }
 
-    /// True when dealing anything but `preflop` next would drop it below its share.
+    /// Allowed preflop-group skills that can be dealt now and aren't blocked.
+    fn preflop_pool(&self, blocked: Option<Skill>) -> Vec<Skill> {
+        self.allowed
+            .iter()
+            .copied()
+            .filter(|&s| group_of(s) == Some(Group::Preflop) && self.can_deal(s) && Some(s) != blocked)
+            .collect()
+    }
+
+    fn has_preflop(&self) -> bool {
+        self.allowed.iter().any(|&s| group_of(s) == Some(Group::Preflop))
+    }
+
+    fn pick_preflop(&mut self, pool: &[Skill], blocked: Option<Skill>) -> Skill {
+        if pool.len() == 1 {
+            pool[0]
+        } else {
+            self.choose_skill(pool, blocked)
+        }
+    }
+
+    /// True when dealing anything outside the preflop group next would drop it below its share.
     fn preflop_owed(&self, blocked: Option<Skill>) -> bool {
-        let dealt = self.dealt.iter().filter(|s| **s == Skill::Preflop).count() as u64;
+        let dealt = self.dealt.iter().filter(|s| group_of(**s) == Some(Group::Preflop)).count() as u64;
         self.preflop_floor
-            && self.allowed.contains(&Skill::Preflop)
-            && blocked != Some(Skill::Preflop)
+            && !self.preflop_pool(blocked).is_empty()
             && dealt * 100 < (self.dealt.len() as u64 + 1) * MIN_PREFLOP_PERCENT
     }
 
-    /// False if starting a chain now would leave `preflop` under its share after
+    /// False if starting a chain now would leave the preflop group under its share after
     /// the chain's last stage.
     fn chain_fits_preflop_floor(&self) -> bool {
-        if !self.preflop_floor || !self.allowed.contains(&Skill::Preflop) {
+        if !self.preflop_floor || !self.has_preflop() {
             return true;
         }
-        let preflop = self.dealt.iter().filter(|s| **s == Skill::Preflop).count() as u64;
+        let preflop = self.dealt.iter().filter(|s| group_of(**s) == Some(Group::Preflop)).count() as u64;
         preflop * 100 >= (self.dealt.len() as u64 + CHAIN_STAGES) * MIN_PREFLOP_PERCENT
     }
 
@@ -513,7 +533,7 @@ impl Session {
             self.chain_waiting = false;
             return Some(self.deal_fresh(Skill::Chain));
         }
-        let preflop_owed = self.preflop_owed(blocked) || (self.chain_waiting && blocked != Some(Skill::Preflop));
+        let preflop_owed = self.preflop_owed(blocked) || (self.chain_waiting && !self.preflop_pool(blocked).is_empty());
         // Dealing a retry now must keep retries at or under 1 in MAX_RETRY_ONE_IN.
         let retry_allowed =
             (self.retries_dealt + 1) * MAX_RETRY_ONE_IN <= self.dealt.len() as u64 + 1;
@@ -535,16 +555,21 @@ impl Session {
         }
         // The no-three-in-a-row rule can't apply with one dealable skill.
         let blocked = blocked.filter(|_| eligible.len() >= 2);
-        let mut skill = if preflop_owed { Skill::Preflop } else { self.choose(&eligible, blocked) };
+        let preflop_pool = self.preflop_pool(blocked);
+        let mut skill = if preflop_owed && !preflop_pool.is_empty() {
+            self.pick_preflop(&preflop_pool, blocked)
+        } else {
+            self.choose(&eligible, blocked)
+        };
         // A chain's stages come in a row, so it only starts if the floor survives them
-        // all. Otherwise it waits for the next `preflop` item instead of being lost.
+        // all. Otherwise it waits for the next preflop-group item instead of being lost.
         if skill == Skill::Chain && !self.chain_fits_preflop_floor() {
             self.chain_waiting = true;
-            if blocked == Some(Skill::Preflop) {
+            if preflop_pool.is_empty() {
                 let others: Vec<Skill> = eligible.iter().copied().filter(|&s| s != Skill::Chain).collect();
                 skill = self.choose(&others, blocked);
             } else {
-                skill = Skill::Preflop;
+                skill = self.pick_preflop(&preflop_pool, blocked);
             }
         }
         if let Some(index) = self.due.iter().position(|d| d.skill == skill).filter(|_| self.review_slot_open(skill)) {

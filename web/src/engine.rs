@@ -1839,7 +1839,7 @@ mod tests {
         let total = 120;
         for step in 0..total {
             let next = dispatch(&format!("session_next\x1f{}", step * 1000));
-            preflop += u32::from(next.contains("\"skill\":\"preflop\""));
+            preflop += u32::from(next.contains("\"skill\":\"preflop\"") || next.contains("\"skill\":\"limpers\""));
         }
         assert!(preflop * 5 >= total, "{preflop} of {total}");
     }
@@ -2400,5 +2400,51 @@ LEAK|1|price|leak:price:call_below:river|3500|1|2026-01-15|2026-01-15a|synth-02|
             assert!(committed.contains("\\triver\\t"), "{committed}");
         }
         assert!(!dispatch("progress\x1f10000").contains("\"River\""), "River rows showed up in Progress");
+    }
+
+    #[test]
+    fn limpers_drill_and_leaks_work_through_the_bridge() {
+        load("");
+        let home = dispatch("home\x1f1000");
+        assert!(home.contains("\"skills\":[\"Preflop\",\"Limpers\"]"), "{home}");
+
+        assert!(dispatch("session_open\x1f19\x1f1000\x1flimpers").contains("first"));
+        dispatch("session_start\x1f15");
+        let mut saw_raise_size = false;
+        let mut saw_bb_check = false;
+        for step in 0..30u64 {
+            let next = dispatch(&format!("session_next\x1f{}", step * 1000));
+            assert!(next.contains("\"skill\":\"limpers\""), "{next}");
+            let seed = field(&next, "seed");
+            let prep = dispatch(&format!("prepare\x1flimpers\x1f{seed}\x1fnew"));
+            assert!(prep.contains("\"kind\":\"limpers\"") && prep.contains("\"context\":\""), "{prep}");
+            if prep.contains("\"seat_short\":\"BB\"") {
+                assert!(prep.contains("\"label\":\"Check\"") && !prep.contains("\"label\":\"Fold\""), "{prep}");
+                saw_bb_check = true;
+            }
+            if prep.contains("Raise to ") {
+                saw_raise_size = true;
+            }
+            let graded = dispatch(&format!("grade\x1flimpers\x1f{seed}\x1fc\x1f1200"));
+            assert!(graded.contains("\"kind\":\"limpers\"") && graded.contains("\"best\":\"") && graded.contains("\"why\":\""), "{graded}");
+            let line = template(&graded);
+            assert!(dispatch(&format!("commit\x1f{line}\x1f{}\x1f1200", 2000 + step)).contains("\\tlimpers\\t"));
+        }
+        assert!(saw_raise_size && saw_bb_check, "saw_raise_size={saw_raise_size} saw_bb_check={saw_bb_check}");
+        assert!(dispatch("progress\x1f50000").contains("\"title\":\"Limpers\""));
+
+        // Limpers leaks load cleanly and join Preflop mistakes.
+        let sample = "#LEAKS v1\n\
+LEAK|0|limpers|limpers:btn:1|1200|1|2026-11-18|s1|h10|100|0|Raised K7s over CO limp|cost 4bb|players=5|seat=BTN|limpers=CO|hand=Ks7s|hero_act=r|expect=f\n";
+        assert!(dispatch(&format!("load_leaks\x1f{sample}")).contains("\"preflop\":1"));
+        assert!(dispatch("session_open\x1f7\x1f1000\x1fleaks:preflop").contains("\"total\":15"));
+        let next = dispatch("session_next\x1f0");
+        assert!(next.contains("\"skill\":\"limpers\""), "{next}");
+        let seed = field(&next, "seed");
+        let prep = dispatch(&format!("prepare_leak\x1f{seed}\x1fnew"));
+        assert!(prep.contains("CO limps. You are on the button.") && prep.contains("\"graded\":{}"), "{prep}");
+        let graded = dispatch(&format!("grade\x1flimpers\x1f{seed}\x1ff\x1f800"));
+        assert!(graded.contains("\"correct\":true") && graded.contains("\"leak\":{"), "{graded}");
+        assert!(dispatch("load_leaks\x1f").contains("\"loaded\":false"));
     }
 }

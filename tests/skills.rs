@@ -1777,6 +1777,7 @@ fn correct_answer(item: &Item) -> String {
         Skill::Outs => "0",
         Skill::Price | Skill::Hit => "0",
         Skill::Preflop | Skill::Spot | Skill::SpotMw => "f",
+        Skill::Limpers => "c",
         Skill::Equity | Skill::Anchor => "50",
         Skill::BoardType => "rp",
         Skill::Table | Skill::Chain | Skill::BeatsMe | Skill::ReadPrice | Skill::River => "fold",
@@ -1895,6 +1896,7 @@ fn sampled_multiway_numbers_do_not_change_with_suit_labels() {
 fn reveal_key(skill: Skill) -> &'static str {
     match skill {
         Skill::Preflop => "f",
+        Skill::Limpers => "c",
         Skill::Nuts => "AK",
         Skill::Possible => "fs",
         Skill::Made => "top",

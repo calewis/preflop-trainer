@@ -26,6 +26,7 @@ function hand(cards, title = 'Your hand') {
 export function questionView(q) {
   switch (q.kind) {
     case 'preflop': return preflopQuestion(q);
+    case 'limpers': return limpersQuestion(q);
     case 'nuts': return h('div', { class: 'stack' }, board(q), prompt('Name the best possible holding right now.'));
     case 'possible': return h('div', { class: 'stack' }, board(q), prompt('Which can someone hold right now with two hole cards?'));
     case 'made': return h('div', { class: 'stack' }, hand(q.hero), board(q), prompt('What do you have?'));
@@ -72,6 +73,16 @@ function preflopQuestion(q) {
     h('p', { class: 'context' }, acted ? `Table of ${q.players}. You are ${q.seat_sentence}.`
       : `Table of ${q.players}. You are ${q.seat_sentence} with ${plural(q.behind, 'player', 'players')} still to act behind you.`),
     prompt(lines[q.situation]));
+}
+
+function limpersQuestion(q) {
+  return h('div', { class: 'stack' },
+    h('div', { class: 'chips' },
+      chip('Table', `${q.players}-handed`),
+      chip('Seat', q.seat_short),
+      chip('Limpers', q.limpers_count)),
+    hand(q.hand),
+    prompt(q.context));
 }
 
 function priceQuestion(q) {
@@ -255,6 +266,7 @@ function shortList(items, keep, cls = 'facts') {
 function revealBody(r) {
   switch (r.kind) {
     case 'preflop': return [answerLine(r.answer), p(r.why), r.chart ? h('p', { class: 'hint' }, r.chart) : null];
+    case 'limpers': return limpersReveal(r);
     case 'nuts': return nutsReveal(r);
     case 'possible': return possibleReveal(r);
     case 'made': return [answerLine(r.answer), p(r.description), p(`Your best five cards make ${r.rank}.`)];
@@ -276,6 +288,16 @@ function revealBody(r) {
     case 'river': return riverReveal(r);
     default: return [];
   }
+}
+
+function limpersReveal(r) {
+  return [
+    h('p', { class: 'reveal-answer' }, 'Best: ', h('strong', {}, r.best)),
+    p(r.why),
+    more('Details',
+      p(r.summary),
+      p(r.size_note)),
+  ];
 }
 
 function nutsReveal(r) {

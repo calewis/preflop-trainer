@@ -8,6 +8,7 @@ use poker_trainer::equity_skill::{EquityBand, EquityBias, BIAS_MIN_ATTEMPTS};
 use poker_trainer::beats_me::{mix_method, prompt_text, ways_method, Standing};
 use poker_trainer::grade::{any_of_suit_text, BeatsMeReveal, EquityAnalysis, EvBand, FlipFacts, Outcome, Reveal, BEATS_RANDOM_NOTE};
 use poker_trainer::item::{BeatsMeAsk, BeatsMeQuestion, ChainHand, ChainQuestion, ChainStage, EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question, Skill, SpotMode, SpotQuestion};
+use poker_trainer::limpers::{LimperGrade, SIZE_RULE_NOTE};
 use poker_trainer::preflop::{action_label, why_line, Action, CardLine, Chart, PreflopReason, Seat, Range, Situation, CARD};
 use poker_trainer::progress::{BaselineRun, SkillStats, PASS_ATTEMPTS};
 use poker_trainer::river::{river_bb, RiverGrade, RiverQuestion, RIVER_NOTE};
@@ -193,6 +194,15 @@ pub fn question(item: &Item, style: Style) -> String {
         }
         Question::Table(q) => table_question(q, style),
         Question::River(q) => river_question(q, style),
+        Question::Limpers(q) => format!(
+            "{}-handed. Seat: {}. Limpers: {} ({}).\nYour hand: {}\n{}",
+            q.players,
+            q.seat.short(),
+            q.limper_count(),
+            q.limpers_short_list(),
+            style.holding(q.hand),
+            q.context_line(),
+        ),
         Question::Chain(q) => chain_question(item, q, style),
     }
 }
@@ -650,6 +660,7 @@ pub fn reveal(outcome: &Outcome, style: Style) -> String {
         }
         Reveal::Table(graded) => table_reveal(&mut lines, graded),
         Reveal::River(graded) => river_reveal(&mut lines, graded),
+        Reveal::Limpers(graded) => limpers_reveal(&mut lines, graded),
     }
     lines.extend(outcome.chain_tie.clone());
     lines.join("\n")
@@ -701,6 +712,13 @@ fn river_reveal(lines: &mut Vec<String>, g: &RiverGrade) {
     lines.push(spot.beaten_line());
     lines.extend(spot.reply_line(spot.best_option().code));
     lines.push(RIVER_NOTE.to_string());
+}
+
+fn limpers_reveal(lines: &mut Vec<String>, g: &LimperGrade) {
+    lines.push(format!("Best: {}", g.best_text()));
+    lines.push(g.reason.text().to_string());
+    lines.push(g.row_summary.to_string());
+    lines.push(SIZE_RULE_NOTE.to_string());
 }
 
 #[allow(clippy::too_many_arguments)]

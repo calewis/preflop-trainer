@@ -7,6 +7,7 @@ use crate::eval::Category;
 use crate::generate::{equity_first_candidate, family_prefilter, generate, Prefilter, EQUITY_MAX_PCT, EQUITY_MIN_PCT};
 use crate::grade::{beats_analysis, equity_analysis, nuts_analysis, outs_analysis, possible_analysis};
 use crate::item::{beats_me_seed_with_rung, equity_seed_with_rung, read_price_seed_with_rung, EquityQuestion, Item, Question, Skill, SpotMode, SpotQuestion, HELD_OUT_BIT};
+use crate::limpers::limpers_family;
 use crate::read_price::read_price_family;
 use crate::classes::made_class;
 use crate::preflop::{Seat, Situation};
@@ -53,6 +54,7 @@ pub fn family_of(item: &Item) -> Option<String> {
         Question::River(q) => Some(q.spot().family_tag()),
         Question::BeatsMe(q) => Some(beats_me_family(q)),
         Question::ReadPrice(q) => Some(read_price_family(q)),
+        Question::Limpers(q) => Some(limpers_family(q)),
         Question::Anchor { .. } | Question::BoardType { .. } | Question::Chain(_) => None,
     }
 }

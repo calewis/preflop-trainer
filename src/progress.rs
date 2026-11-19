@@ -40,6 +40,7 @@ const fn accuracy(pct: f64, median_ms: Option<u32>) -> PassMark {
 }
 
 pub const PASS_PREFLOP: PassMark = accuracy(95.0, None);
+pub const PASS_LIMPERS: PassMark = accuracy(95.0, None);
 pub const PASS_NUTS: PassMark = accuracy(95.0, Some(6_000));
 pub const PASS_POSSIBLE: PassMark = accuracy(95.0, Some(6_000));
 pub const PASS_MADE: PassMark = accuracy(95.0, Some(6_000));
@@ -148,6 +149,7 @@ pub fn pass_mark(skill: Skill) -> PassMark {
         // River rows have their own mode and count toward no pass mark yet; this mark
         // is the table spots' and only says what one would look like.
         Skill::River => PASS_TABLE,
+        Skill::Limpers => PASS_LIMPERS,
     }
 }
 
@@ -165,7 +167,7 @@ pub const fn baseline_step(skill: Skill) -> Option<usize> {
         Skill::Nuts | Skill::Possible | Skill::Made | Skill::Beats | Skill::BoardType | Skill::BeatsMe => Some(1),
         Skill::Outs | Skill::Price | Skill::Hit | Skill::Equity | Skill::Anchor => Some(2),
         Skill::Spot | Skill::SpotMw | Skill::Chain => Some(3),
-        Skill::Preflop | Skill::ReadPrice | Skill::Table | Skill::River => None,
+        Skill::Preflop | Skill::ReadPrice | Skill::Table | Skill::River | Skill::Limpers => None,
     }
 }
 

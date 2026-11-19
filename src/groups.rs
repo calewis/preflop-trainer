@@ -50,7 +50,7 @@ impl Group {
     /// The skills a group deals, with their relative weights inside it.
     pub const fn members(self) -> &'static [(Skill, u64)] {
         match self {
-            Group::Preflop => &[(Skill::Preflop, 1)],
+            Group::Preflop => &[(Skill::Preflop, 1), (Skill::Limpers, 1)],
             Group::ReadPrice => &[(Skill::ReadPrice, 1)],
             Group::Equity => &[(Skill::Equity, 3), (Skill::Anchor, 1)],
             Group::WholeHands => &[(Skill::Chain, 1)],

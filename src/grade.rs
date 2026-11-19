@@ -14,6 +14,7 @@ use crate::item::{
     chain_hand_seed, BeatsMeAsk, BeatsMeQuestion, ChainHand, ChainQuestion, ChainStage, EquityOpponents, EquityQuestion,
     HitStreet, Item, Question, ReadPriceAsk, ReadPriceQuestion, SpotMode, SpotQuestion,
 };
+use crate::limpers::{self, LimperGrade, LimperSeat, LimpersQuestion};
 use crate::money;
 use crate::preflop::{preflop_answer, Action, PreflopReason, Seat, Situation};
 use crate::read_price::{price_points, question_band, question_call, reveal_for, smallest_mistake, PriceBand, PriceCall, ReadPriceReveal};
@@ -329,6 +330,7 @@ pub enum Reveal {
     River(RiverGrade),
     BeatsMe(BeatsMeReveal),
     ReadPrice(ReadPriceReveal),
+    Limpers(LimperGrade),
 }
 
 /// One shown hand's result at rung 0 of `beats_me`.
@@ -405,6 +407,7 @@ fn grade_item(item: &Item, raw: &str) -> Result<Outcome, InvalidAnswer> {
         Question::BeatsMe(q) => grade_beats_me(q, raw),
         Question::ReadPrice(q) => grade_read_price(q, raw),
         Question::River(q) => grade_river(q, raw),
+        Question::Limpers(q) => grade_limpers(q, raw),
     }
 }
 
@@ -571,6 +574,29 @@ fn grade_preflop(
         chosen == action,
         chosen.code().to_string(),
         Reveal::Preflop { seat, situation, action, reason },
+    ))
+}
+
+fn grade_limpers(q: &LimpersQuestion, raw: &str) -> Result<Outcome, InvalidAnswer> {
+    let chosen = match normalize(raw).as_str() {
+        "r" => Action::Raise,
+        "c" => Action::Call,
+        "f" if q.seat != LimperSeat::Bb => Action::Fold,
+        _ => {
+            let msg = if q.seat == LimperSeat::Bb {
+                "Answer r or c."
+            } else {
+                "Answer r, c or f."
+            };
+            return Err(InvalidAnswer(msg.to_string()));
+        }
+    };
+    let graded = limpers::answer(q.seat, q.limper_count(), q.hand)
+        .ok_or_else(|| InvalidAnswer("This hand has no answer in the limpers table.".to_string()))?;
+    Ok(outcome(
+        chosen == graded.action,
+        chosen.code().to_string(),
+        Reveal::Limpers(graded),
     ))
 }
 

@@ -47,7 +47,27 @@ pub const fn is_mixed_form(form: u32) -> bool {
 /// out: its held-out spots are walked by its own forms. Drills in
 /// [`crate::groups::HIDDEN_SKILLS`] are dropped from the plan, leaving the rest
 /// as they were, so the checkup is [`MIXED_CHECKUP_LEN`] long.
-pub const MIXED_CHECKUP_MIX: [(Skill, usize); 14] = [
+pub const MIXED_CHECKUP_MIX: [(Skill, usize); 15] = [
+    (Skill::Preflop, 4),
+    (Skill::Limpers, 4),
+    (Skill::ReadPrice, 7),
+    (Skill::Equity, 5),
+    (Skill::Anchor, 2),
+    (Skill::Chain, 4),
+    (Skill::Nuts, 1),
+    (Skill::Possible, 1),
+    (Skill::Made, 1),
+    (Skill::BoardType, 1),
+    (Skill::BeatsMe, 2),
+    (Skill::Outs, 2),
+    (Skill::Hit, 2),
+    (Skill::Spot, 2),
+    (Skill::SpotMw, 2),
+];
+
+/// The older mixed checkup composition before `limpers` joined the preflop group,
+/// kept so completed runs from earlier logs still load and score.
+const PRE_LIMPERS_MIX: [(Skill, usize); 14] = [
     (Skill::Preflop, 8),
     (Skill::ReadPrice, 7),
     (Skill::Equity, 5),
@@ -292,11 +312,15 @@ pub fn mixed_checkup_plan(form: u32) -> CheckupPlan {
 /// The plan with every skill in [`MIXED_CHECKUP_MIX`], hidden ones included: the
 /// one a run taken before they were hidden followed.
 pub fn full_mixed_checkup_plan(form: u32) -> CheckupPlan {
+    mixed_plan_from_mix(form, &MIXED_CHECKUP_MIX)
+}
+
+fn mixed_plan_from_mix(form: u32, mix: &[(Skill, usize)]) -> CheckupPlan {
     let mut rng = Rng::new((u64::from(form) + 1).wrapping_mul(FORM_MIX) ^ MIXED_SALT);
     let deck_len = anchors::deck().len().max(1) as u64;
     let top_down = |i: usize, rungs: u8| rungs - 1 - (i % usize::from(rungs)) as u8;
     let mut units: Vec<Vec<CheckupSlot>> = Vec::new();
-    for &(skill, count) in &MIXED_CHECKUP_MIX {
+    for &(skill, count) in mix {
         let slot = |seed: u64| CheckupSlot { skill, seed, repeat_of: None, perm: IDENTITY };
         if skill == Skill::Chain {
             for _ in 0..count / ChainStage::ALL.len() {
@@ -321,6 +345,15 @@ pub fn full_mixed_checkup_plan(form: u32) -> CheckupPlan {
     }
     rng.shuffle(&mut units);
     CheckupPlan { kind: CheckupKind::Mixed, form, slots: units.concat() }
+}
+
+/// The older pre-`limpers` mixed checkup plan (hidden skills filtered out if `dealt_only`).
+pub fn legacy_mixed_checkup_plan(form: u32, dealt_only: bool) -> CheckupPlan {
+    let mut plan = mixed_plan_from_mix(form, &PRE_LIMPERS_MIX);
+    if dealt_only {
+        plan.slots.retain(|slot| is_dealt(slot.skill));
+    }
+    plan
 }
 
 /// The plan for either kind of checkup.
@@ -543,10 +576,17 @@ fn score_run(kind: CheckupKind, check: CheckRef, rows: &[&Attempt]) -> CheckupSc
     // followed, and can't be picked up again: its places no longer line up.
     let mut older_plan = false;
     if kind == CheckupKind::Mixed && !rows_follow(&plan, rows) {
-        let full = full_mixed_checkup_plan(check.form);
-        if rows_follow(&full, rows) {
-            plan = full;
-            older_plan = true;
+        let candidates = [
+            full_mixed_checkup_plan(check.form),
+            legacy_mixed_checkup_plan(check.form, true),
+            legacy_mixed_checkup_plan(check.form, false),
+        ];
+        for candidate in candidates {
+            if rows_follow(&candidate, rows) {
+                plan = candidate;
+                older_plan = true;
+                break;
+            }
         }
     }
     let mut by_slot: Vec<Option<&Attempt>> = vec![None; plan.slots.len()];

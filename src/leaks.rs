@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use crate::cards::{holding_mask, mask_of, parse_cards, parse_holding, Card, Holding};
 use crate::grade::grade;
 use crate::item::{Item, PriceHand, Question, ReadPriceAsk, ReadPriceQuestion, Skill};
+use crate::limpers::{LimperSeat, LimpersQuestion};
 use crate::log::{Attempt, Mode};
 use crate::preflop::Situation;
 use crate::rng::Rng;
@@ -26,6 +27,14 @@ pub enum LeakSpec {
         players: u8,
         behind: u8,
         situation: Situation,
+        hand: Holding,
+        hero_act: String,
+        expect: String,
+    },
+    Limpers {
+        players: u8,
+        seat: LimperSeat,
+        limpers: Vec<LimperSeat>,
         hand: Holding,
         hero_act: String,
         expect: String,
@@ -113,19 +122,24 @@ impl LeakEntry {
     pub fn skill(&self) -> Skill {
         match &self.spec {
             LeakSpec::Preflop { .. } => Skill::Preflop,
+            LeakSpec::Limpers { .. } => Skill::Limpers,
             LeakSpec::Price { .. } => Skill::ReadPrice,
         }
     }
 
     pub fn hero_act_code(&self) -> &str {
         match &self.spec {
-            LeakSpec::Preflop { hero_act, .. } | LeakSpec::Price { hero_act, .. } => hero_act,
+            LeakSpec::Preflop { hero_act, .. }
+            | LeakSpec::Limpers { hero_act, .. }
+            | LeakSpec::Price { hero_act, .. } => hero_act,
         }
     }
 
     pub fn expect_code(&self) -> &str {
         match &self.spec {
-            LeakSpec::Preflop { expect, .. } | LeakSpec::Price { expect, .. } => expect,
+            LeakSpec::Preflop { expect, .. }
+            | LeakSpec::Limpers { expect, .. }
+            | LeakSpec::Price { expect, .. } => expect,
         }
     }
 
@@ -141,6 +155,16 @@ impl LeakEntry {
                     situation: *situation,
                     hand: *hand,
                 },
+            },
+            LeakSpec::Limpers { players, seat, limpers, hand, .. } => Item {
+                skill: Skill::Limpers,
+                seed,
+                question: Question::Limpers(LimpersQuestion {
+                    players: *players,
+                    seat: *seat,
+                    limpers: limpers.clone(),
+                    hand: *hand,
+                }),
             },
             LeakSpec::Price { pot_before, bet, callers, share_pct, .. } => Item {
                 skill: Skill::ReadPrice,
@@ -328,6 +352,64 @@ pub fn parse_leaks(text: &str) -> Result<LeakLibrary, String> {
                 let expect = parse_pf_action(need(&kv, "expect")?)?;
                 LeakSpec::Preflop { players, behind, situation, hand, hero_act, expect }
             }
+            "limpers" => {
+                preflop += 1;
+                let players: u8 = need(&kv, "players")?.parse().map_err(|_| format!("bad players on leak {id}"))?;
+                if !matches!(players, 5 | 6) {
+                    return Err(format!("limpers leak {id} needs players=5 or 6, got {players}"));
+                }
+                let seat = if let Some(raw_seat) = kv.get("seat") {
+                    LimperSeat::parse(raw_seat).ok_or_else(|| format!("bad seat {raw_seat} on leak {id}"))?
+                } else {
+                    let behind: u8 = need(&kv, "behind")?.parse().map_err(|_| format!("bad behind on leak {id}"))?;
+                    LimperSeat::from_behind(players, behind)
+                        .ok_or_else(|| format!("invalid table geometry players={players} behind={behind} on leak {id}"))?
+                };
+                let table_seats = LimperSeat::seats_for_table(players);
+                let Some(hero_idx) = table_seats.iter().position(|&s| s == seat) else {
+                    return Err(format!("seat {} not on {players}-seat table on leak {id}", seat.short()));
+                };
+                if hero_idx == 0 {
+                    return Err(format!("UTG cannot face a limper on leak {id}"));
+                }
+                let earlier = &table_seats[..hero_idx];
+                let limpers: Vec<LimperSeat> = if let Some(raw_limpers) = kv.get("limpers") {
+                    let mut parsed = Vec::new();
+                    for part in raw_limpers.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                        let s = LimperSeat::parse(part).ok_or_else(|| format!("bad limper seat {part} on leak {id}"))?;
+                        if !earlier.contains(&s) || parsed.contains(&s) {
+                            return Err(format!("invalid limper seat {part} before {} on leak {id}", seat.short()));
+                        }
+                        parsed.push(s);
+                    }
+                    parsed.sort_unstable();
+                    parsed
+                } else {
+                    let Situation::Limpers(n) = parse_situation(need(&kv, "sit")?)? else {
+                        return Err(format!("limpers leak {id} needs limpers=... or sit=limpers:N"));
+                    };
+                    let n = usize::from(n);
+                    let candidates: Vec<LimperSeat> = if seat == LimperSeat::Bb && n == 1 {
+                        earlier.iter().copied().filter(|&s| s != LimperSeat::Sb).collect()
+                    } else {
+                        earlier.to_vec()
+                    };
+                    if n == 0 || n > 3 || n > candidates.len() {
+                        return Err(format!("invalid limper count {n} on leak {id}"));
+                    }
+                    candidates[..n].to_vec()
+                };
+                if !(1..=3).contains(&limpers.len()) {
+                    return Err(format!("limpers leak {id} needs 1 to 3 limpers, got {}", limpers.len()));
+                }
+                if seat == LimperSeat::Bb && limpers.as_slice() == [LimperSeat::Sb] {
+                    return Err(format!("lone SB complete is outside the limpers table on leak {id}"));
+                }
+                let hand = parse_holding(need(&kv, "hand")?).ok_or_else(|| format!("bad hand cards on leak {id}"))?;
+                let hero_act = parse_pf_action(need(&kv, "hero_act")?)?;
+                let expect = parse_pf_action(need(&kv, "expect")?)?;
+                LeakSpec::Limpers { players, seat, limpers, hand, hero_act, expect }
+            }
             "price" => {
                 price += 1;
                 let street = need(&kv, "street")?.to_string();
@@ -507,7 +589,7 @@ impl LeakSession {
     /// The same session dealing only the preflop leaks ("Preflop mistakes").
     pub fn preflop_only(mut self) -> LeakSession {
         self.eligible = (0..self.lib.entries.len())
-            .filter(|&idx| matches!(self.lib.entries[idx].spec, LeakSpec::Preflop { .. }))
+            .filter(|&idx| matches!(self.lib.entries[idx].spec, LeakSpec::Preflop { .. } | LeakSpec::Limpers { .. }))
             .collect();
         self
     }

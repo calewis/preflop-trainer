@@ -79,7 +79,7 @@ fn without_skill_flags_preflop_is_in_rotation() {
     let home = temp_home("rotation");
     let out = run(&home, &["drill", "--items", "40", "--seed", "4"], &answers(200));
     assert!(out.status.success());
-    assert!(log_rows(&home).iter().any(|r| r[3] == "preflop"));
+    assert!(log_rows(&home).iter().any(|r| r[3] == "preflop" || r[3] == "limpers"));
     let _ = fs::remove_dir_all(&home);
 }
 
@@ -100,6 +100,21 @@ fn preflop_prompt_states_table_seat_and_players_behind() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("Table of "), "{stdout}");
     assert!(stdout.contains("still to act behind you"), "{stdout}");
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn limpers_drill_runs_through_cli_and_logs_attempts() {
+    let home = temp_home("limpers");
+    let out = run(&home, &["drill", "--items", "8", "--seed", "19", "--skill", "limpers"], &"r\nc\n".repeat(20));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert!(stdout.contains("-handed. Seat: "), "{stdout}");
+    assert!(stdout.contains("Limpers: "), "{stdout}");
+    assert!(stdout.contains("Best: "), "{stdout}");
+    let rows = log_rows(&home);
+    assert_eq!(rows.len(), 8);
+    assert!(rows.iter().all(|r| r[3] == "limpers"), "{rows:?}");
     let _ = fs::remove_dir_all(&home);
 }
 
