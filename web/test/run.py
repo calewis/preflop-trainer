@@ -1097,18 +1097,26 @@ def check_table_reveal(page, verdict, want_correct, outcome, where):
     check(page.eval("document.querySelector('.verdict').textContent").startswith("Correct" if want_correct else "Not quite"),
           f"{where}: verdict line {reveal[:80]}")
     check(reveal.startswith("Correct") == want_correct, f"{where}: reveal tone {reveal[:80]}")
+    # The short reveal: best play, one EV per option, and on a depends spot one line per play.
+    short = page.eval("(() => { const c = document.querySelector('.reveal').cloneNode(true); c.querySelectorAll('details').forEach(d => d.remove()); return c.innerText; })()")
+    check("Best:" in short, f"{where}: no best option in {short}")
+    check(len(re.findall(r"-?[+\d.]+bb", short)) >= len(outcome["reveal"]["options"]), f"{where}: each option needs its EV in bb: {short}")
+    check("simulated tables" not in short and "simulated opponents" not in short and "% of the pot" not in short, f"{where}: the short reveal carries the long numbers: {short}")
+    if verdict == "depends":
+        check(re.search(r" vs [a-z-]+", short), f"{where}: depends needs one line per play: {short}")
+    else:
+        check(" vs " not in short, f"{where}: only depends spots show the breakdown: {short}")
+    # The detail is still there, folded away.
+    page.eval("document.querySelectorAll('.reveal details').forEach(d => { d.open = true; })")
+    reveal = page.eval("document.querySelector('.reveal').innerText")
     check("simulated loose-table opponents" in reveal and "assumptions" in reveal, f"{where}: no simulation caveat in {reveal}")
     check(outcome["reveal"]["explanation"].split(":")[0] in reveal, f"{where}: no verdict explanation in {reveal}")
-    check("Best:" in reveal, f"{where}: no best option in {reveal}")
-    check(len(re.findall(r"% of the pot, best at [\d.]+% of simulated tables", reveal)) == len(outcome["reveal"]["options"]) and "bb, " in reveal and "% of the pot" in reveal,
-          f"{where}: each option needs EV in bb and percent and 'best at': {reveal}")
+    check(len(re.findall(r"% of the pot, best at [\d.]+% of simulated tables", reveal)) == len(outcome["reveal"]["options"]), f"{where}: the detail needs percent and 'best at' per option: {reveal}")
     if verdict == "depends":
-        check("Against a" in reveal and "of the simulated opponents here" in reveal and "By opponent type" in reveal, f"{where}: depends needs the archetype breakdown: {reveal}")
+        check("Against a" in reveal and "of the simulated opponents here" in reveal, f"{where}: depends needs the archetype breakdown: {reveal}")
         check(("fair choice" in reveal or "the right read" in reveal) if want_correct else "rarely a read worth making" in reveal, f"{where}: no read note: {reveal}")
-    else:
-        check("Against a" not in reveal, f"{where}: only depends spots show the breakdown: {reveal}")
     if not want_correct and verdict != "depends":
-        check("gave up" in reveal and outcome["reveal"]["loss"].split(" ")[0] in reveal, f"{where}: no loss in {reveal}")
+        check("Cost:" in reveal and outcome["reveal"]["loss"].split(" ")[0] in reveal, f"{where}: no loss in {reveal}")
 
 
 
@@ -1217,7 +1225,8 @@ def run_research(viewport=(390, 844), mobile=True, theme="light", port_offset=0)
         check(re.search(r"\d+ of 4[67] next cards put you ahead of the price\.", text), f"no flip card line: {text}")
         check(re.search(r"Hands counted: ", text), f"the reveal does not list the groups used: {text}")
         question_text = page.eval("document.querySelector('.question').innerText")
-        check("Assume they have one of:" in question_text, f"no mix in the question: {question_text}")
+        check(re.search(r"The bettor is an? ", question_text), f"no player type in the question: {question_text}")
+        check("Assume they have one of:" not in question_text, f"the question still lists the hands: {question_text}")
         inspector.snapshot("research-flip-spot", full=True)
         page.eval("location.hash = '#home'")
         wait_home(page)

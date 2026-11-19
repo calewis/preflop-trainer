@@ -910,6 +910,20 @@ fn table_reveal(g: &TableGrade) -> V {
     } else {
         Vec::new()
     };
+    // The same breakdown as short pieces: `{"who": "nit", "play": "fold"}`.
+    let by_type: Vec<V> = if spot.verdict == Verdict::Depends {
+        spot.archetypes
+            .iter()
+            .map(|row| {
+                let who = row.archetype.described();
+                let who = who.strip_prefix("an ").or_else(|| who.strip_prefix("a ")).unwrap_or(who);
+                let who = who.strip_suffix(" player").unwrap_or(who);
+                obj! { "who": who, "play": spot.options[row.best].plain.as_str() }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let loss = (g.chosen != spot.best).then(|| g.loss_text());
     let read_note = g.read_note();
     obj! {
@@ -925,6 +939,7 @@ fn table_reveal(g: &TableGrade) -> V {
         "band": g.band.map(band_text),
         "read_note": read_note,
         "archetypes": archetypes,
+        "by_type": by_type,
     }
 }
 

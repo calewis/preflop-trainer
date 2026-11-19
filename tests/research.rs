@@ -1126,7 +1126,7 @@ mod spot_mixes {
     #[test]
     fn the_prompt_names_the_player_and_the_groups() {
         let mix = OppMix { player: Some(PlayerType::Loose), classes: vec![OppClass::Top, OppClass::Mid, OppClass::FlushDraw, OppClass::Nothing] };
-        assert_eq!(mix.assumption(None), "They're a loose player. Assume they have one of: top pair, second pair, a flush draw, or nothing much.");
+        assert_eq!(mix.assumption(None), "The bettor is a loose player.");
         assert_eq!(OppMix::single(OppClass::Set).assumption(None), "Assume they have a set.");
     }
 

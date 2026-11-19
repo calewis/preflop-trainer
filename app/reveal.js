@@ -372,18 +372,28 @@ function spotReveal(r) {
 }
 
 function tableReveal(r) {
+  // One short line per play: "Fold vs loose-passive, calling station."
+  const plays = [];
+  for (const t of r.by_type || []) {
+    let entry = plays.find(e => e.play === t.play);
+    if (!entry) plays.push(entry = { play: t.play, who: [] });
+    entry.who.push(t.who);
+  }
+  const cap = text => text.charAt(0).toUpperCase() + text.slice(1);
   return [
     h('p', { class: 'reveal-answer' }, 'Best: ', h('strong', {}, r.best)),
-    p(r.explanation),
-    r.loss
-      ? p(`You gave up ${r.loss} against the best option${r.band ? `: ${r.band}` : ''}.`)
-      : p('You picked the best option.'),
-    r.read_note ? p(r.read_note) : null,
+    r.loss ? p(`Cost: ${r.loss}${r.band ? ` (${r.band})` : ''}.`) : null,
+    r.verdict === 'close' ? p('Close: the top options are about equal.') : null,
     h('ul', { class: 'table-options' }, r.options.map(o => h('li', { class: o.is_chosen ? 'chosen' : '' },
-      h('div', { class: 'tl-head' }, h('strong', {}, o.label), o.is_best ? h('span', { class: 'pill good' }, 'Best') : null),
-      h('div', { class: 'hint' }, `${o.ev_bb}, ${o.ev_pct}, ${o.share}`)))),
-    r.archetypes.length ? more('By opponent type', h('ul', { class: 'facts' }, r.archetypes.map(line => h('li', {}, line)))) : null,
-    h('p', { class: 'hint' }, r.note),
+      h('div', { class: 'tl-head' }, h('strong', {}, o.label), h('span', { class: 'hint' }, o.ev_bb),
+        o.is_best ? h('span', { class: 'pill good' }, 'Best') : null)))),
+    plays.length ? h('ul', { class: 'facts' }, plays.map(e => h('li', {}, `${cap(e.play)} vs ${e.who.join(', ')}.`))) : null,
+    more('About these numbers',
+      p(r.explanation),
+      r.read_note ? p(r.read_note) : null,
+      r.options.map(o => p(`${o.label}: ${o.ev_bb}, ${o.ev_pct}, ${o.share}`)),
+      r.archetypes.map(line => p(line)),
+      p(r.note)),
   ];
 }
 

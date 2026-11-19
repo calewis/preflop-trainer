@@ -334,7 +334,7 @@ fn spot_question(q: &SpotQuestion, style: Style) -> String {
             q.opponents.len()
         ));
         for (i, mix) in q.opponents.iter().enumerate() {
-            lines.push(mix.assumption(Some(i + 1)));
+            lines.push(mix.assumption_among(Some(i + 1), q.opponents.len() - 1));
         }
     }
     match q.mode {

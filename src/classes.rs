@@ -268,21 +268,41 @@ impl OppMix {
     /// The sentence for a second opponent behind the one already shown.
     pub fn other_opponent(&self) -> String {
         match self.player {
-            Some(player) => format!("The other opponent is {}. Assume they have one of: {}. Nobody can raise.", player.described(), self.listed()),
+            Some(player) => format!("The other opponent is {}. Nobody can raise.", player.described()),
             None => format!("Assume another opponent has {}. Nobody can raise.", self.classes[0].description()),
         }
     }
 
-    /// The sentence telling the player what to assume about this opponent.
-    /// `opponent` is 1-based and set when there is more than one opponent.
+    /// The sentence telling the player who this opponent is. A typed player is
+    /// named by type only; the hands that type stands for are shown with the
+    /// answer, not in the question. `opponent` is 1-based and set when there is
+    /// more than one opponent: the first is the bettor, the rest called.
+    /// `callers` is how many of them called.
     pub fn assumption(&self, opponent: Option<usize>) -> String {
-        let hands = self.listed();
-        match (self.player, opponent) {
+        self.assumption_among(opponent, 1)
+    }
+
+    pub fn assumption_among(&self, opponent: Option<usize>, callers: usize) -> String {
+        let who = match opponent {
+            None => None,
+            Some(1) => Some("The bettor".to_string()),
+            Some(_) if callers <= 1 => Some("The caller".to_string()),
+            Some(n) => Some(format!("Caller {}", n - 1)),
+        };
+        match (self.player, who) {
             (None, None) => format!("Assume they have {}.", self.classes[0].description()),
-            (None, Some(n)) => format!("Assume opponent {n} has {}.", self.classes[0].description()),
-            (Some(player), None) => format!("They're {}. Assume they have one of: {hands}.", player.described()),
-            (Some(player), Some(n)) => format!("Opponent {n} is {}. Assume they have one of: {hands}.", player.described()),
+            (None, Some(who)) => format!("Assume {} has {}.", lower_first(&who), self.classes[0].description()),
+            (Some(player), None) => format!("The bettor is {}.", player.described()),
+            (Some(player), Some(who)) => format!("{who} is {}.", player.described()),
         }
+    }
+}
+
+fn lower_first(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_lowercase().collect::<String>() + c.as_str(),
+        None => String::new(),
     }
 }
 

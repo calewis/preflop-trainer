@@ -349,7 +349,7 @@ MUTATIONS = [
     ("a spot can be a hand with nothing", "src/generate.rs",
      "if !CARD.plays(hero) || !worth_a_decision(hero, &board) {", "if !CARD.plays(hero) {", "libresearch", "a_spot_is_never_a_hand_with_nothing"),
     ("the prompt doesn't name the player", "src/classes.rs",
-     'format!("They\'re {}. Assume they have one of: {hands}.", player.described())', 'format!("Assume they have one of: {hands}.")', "libresearch", "the_prompt_names_the_player"),
+     'format!("The bettor is {}.", player.described())', 'format!("The bettor is a player.")', "libresearch", "the_prompt_names_the_player"),
     ("the side of break-even is ignored", "src/generate.rs",
      "let on_side = if want_call { margin > 0.0 } else { margin < 0.0 };", "let on_side = margin > 0.0;", "libresearch", "call_and_fold_are_both_real_answers"),
     ("spots can be hopeless", "src/generate.rs",
