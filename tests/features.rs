@@ -15,8 +15,10 @@ use poker_trainer::checkup::{
 use poker_trainer::classes::{combos_in_class, OppClass};
 use poker_trainer::equity::equity_all_in;
 use poker_trainer::equity_skill::{
-    equity_band, equity_bias, equity_rung, next_band, BIAS_MIN_ATTEMPTS, EQUITY_BAND_MAX, EQUITY_BAND_MIN, EQUITY_BAND_START,
-    estimate_points, equity_points, EQUITY_GATE, OLD_PROMOTE_MAX_MAE, OLD_PROMOTE_WINDOW, PROMOTE_ERROR_CAP, PROMOTE_PAR_POINTS,
+    equity_band, equity_bias, equity_points, equity_rung, next_band, BIAS_MIN_ATTEMPTS, CHOICE_RIGHT_POINTS,
+    EQUITY_BAND_MAX, EQUITY_BAND_MIN, EQUITY_BAND_START, EQUITY_BOUNDARY_CLOSE_PCT, EQUITY_GATE,
+    EQUITY_HIGH_MIN_PCT, EQUITY_LOW_MAX_PCT, EquityBand, OLD_PROMOTE_MAX_MAE, OLD_PROMOTE_WINDOW,
+    PROMOTE_ERROR_CAP, PROMOTE_PAR_POINTS, estimate_points,
 };
 use poker_trainer::generate::{generate, EQUITY_MAX_PCT, EQUITY_MIN_PCT};
 use poker_trainer::grade::{equity_analysis, grade, grade_timed, Outcome, Reveal};
@@ -29,7 +31,7 @@ use poker_trainer::family::family_of;
 use poker_trainer::eval::evaluate;
 use poker_trainer::preflop::CARD;
 use poker_trainer::groups::{group_of, Group};
-use poker_trainer::progress::{pass_mark, skill_stats};
+use poker_trainer::progress::{pass_mark, skill_stats, EQUITY_CHOICE_MIN_OK_PCT};
 use poker_trainer::rng::Rng;
 use poker_trainer::schedule::{
     anchor_status, anchors_due, anchors_new, due_families, recent_results, Origin, Session, DAY_MS,
@@ -71,7 +73,27 @@ fn equity_item(hero: &str, board: &str, opponents: EquityOpponents, band: u8) ->
     Item {
         skill: Skill::Equity,
         seed: 1,
-        question: Question::Equity(EquityQuestion { hero: hand(hero), board: cards(board), opponents, band }),
+        question: Question::Equity(EquityQuestion {
+            hero: hand(hero),
+            board: cards(board),
+            opponents,
+            band,
+            exact_pct: true,
+        }),
+    }
+}
+
+fn equity_choice_item(hero: &str, board: &str, opponents: EquityOpponents) -> Item {
+    Item {
+        skill: Skill::Equity,
+        seed: 1,
+        question: Question::Equity(EquityQuestion {
+            hero: hand(hero),
+            board: cards(board),
+            opponents,
+            band: EQUITY_BAND_START,
+            exact_pct: false,
+        }),
     }
 }
 
@@ -430,8 +452,8 @@ fn hit_or_miss_compares_the_estimate_with_the_band() {
     let result = answer(&item(5), "39");
     assert!(result.correct, "off by 4.9 points");
     let log = result.equity_log.unwrap();
-    assert!((log.signed_error - (39.0 - 100.0 * 15.0 / 44.0)).abs() < 1e-9);
-    assert_eq!(log.band, 5);
+    assert!((log.signed_error.unwrap() - (39.0 - 100.0 * 15.0 / 44.0)).abs() < 1e-9);
+    assert_eq!(log.band, Some(5));
     assert_eq!(log.opponents, 1);
     assert!((log.truth_pct - 100.0 * 15.0 / 44.0).abs() < 1e-9);
 
@@ -469,6 +491,7 @@ fn equity_items_meet_the_brief() {
         let item = generate(Skill::Equity, seed);
         let Question::Equity(q) = &item.question else { panic!() };
         assert_eq!(q.band, EQUITY_BAND_START);
+        assert!(!q.exact_pct, "default equity mode is three-choice");
         assert!(CARD.plays(q.hero), "{:?}", q.hero);
         assert!(q.board.len() == 3 || q.board.len() == 4);
         streets[q.board.len() - 3] += 1;
@@ -599,13 +622,14 @@ fn staircase_stops_at_both_clamps() {
 fn a_session_serves_the_band_and_tracks_it_like_the_log() {
     let rung0 = equity_seed_with_rung(10, 0);
     let log = vec![equity_attempt(rung0, 0, 1.0, 40.0, 1, 10)];
-    let mut session = Session::new(vec![Skill::Equity], &log, 100, 7);
+    let mut session = Session::new(vec![Skill::Equity], &log, 100, 7).with_exact_equity(true);
     let mut mirror = log.clone();
     for i in 0..12 {
         let planned = session.try_next_item().unwrap();
         assert_eq!(planned.skill, Skill::Equity);
         let item = session.item_for(planned);
         let Question::Equity(q) = &item.question else { panic!() };
+        assert!(q.exact_pct);
         assert_eq!(q.band, equity_band(&mirror, 0), "turn {i}");
         let hit = i % 4 != 0;
         session.record(planned, hit);
@@ -618,6 +642,136 @@ fn a_session_serves_the_band_and_tracks_it_like_the_log() {
             mirror.push(retry);
         }
     }
+}
+
+#[test]
+fn default_equity_asks_three_choices_regardless_of_opponents_and_rung() {
+    for opps in [
+        EquityOpponents::Exact(vec![hand("AsAd")]),
+        EquityOpponents::Exact(vec![hand("AsAd"), hand("KsKd")]),
+        EquityOpponents::Exact(vec![hand("AsAd"), hand("KsKd"), hand("QsQd")]),
+        EquityOpponents::Classes(vec![OppClass::Top]),
+        EquityOpponents::Classes(vec![OppClass::Top, OppClass::Mid, OppClass::Set]),
+    ] {
+        let item = equity_choice_item("9c8c", "7c6c2d3s", opps);
+        let AnswerFormat::Choice(options) = answer_format(&item.question) else {
+            panic!("default equity should be three-choice");
+        };
+        let labels: Vec<&str> = options.iter().map(|o| o.label).collect();
+        let codes: Vec<&str> = options.iter().map(|o| o.code).collect();
+        assert_eq!(codes, vec!["l", "m", "h"]);
+        assert_eq!(labels, vec!["Low (under 30%)", "Medium (30-60%)", "High (over 60%)"]);
+    }
+    let exact_mode = equity_item("9c8c", "7c6c2d3s", EquityOpponents::Exact(vec![hand("AsAd")]), 10);
+    assert_eq!(answer_format(&exact_mode.question), AnswerFormat::Percent);
+
+    // A default session serves three-choice items and leaves the typed staircase at 10.
+    let mut session = Session::new(vec![Skill::Equity], &[], 100, 7);
+    let planned = session.try_next_item().unwrap();
+    let item = session.item_for(planned);
+    assert!(matches!(answer_format(&item.question), AnswerFormat::Choice(_)));
+    session.record(planned, true);
+    assert_eq!(equity_band(&[], 0), EQUITY_BAND_START);
+}
+
+#[test]
+fn choice_grading_accepts_the_band_and_neighbour_within_three_points_as_close() {
+    assert_eq!((EQUITY_LOW_MAX_PCT, EQUITY_HIGH_MIN_PCT, EQUITY_BOUNDARY_CLOSE_PCT), (30.0, 60.0, 3.0));
+    // Well inside Low (26.9%), Medium (45.0%), High (63.1%): only the exact band passes, close = false.
+    assert_eq!(EquityBand::grade_choice(EquityBand::Low, 26.9), (true, false));
+    assert_eq!(EquityBand::grade_choice(EquityBand::Medium, 26.9), (false, false));
+    assert_eq!(EquityBand::grade_choice(EquityBand::Medium, 45.0), (true, false));
+    assert_eq!(EquityBand::grade_choice(EquityBand::Low, 45.0), (false, false));
+    assert_eq!(EquityBand::grade_choice(EquityBand::High, 63.1), (true, false));
+    assert_eq!(EquityBand::grade_choice(EquityBand::Medium, 63.1), (false, false));
+
+    // Within 3 points of 30% (27.0..=33.0): Low and Medium both count as correct and close; High is wrong.
+    for pct in [27.0, 29.9, 30.0, 33.0] {
+        assert_eq!(EquityBand::grade_choice(EquityBand::Low, pct), (true, true), "{pct}");
+        assert_eq!(EquityBand::grade_choice(EquityBand::Medium, pct), (true, true), "{pct}");
+        assert_eq!(EquityBand::grade_choice(EquityBand::High, pct), (false, false), "{pct}");
+    }
+    assert_eq!(EquityBand::grade_choice(EquityBand::Medium, 33.1), (true, false));
+    assert_eq!(EquityBand::grade_choice(EquityBand::Low, 33.1), (false, false));
+
+    // Within 3 points of 60% (57.0..=63.0): Medium and High both count as correct and close; Low is wrong.
+    for pct in [57.0, 59.9, 60.0, 63.0] {
+        assert_eq!(EquityBand::grade_choice(EquityBand::Medium, pct), (true, true), "{pct}");
+        assert_eq!(EquityBand::grade_choice(EquityBand::High, pct), (true, true), "{pct}");
+        assert_eq!(EquityBand::grade_choice(EquityBand::Low, pct), (false, false), "{pct}");
+    }
+    assert_eq!(EquityBand::grade_choice(EquityBand::Medium, 56.9), (true, false));
+    assert_eq!(EquityBand::grade_choice(EquityBand::High, 56.9), (false, false));
+
+    // Answer label keeps rounded pct on its band's side of 30% and 60%.
+    assert_eq!(EquityBand::answer_text(29.8), "Low (29%)");
+    assert_eq!(EquityBand::answer_text(34.09), "Medium (34%)");
+    assert_eq!(EquityBand::answer_text(60.2), "High (61%)");
+
+    // End-to-end grading on a borderline hand: Kh7h against AsTd on Kc9h2c is ~61.8% (within 3 of 60%),
+    // and 9c8c against AsAd on 7c6c2d3s is 15/44 = 34.09% (pure Medium).
+    let mid_item = equity_choice_item("9c8c", "7c6c2d3s", EquityOpponents::Exact(vec![hand("AsAd")]));
+    let ok = answer(&mid_item, "m");
+    assert!(ok.correct && !ok.close && ok.answer == "m");
+    assert!(!answer(&mid_item, "l").ok());
+    assert!(grade(&mid_item, "50").is_err(), "choice mode rejects plain numbers");
+}
+
+#[test]
+fn choice_rows_log_compatibly_with_old_numeric_rows_and_do_not_move_the_staircase() {
+    let item = equity_choice_item("9c8c", "7c6c2d3s", EquityOpponents::Exact(vec![hand("AsAd")]));
+    let outcome = answer(&item, "m");
+    let planned = poker_trainer::schedule::Planned { skill: Skill::Equity, seed: 1, origin: Origin::New };
+    let choice_row = Attempt::from_drill(planned, &outcome, 1_000, 500);
+    assert_eq!(choice_row.answer, "m");
+    assert_eq!(choice_row.extra.band, None);
+    assert_eq!(choice_row.extra.signed_error, None);
+    assert!(choice_row.extra.truth_pct.is_some());
+    assert_eq!(choice_row.extra.opponents, Some(1));
+    let line = format_attempt(&choice_row);
+    assert_eq!(line.split('\t').count(), 24);
+    let (parsed, warnings) = parse_log(&line);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(parsed[0].answer, "m");
+    assert_eq!(parsed[0].correct, choice_row.correct);
+    assert_eq!(parsed[0].close, choice_row.close);
+    assert_eq!(parsed[0].extra.band, None);
+    assert_eq!(parsed[0].extra.signed_error, None);
+    assert_eq!(parsed[0].extra.opponents, Some(1));
+    assert_eq!(parsed[0].extra.family, choice_row.extra.family);
+    assert!((parsed[0].extra.truth_pct.unwrap() - choice_row.extra.truth_pct.unwrap()).abs() < 1e-4);
+
+    // Mixing old numeric rows and new choice rows keeps old bias/staircase intact and scores new choice runs cleanly.
+    let rung0 = equity_seed_with_rung(10, 0);
+    let mut mixed = vec![
+        equity_attempt(rung0, 1, 2.0, 50.0, 1, 10), // hits -> staircase goes 10 -> 9
+    ];
+    for i in 0..40u64 {
+        let mut r = choice_row.clone();
+        r.item = ItemRef::Seed(rung0);
+        r.timestamp_ms = 2_000 + i;
+        r.correct = i < 34; // 85% right
+        r.close = i == 0;
+        mixed.push(r);
+    }
+    assert_eq!(equity_band(&mixed, 0), 9, "choice rows leave typed staircase at 9");
+    assert_eq!(equity_bias(&mixed).count, 1, "bias counts typed estimates only");
+    let stats = skill_stats(Skill::Equity, &mixed);
+    assert_eq!(stats.mark.min_within_one_pct, Some(EQUITY_CHOICE_MIN_OK_PCT));
+    assert!(stats.drill_passed, "85% meets choice mark");
+
+    // 20 choice-mode right answers promote from rung 0 -> rung 1 via CHOICE_RIGHT_POINTS (4 * 20 + 30 = 110).
+    let choice_only: Vec<Attempt> = (0..20)
+        .map(|i| {
+            let mut r = choice_row.clone();
+            r.item = ItemRef::Seed(rung0);
+            r.timestamp_ms = 10_000 + i;
+            r
+        })
+        .collect();
+    assert_eq!(CHOICE_RIGHT_POINTS, 4);
+    assert_eq!(equity_points(&choice_only).points, 110);
+    assert_eq!(equity_rung(&choice_only), 1);
 }
 
 #[test]

@@ -319,9 +319,11 @@ pub struct Session {
     /// `read_price`: the rung new items are dealt at, and the reviews dealt so far.
     read_price_rung: u8,
     read_price_reviews: u64,
-    /// `equity`: the rung new items are dealt at, and each rung's current band.
+    /// `equity`: the rung new items are dealt at, each rung's current band, and
+    /// whether items ask for typed percentages (`true`) or three bands (`false`, default).
     equity_rung: u8,
     equity_bands: [u8; 2],
+    exact_equity: bool,
     /// `anchor`: cards due now, cards never seen, and how many new ones may still come.
     anchors_due: VecDeque<usize>,
     anchors_new: VecDeque<usize>,
@@ -374,6 +376,7 @@ impl Session {
             read_price_reviews: 0,
             equity_rung: equity_rung(attempts),
             equity_bands: [equity_band(attempts, 0), equity_band(attempts, 1)],
+            exact_equity: false,
             anchors_due: anchors_due(attempts, now_ms).into(),
             anchors_new: anchors_new(attempts).into(),
             anchors_new_left: MAX_NEW_ANCHORS_PER_SESSION,
@@ -415,6 +418,17 @@ impl Session {
         self
     }
 
+    /// Sets whether `equity` asks for a typed percentage (`true`) or the default
+    /// three-choice bands (`false`).
+    pub fn with_exact_equity(mut self, exact: bool) -> Session {
+        self.exact_equity = exact;
+        self
+    }
+
+    pub fn set_exact_equity(&mut self, exact: bool) {
+        self.exact_equity = exact;
+    }
+
     /// True when dealing anything but `preflop` next would drop it below its share.
     fn preflop_owed(&self, blocked: Option<Skill>) -> bool {
         let dealt = self.dealt.iter().filter(|s| **s == Skill::Preflop).count() as u64;
@@ -450,11 +464,12 @@ impl Session {
     }
 
     /// The fully specified item for a plan from this session: an `equity` item
-    /// is served with its rung's current tolerance band.
+    /// carries the session's choice/typed mode and its rung's current tolerance band.
     pub fn item_for(&self, planned: Planned) -> Item {
         let mut item = generate(planned.skill, planned.seed);
         if let Question::Equity(q) = &mut item.question {
             q.band = self.equity_bands[usize::from(equity_rung_of_seed(planned.seed))];
+            q.exact_pct = self.exact_equity;
         }
         item
     }
@@ -723,7 +738,7 @@ impl Session {
             return;
         }
         match planned.skill {
-            Skill::Equity => {
+            Skill::Equity if self.exact_equity => {
                 let rung = usize::from(equity_rung_of_seed(planned.seed));
                 self.equity_bands[rung] = next_band(self.equity_bands[rung], ok);
             }

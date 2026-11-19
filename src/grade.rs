@@ -7,6 +7,7 @@ use crate::board_type::{classify_flop, BoardCategory, BOARD_TYPE_MISS_MS};
 use crate::cards::{holding_mask, mask_of, rank_from_byte, suit_from_byte, unseen_cards, unseen_holdings, Card, Holding};
 use crate::classes::{combos_in_class, made_class, matches_opp_class, mix_combos, rank_of, MadeClass, OppMix};
 use crate::equity::{equity_all_in, equity_next_card, share_by_next_card, Equity};
+use crate::equity_skill::EquityBand;
 use crate::eval::{straight_top, Category, HandRank};
 use crate::family::{equity_family, family_of};
 use crate::item::{
@@ -74,9 +75,10 @@ pub struct Outcome {
 /// The facts an `equity` attempt logs.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct EquityLog {
-    pub band: u8,
-    /// Estimate minus truth, in percentage points.
-    pub signed_error: f64,
+    /// Set in typed-percentage mode (`exact_pct == true`), `None` in three-choice mode.
+    pub band: Option<u8>,
+    /// Estimate minus truth, in percentage points, in typed mode; `None` in three-choice mode.
+    pub signed_error: Option<f64>,
     pub truth_pct: f64,
     pub opponents: u8,
 }
@@ -304,6 +306,9 @@ pub enum Reveal {
     },
     Equity {
         analysis: EquityAnalysis,
+        reason: String,
+        choice: Option<EquityBand>,
+        close: bool,
         estimate_pct: f64,
         signed_error: f64,
         band: u8,
@@ -1039,21 +1044,134 @@ pub fn equity_analysis(q: &EquityQuestion, seed: u64) -> Option<EquityAnalysis> 
     })
 }
 
+/// One short reason line for an `equity` reveal using facts the engine already computes.
+pub fn equity_reason(q: &EquityQuestion) -> String {
+    let hero_label = made_class(q.hero, &q.board).label();
+    match &q.opponents {
+        EquityOpponents::Exact(hands) if hands.len() == 1 => {
+            let villain = hands[0];
+            let villain_label = made_class(villain, &q.board).label();
+            let outs_word = |n: usize| if n == 1 { "1 out".to_string() } else { format!("{n} outs") };
+            match rank_of(q.hero, &q.board).cmp(&rank_of(villain, &q.board)) {
+                std::cmp::Ordering::Less => {
+                    let outs = outs_analysis(q.hero, &q.board, villain).outs.len();
+                    if outs == 0 {
+                        format!("Behind right now ({hero_label} vs {villain_label}), with no direct outs.")
+                    } else {
+                        format!("Behind right now ({hero_label} vs {villain_label}), with {}.", outs_word(outs))
+                    }
+                }
+                std::cmp::Ordering::Greater => {
+                    let outs = outs_analysis(villain, &q.board, q.hero).outs.len();
+                    if outs == 0 {
+                        format!("Ahead right now ({hero_label} vs {villain_label}); they have no outs.")
+                    } else {
+                        format!("Ahead right now ({hero_label} vs {villain_label}); they have {}.", outs_word(outs))
+                    }
+                }
+                std::cmp::Ordering::Equal => {
+                    let outs = outs_analysis(q.hero, &q.board, villain).outs.len();
+                    if outs == 0 {
+                        format!("Tied right now ({hero_label}).")
+                    } else {
+                        format!("Tied right now ({hero_label}), with {} to pull ahead.", outs_word(outs))
+                    }
+                }
+            }
+        }
+        EquityOpponents::Exact(hands) => {
+            let hero_rank = rank_of(q.hero, &q.board);
+            let best = *hands.iter().max_by_key(|&&h| rank_of(h, &q.board)).expect("at least one opponent");
+            let best_rank = rank_of(best, &q.board);
+            let best_label = made_class(best, &q.board).label();
+            match hero_rank.cmp(&best_rank) {
+                std::cmp::Ordering::Greater => format!("Ahead of all {} opponents right now with {hero_label}.", hands.len()),
+                std::cmp::Ordering::Equal => format!("Tied for best right now with {hero_label}."),
+                std::cmp::Ordering::Less => format!("Behind right now ({hero_label}; best opponent has {best_label})."),
+            }
+        }
+        EquityOpponents::Classes(classes) if classes.len() == 1 => {
+            let (hero_c, board_c) = canonical_suits(q.hero, &q.board);
+            let combos = combos_in_class(classes[0], hero_c, &board_c);
+            let hero_rank = rank_of(hero_c, &board_c);
+            let ahead = combos.iter().filter(|&&h| hero_rank > rank_of(h, &board_c)).count();
+            format!("You have {hero_label}, ahead of {ahead} of {} combos right now.", combos.len())
+        }
+        EquityOpponents::Classes(classes) => {
+            let (hero_c, board_c) = canonical_suits(q.hero, &q.board);
+            let hero_rank = rank_of(hero_c, &board_c);
+            let beaten_by = classes
+                .iter()
+                .filter(|&&c| {
+                    let cs = combos_in_class(c, hero_c, &board_c);
+                    cs.iter().filter(|&&h| rank_of(h, &board_c) > hero_rank).count() * 2 > cs.len()
+                })
+                .count();
+            match beaten_by {
+                0 => format!("You have {hero_label}, ahead of most hands right now ({} opponents).", classes.len()),
+                1 => format!("You have {hero_label}; 1 opponent is usually ahead right now."),
+                n => format!("You have {hero_label}; {n} opponents are usually ahead right now."),
+            }
+        }
+    }
+}
+
 fn grade_equity(q: &EquityQuestion, seed: u64, raw: &str) -> Result<Outcome, InvalidAnswer> {
+    if !q.exact_pct {
+        let chosen = EquityBand::from_code(&normalize(raw))
+            .ok_or_else(|| InvalidAnswer("Answer l, m or h.".to_string()))?;
+        let analysis = equity_analysis(q, seed)
+            .ok_or_else(|| InvalidAnswer("This spot has no possible opponent hands.".to_string()))?;
+        let truth_pct = analysis.truth_pct;
+        let (correct, close) = EquityBand::grade_choice(chosen, truth_pct);
+        let reason = equity_reason(q);
+        let mut result = outcome(
+            correct,
+            chosen.code().to_string(),
+            Reveal::Equity {
+                analysis,
+                reason,
+                choice: Some(chosen),
+                close,
+                estimate_pct: 0.0,
+                signed_error: 0.0,
+                band: q.band,
+                hit: correct,
+            },
+        );
+        result.close = close;
+        result.equity_log = Some(EquityLog {
+            band: None,
+            signed_error: None,
+            truth_pct,
+            opponents: q.opponents.count() as u8,
+        });
+        return Ok(result);
+    }
     let estimate_pct = percent_guess(raw)?;
     let analysis = equity_analysis(q, seed)
         .ok_or_else(|| InvalidAnswer("This spot has no possible opponent hands.".to_string()))?;
     let signed_error = estimate_pct - analysis.truth_pct;
     let hit = signed_error.abs() <= f64::from(q.band);
     let truth_pct = analysis.truth_pct;
+    let reason = equity_reason(q);
     let mut result = outcome(
         hit,
         format!("{estimate_pct}"),
-        Reveal::Equity { analysis, estimate_pct, signed_error, band: q.band, hit },
+        Reveal::Equity {
+            analysis,
+            reason,
+            choice: None,
+            close: false,
+            estimate_pct,
+            signed_error,
+            band: q.band,
+            hit,
+        },
     );
     result.equity_log = Some(EquityLog {
-        band: q.band,
-        signed_error,
+        band: Some(q.band),
+        signed_error: Some(signed_error),
         truth_pct,
         opponents: q.opponents.count() as u8,
     });

@@ -153,6 +153,7 @@ fn equity_family_is_rung_opponents_and_truth_band() {
         board: cards("7c6c2d3s"),
         opponents: EquityOpponents::Exact(vec![hand("AsAd")]),
         band: 10,
+        exact_pct: false,
     };
     assert_eq!(family(&item(Skill::Equity, Question::Equity(exact))), "0:1:25-50");
     let classes = EquityQuestion {
@@ -160,6 +161,7 @@ fn equity_family_is_rung_opponents_and_truth_band() {
         board: cards("Ks7c2d"),
         opponents: EquityOpponents::Classes(vec![OppClass::Top, OppClass::Mid]),
         band: 10,
+        exact_pct: false,
     };
     let truth_family = family(&item(Skill::Equity, Question::Equity(classes)));
     assert!(truth_family.starts_with("1:2:"), "{truth_family}");

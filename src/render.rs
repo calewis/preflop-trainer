@@ -4,12 +4,12 @@ use poker_trainer::anchors;
 use poker_trainer::answer::{answer_format, AnswerFormat, AnswerOption};
 use poker_trainer::cards::{rank_char, Card, Holding};
 use poker_trainer::checkup::{CheckupKind, CheckupMetric, CheckupScore, MIXED_CHECKUP_LEN};
-use poker_trainer::equity_skill::{EquityBias, BIAS_MIN_ATTEMPTS};
+use poker_trainer::equity_skill::{EquityBand, EquityBias, BIAS_MIN_ATTEMPTS};
 use poker_trainer::beats_me::{mix_method, prompt_text, ways_method, Standing};
 use poker_trainer::grade::{any_of_suit_text, BeatsMeReveal, EquityAnalysis, EvBand, FlipFacts, Outcome, Reveal, BEATS_RANDOM_NOTE};
 use poker_trainer::item::{BeatsMeAsk, BeatsMeQuestion, ChainHand, ChainQuestion, ChainStage, EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question, Skill, SpotMode, SpotQuestion};
 use poker_trainer::preflop::{action_label, why_line, Action, CardLine, Chart, PreflopReason, Seat, Range, Situation, CARD};
-use poker_trainer::progress::{pass_mark, BaselineRun, SkillStats, PASS_ATTEMPTS};
+use poker_trainer::progress::{BaselineRun, SkillStats, PASS_ATTEMPTS};
 use poker_trainer::river::{river_bb, RiverGrade, RiverQuestion, RIVER_NOTE};
 use poker_trainer::table::{bb_text, checkup_form_reuses_spots, ev_bb_text, REUSE_NOTE, TableAction, TableActionKind, TableGrade, TableQuestion, TableSeat, TableStreetName, Verdict, ASSUMPTION_NOTE};
 
@@ -311,7 +311,11 @@ fn equity_question(q: &EquityQuestion, style: Style) -> String {
             }
         }
     }
-    lines.push(format!("All-in, all remaining cards run out. What is your equity? Within {} points counts.", q.band));
+    if q.exact_pct {
+        lines.push(format!("All-in, all remaining cards run out. What is your equity? Within {} points counts.", q.band));
+    } else {
+        lines.push("All-in, all remaining cards run out. What is your equity?".to_string());
+    }
     lines.join("\n")
 }
 
@@ -629,8 +633,8 @@ pub fn reveal(outcome: &Outcome, style: Style) -> String {
                 }
             }
         }
-        Reveal::Equity { analysis, estimate_pct, signed_error, band, hit } => {
-            equity_reveal(&mut lines, analysis, *estimate_pct, *signed_error, *band, *hit);
+        Reveal::Equity { analysis, reason, choice, estimate_pct, signed_error, band, hit, .. } => {
+            equity_reveal(&mut lines, analysis, reason, *choice, *estimate_pct, *signed_error, *band, *hit);
         }
         Reveal::Anchor { card, estimate_pct, signed_error } => {
             lines.push(format!(
@@ -699,14 +703,24 @@ fn river_reveal(lines: &mut Vec<String>, g: &RiverGrade) {
     lines.push(RIVER_NOTE.to_string());
 }
 
+#[allow(clippy::too_many_arguments)]
 fn equity_reveal(
     lines: &mut Vec<String>,
     a: &EquityAnalysis,
+    reason: &str,
+    choice: Option<EquityBand>,
     estimate_pct: f64,
     signed_error: f64,
     band: u8,
     hit: bool,
 ) {
+    if choice.is_some() {
+        lines.push(format!("Answer: {}.", EquityBand::answer_text(a.truth_pct)));
+        if !reason.is_empty() {
+            lines.push(reason.to_string());
+        }
+        return;
+    }
     lines.push(format!(
         "Exact equity: {:.1}%{}. You said {estimate_pct}% ({signed_error:+.1} points).",
         a.truth_pct,
@@ -847,13 +861,15 @@ pub fn card_text() -> String {
 }
 
 fn mark_text(stats: &SkillStats) -> String {
-    let mark = pass_mark(stats.skill);
+    let mark = stats.mark;
     let mut parts = Vec::new();
     if let Some(m) = mark.min_correct_pct {
         parts.push(format!("at least {m:.0}% correct"));
     }
     if let (Some(m), Skill::Chain) = (mark.min_within_one_pct, stats.skill) {
         parts.push(format!("at least {m:.0}% of stages right (outs within 1 count)"));
+    } else if let (Some(m), Skill::Equity) = (mark.min_within_one_pct, stats.skill) {
+        parts.push(format!("at least {m:.0}% right"));
     } else if let Some(m) = mark.min_within_one_pct {
         parts.push(format!("at least {m:.0}% within 1"));
     }
@@ -889,12 +905,14 @@ fn pass_status(stats: &SkillStats) -> String {
 }
 
 fn stats_text(stats: &SkillStats) -> String {
-    let mark = pass_mark(stats.skill);
+    let mark = stats.mark;
     let mut parts = vec![format!("last {}", stats.window)];
     if mark.min_correct_pct.is_some() {
         parts.push(format!("{:.0}% correct", stats.correct_pct));
     }
-    if mark.min_within_one_pct.is_some() {
+    if mark.min_within_one_pct.is_some() && stats.skill == Skill::Equity {
+        parts.push(format!("{:.0}% right", stats.within_one_pct));
+    } else if mark.min_within_one_pct.is_some() {
         parts.push(format!("{:.0}% within 1 ({:.0}% exact)", stats.within_one_pct, stats.correct_pct));
     }
     if mark.max_median_ms.is_some() {
@@ -1390,5 +1408,27 @@ mod tests {
         assert_eq!(hint(3, Situation::RaisedCalled(1)), "r 3-bet, c call, f fold");
         assert_eq!(hint(3, Situation::ThreeBet { in_position: false }), "r 4-bet, c call, f fold");
         assert_eq!(hint(3, Situation::FourBet), "r all in, c call, f fold");
+    }
+
+    #[test]
+    fn equity_choice_reveal_shows_band_percent_and_one_short_reason() {
+        use poker_trainer::item::{EquityOpponents, EquityQuestion};
+        let item = Item {
+            skill: Skill::Equity,
+            seed: 1,
+            question: Question::Equity(EquityQuestion {
+                hero: hand("9c8c"),
+                board: cards("7c6c2d3s"),
+                opponents: EquityOpponents::Exact(vec![hand("AsAd")]),
+                band: 10,
+                exact_pct: false,
+            }),
+        };
+        let asked = question(&item, PLAIN);
+        assert!(!asked.contains("Within "), "{asked}");
+        let revealed_text = revealed(&item, "m");
+        assert!(revealed_text.contains("Answer: Medium (34%)."), "{revealed_text}");
+        assert!(revealed_text.contains("15 outs"), "{revealed_text}");
+        assert!(!revealed_text.contains("Exact equity:"), "{revealed_text}");
     }
 }

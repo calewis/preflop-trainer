@@ -1,6 +1,6 @@
 // The app's screens. Each `show*` function fills the page and sets the key handler.
 import { h } from './dom.js';
-import { engine, prepareDrill, prepareLeak, prepareBaseline, prepareCheck, clearSpeculation, drillKey, leakKey, syncLeaks, distrustPrep } from './engine.js';
+import { engine, prepareDrill, prepareLeak, prepareBaseline, prepareCheck, clearSpeculation, drillKey, leakKey, syncEquityMode, syncLeaks, distrustPrep } from './engine.js';
 import { answerControls } from './answers.js';
 import { questionView, revealView } from './reveal.js';
 import * as store from './store.js';
@@ -73,6 +73,20 @@ export async function showHome() {
     },
   }, confidenceLabel(confident));
 
+  let equityExact = store.readEquityExact();
+  const equityModeBtn = h('button', {
+    class: 'btn ghost', 'aria-pressed': String(equityExact), 'data-equity-exact': '',
+    onclick: () => {
+      equityExact = !equityExact;
+      store.writeEquityExact(equityExact);
+      equityModeBtn.setAttribute('aria-pressed', String(equityExact));
+      equityModeBtn.textContent = equityExactLabel(equityExact);
+      equityModeSync = equityModeSync.then(() => syncEquityMode(equityExact)).then(() => {
+        if (prepared) prepareDrill(prepared, false);
+      });
+    },
+  }, equityExactLabel(equityExact));
+
   const lengthButtons = [5, 10, 15].map(m => h('button', {
     class: 'seg', 'aria-pressed': String(m === minutes),
     onclick: () => {
@@ -93,6 +107,7 @@ export async function showHome() {
       h('div', { class: 'seg-group', role: 'group', 'aria-label': 'Drill length' }, lengthButtons),
       h('button', { class: 'btn primary', onclick: () => startDrill(minutes) }, 'Start drill'),
       confidenceBtn,
+      equityModeBtn,
       h('p', { class: 'hint' }, 'Mixes all seven groups: ',
         home.groups.map(g => `${g.title.toLowerCase()} ${g.share}%`).join(', '), '.')),
     h('section', { class: 'panel', 'data-groups': '' },
@@ -120,6 +135,12 @@ export async function showHome() {
 function confidenceLabel(on) {
   return `Ask how sure I am: ${on ? 'on' : 'off'}`;
 }
+
+function equityExactLabel(on) {
+  return `Type exact equity %: ${on ? 'on' : 'off'}`;
+}
+
+let equityModeSync = Promise.resolve();
 
 function link(href, text) { return h('a', { class: 'home-link', href }, text); }
 
@@ -173,6 +194,7 @@ async function startDrill(minutes, group) {
   if (starting || drill) return;
   starting = true;
   try {
+    await equityModeSync;
     if (group) {
       const opened = await engine.call('session_open', randomSeed(), Date.now(), `group:${group}`);
       prepared = opened.first;

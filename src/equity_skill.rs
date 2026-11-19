@@ -40,6 +40,98 @@ pub const BIAS_MIN_ATTEMPTS: usize = 30;
 pub const LOGIT_CLAMP_MIN_PCT: f64 = 1.0;
 pub const LOGIT_CLAMP_MAX_PCT: f64 = 99.0;
 
+/// Cutoffs between the three-choice bands: Low (<30%), Medium (30-60%), High (>60%).
+pub const EQUITY_LOW_MAX_PCT: f64 = 30.0;
+pub const EQUITY_HIGH_MIN_PCT: f64 = 60.0;
+/// Points either side of a band edge where neighbouring bands both count as right.
+pub const EQUITY_BOUNDARY_CLOSE_PCT: f64 = 3.0;
+/// Points toward rung 1 for a three-choice rung-0 drill attempt (+4 right, -16 wrong,
+/// matching the 80% break-even / ~20-streak shape of [`crate::ladder::RIGHT_WRONG_GATE`]).
+pub const CHOICE_RIGHT_POINTS: i32 = 4;
+pub const CHOICE_MISS_POINTS: i32 = -16;
+
+/// The three equity bands offered by default.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum EquityBand {
+    Low,
+    Medium,
+    High,
+}
+
+impl EquityBand {
+    pub const ALL: [EquityBand; 3] = [EquityBand::Low, EquityBand::Medium, EquityBand::High];
+
+    pub fn code(self) -> &'static str {
+        match self {
+            EquityBand::Low => "l",
+            EquityBand::Medium => "m",
+            EquityBand::High => "h",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            EquityBand::Low => "Low (under 30%)",
+            EquityBand::Medium => "Medium (30-60%)",
+            EquityBand::High => "High (over 60%)",
+        }
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            EquityBand::Low => "Low",
+            EquityBand::Medium => "Medium",
+            EquityBand::High => "High",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<EquityBand> {
+        match code {
+            "l" | "low" => Some(EquityBand::Low),
+            "m" | "medium" => Some(EquityBand::Medium),
+            "h" | "high" => Some(EquityBand::High),
+            _ => None,
+        }
+    }
+
+    pub fn from_pct(pct: f64) -> EquityBand {
+        if pct < EQUITY_LOW_MAX_PCT {
+            EquityBand::Low
+        } else if pct <= EQUITY_HIGH_MIN_PCT {
+            EquityBand::Medium
+        } else {
+            EquityBand::High
+        }
+    }
+
+    /// Concise band plus whole percent, e.g. `"Medium (41%)"`. Keeps the printed
+    /// percentage on the true band's side of 30% and 60%.
+    pub fn answer_text(truth_pct: f64) -> String {
+        let band = EquityBand::from_pct(truth_pct);
+        let rounded = truth_pct.round() as i32;
+        let shown = match band {
+            EquityBand::Low if rounded >= 30 => 29,
+            EquityBand::High if rounded <= 60 => 61,
+            _ => rounded,
+        };
+        format!("{} ({shown}%)", band.short_label())
+    }
+
+    /// `(correct, close)` for a three-choice guess. Within 3 points of 30% or 60%,
+    /// either neighbouring band of that boundary counts as correct and is logged close.
+    pub fn grade_choice(chosen: EquityBand, truth_pct: f64) -> (bool, bool) {
+        let near_low_med = (truth_pct - EQUITY_LOW_MAX_PCT).abs() <= EQUITY_BOUNDARY_CLOSE_PCT + 1e-9
+            && matches!(chosen, EquityBand::Low | EquityBand::Medium);
+        let near_med_high = (truth_pct - EQUITY_HIGH_MIN_PCT).abs() <= EQUITY_BOUNDARY_CLOSE_PCT + 1e-9
+            && matches!(chosen, EquityBand::Medium | EquityBand::High);
+        if near_low_med || near_med_high {
+            (true, true)
+        } else {
+            (EquityBand::from_pct(truth_pct) == chosen, false)
+        }
+    }
+}
+
 /// The attempts that move the staircase and the rung: first-time drill answers.
 fn drill_equity(attempts: &[Attempt]) -> impl Iterator<Item = &Attempt> {
     attempts.iter().filter(|a| a.skill == Skill::Equity && a.mode == Mode::Drill)
@@ -61,10 +153,10 @@ pub fn next_band(band: u8, hit: bool) -> u8 {
     }
 }
 
-/// The band to serve next at `rung`, replayed from the log.
+/// The band to serve next at `rung`, replayed from typed-percentage drill rows.
 pub fn equity_band(attempts: &[Attempt], rung: u8) -> u8 {
     drill_equity(attempts)
-        .filter(|a| rung_of(a) == Some(rung))
+        .filter(|a| rung_of(a) == Some(rung) && a.extra.band.is_some())
         .fold(EQUITY_BAND_START, |band, a| next_band(band, a.correct))
 }
 
@@ -82,7 +174,15 @@ fn rung_zero(attempts: &[Attempt]) -> impl Iterator<Item = &Attempt> {
 
 /// Points toward rung 1 from the log, and whether they have reached the goal.
 pub fn equity_points(attempts: &[Attempt]) -> GateStatus {
-    EQUITY_GATE.status(rung_zero(attempts).filter_map(|a| a.extra.signed_error).map(estimate_points))
+    let changes = drill_equity(attempts)
+        .filter(|a| rung_of(a) == Some(0))
+        .map(|a| {
+            a.extra.signed_error.map_or(
+                if a.ok() { CHOICE_RIGHT_POINTS } else { CHOICE_MISS_POINTS },
+                estimate_points,
+            )
+        });
+    EQUITY_GATE.status(changes)
 }
 
 /// The player's ladder rung: 1 once the rung-0 points reach [`EQUITY_GATE`]'s

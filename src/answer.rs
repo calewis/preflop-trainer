@@ -2,6 +2,7 @@
 
 use crate::beats_me::{BeatKind, MixBand};
 use crate::classes::MadeClass;
+use crate::equity_skill::EquityBand;
 use crate::item::{BeatsMeAsk, BeatsMeQuestion, ChainQuestion, ChainStage, Question, ReadPriceAsk, ReadPriceQuestion};
 use crate::preflop::{action_label, Action, Seat, Situation};
 use crate::read_price::{dollar_label, PriceBand, PriceCall};
@@ -121,9 +122,15 @@ pub fn answer_format(question: &Question) -> AnswerFormat {
         Question::Outs { .. } | Question::Chain(ChainQuestion { stage: ChainStage::Outs, .. }) => {
             AnswerFormat::Integer { min: 0, max: MAX_OUTS }
         }
+        Question::Equity(q) => {
+            if q.exact_pct {
+                AnswerFormat::Percent
+            } else {
+                AnswerFormat::Choice(EquityBand::ALL.iter().map(|b| option(b.code(), b.label())).collect())
+            }
+        }
         Question::Price { .. }
         | Question::Hit { .. }
-        | Question::Equity(_)
         | Question::Anchor { .. }
         | Question::Chain(ChainQuestion { stage: ChainStage::Price, .. }) => AnswerFormat::Percent,
         Question::Spot(_) | Question::Chain(ChainQuestion { stage: ChainStage::Decide, .. }) => {

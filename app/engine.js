@@ -102,12 +102,19 @@ export const engine = client(message => fatalHandler(message));
 const MAX_PREP_RESTARTS = 5;
 let prepRestarts = 0;
 let leaksText = '';
+let equityExact = false;
+
+function syncPrepState() {
+  if (leaksText) prepWorker.call('load_leaks', leaksText).catch(() => {});
+  if (equityExact) prepWorker.call('set_equity_exact', '1').catch(() => {});
+}
+
 const prepWorker = client(message => {
   prepRestarts += 1;
   if (prepRestarts > MAX_PREP_RESTARTS) prepWorker.stop(message);
   else {
     prepWorker.restart();
-    if (leaksText) prepWorker.call('load_leaks', leaksText).catch(() => {});
+    syncPrepState();
   }
 });
 
@@ -117,7 +124,7 @@ const prepWorker = client(message => {
 // whatever it was working on.
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
-  prepWorker.revive(() => {});
+  prepWorker.revive(syncPrepState);
 });
 
 // One prepare runs at a time. Requests the player is waiting for jump the queue.
@@ -182,6 +189,18 @@ export async function syncLeaks(text) {
   const [reply] = await Promise.all([
     engine.call('load_leaks', leaksText),
     prepWorker.call('load_leaks', leaksText),
+  ]);
+  return reply;
+}
+
+export async function syncEquityMode(on) {
+  bundles.clear();
+  queue.splice(0);
+  equityExact = !!on;
+  const flag = equityExact ? '1' : '0';
+  const [reply] = await Promise.all([
+    engine.call('set_equity_exact', flag),
+    prepWorker.call('set_equity_exact', flag),
   ]);
   return reply;
 }

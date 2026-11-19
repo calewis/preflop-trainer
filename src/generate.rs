@@ -776,7 +776,7 @@ fn equity_candidate(rng: &mut Rng, seed: u64, opponents: usize) -> (EquityQuesti
         if share_pct < EQUITY_MIN_PCT - margin || share_pct > EQUITY_MAX_PCT + margin {
             continue;
         }
-        return (EquityQuestion { hero, board, opponents: setup, band: EQUITY_BAND_START }, share_pct);
+        return (EquityQuestion { hero, board, opponents: setup, band: EQUITY_BAND_START, exact_pct: false }, share_pct);
     }
 }
 

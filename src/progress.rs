@@ -99,6 +99,33 @@ pub const PASS_EQUITY: PassMark = PassMark {
     max_blunders: None,
     max_mean_abs_error: Some(6.0),
 };
+/// Three-choice `equity`: 85% right over 40, close boundary answers counting.
+pub const EQUITY_CHOICE_MIN_OK_PCT: f64 = 85.0;
+pub const PASS_EQUITY_CHOICE: PassMark = PassMark {
+    min_correct_pct: None,
+    min_within_one_pct: Some(EQUITY_CHOICE_MIN_OK_PCT),
+    max_median_ms: None,
+    max_mean_ev_loss_pct: None,
+    max_blunders: None,
+    max_mean_abs_error: None,
+};
+
+/// True when most rows in `rows` carry typed-percentage equity errors.
+pub fn equity_window_is_numeric(rows: &[&Attempt]) -> bool {
+    let numeric = rows.iter().filter(|a| a.extra.signed_error.is_some()).count();
+    numeric > 0 && numeric * 2 >= rows.len()
+}
+
+/// The pass mark applied to `rows`: three-choice `equity` rows have no signed
+/// error to average, so they use [`PASS_EQUITY_CHOICE`]; historic or typed
+/// numeric windows keep [`PASS_EQUITY`].
+pub fn effective_pass_mark(skill: Skill, rows: &[&Attempt]) -> PassMark {
+    if skill == Skill::Equity && !equity_window_is_numeric(rows) {
+        PASS_EQUITY_CHOICE
+    } else {
+        pass_mark(skill)
+    }
+}
 
 pub fn pass_mark(skill: Skill) -> PassMark {
     match skill {
@@ -156,6 +183,8 @@ pub struct SkillStats {
     /// `equity` only: mean absolute error, in points, over the window.
     pub mean_abs_error: Option<f64>,
     pub enough_data: bool,
+    /// Pass mark used for the current window (choice or numeric for `equity`).
+    pub mark: PassMark,
     /// The drill pass mark is met over the current window.
     pub drill_passed: bool,
     /// Whether the most recent completed per-skill checkup met the same standard;
@@ -224,7 +253,7 @@ pub fn skill_stats(skill: Skill, attempts: &[Attempt]) -> SkillStats {
         .collect();
     let recent = &all[all.len().saturating_sub(STAT_WINDOW)..];
     let m = window_metrics(recent);
-    let mark = pass_mark(skill);
+    let mark = effective_pass_mark(skill, recent);
     let drill_passed = all.len() >= PASS_ATTEMPTS && meets_mark(&mark, &m);
     let checkup_passed = latest_checkup(skill, attempts).map(|score| score.passed);
     let passed = drill_passed || ever_met(&mark, &all);
@@ -239,6 +268,7 @@ pub fn skill_stats(skill: Skill, attempts: &[Attempt]) -> SkillStats {
         blunders: m.blunders,
         mean_abs_error: m.mean_abs_error,
         enough_data: all.len() >= MIN_ATTEMPTS,
+        mark,
         drill_passed,
         checkup_passed,
         passed,
@@ -247,7 +277,15 @@ pub fn skill_stats(skill: Skill, attempts: &[Attempt]) -> SkillStats {
 
 /// True if any [`STAT_WINDOW`] counted attempts in a row met the mark.
 fn ever_met(mark: &PassMark, counted: &[&Attempt]) -> bool {
-    counted.len() >= PASS_ATTEMPTS && counted.windows(STAT_WINDOW).any(|window| meets_mark(mark, &window_metrics(window)))
+    counted.len() >= PASS_ATTEMPTS
+        && counted.windows(STAT_WINDOW).any(|window| {
+            let effective = if counted.first().is_some_and(|a| a.skill == Skill::Equity) {
+                effective_pass_mark(Skill::Equity, window)
+            } else {
+                *mark
+            };
+            meets_mark(&effective, &window_metrics(window))
+        })
 }
 
 pub fn all_stats(attempts: &[Attempt]) -> Vec<SkillStats> {

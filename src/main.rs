@@ -29,7 +29,7 @@ const USAGE: &str = "poker-trainer: fundamentals drills for no-limit hold'em
 Usage:
   poker-trainer baseline    take the frozen 32-question test
   poker-trainer card        print the preflop card
-  poker-trainer drill [--skill NAME]... [--minutes N] [--items N] [--seed N]
+  poker-trainer drill [--skill NAME]... [--minutes N] [--items N] [--seed N] [--exact-equity]
                             run a drill (10 minutes by default); with no
                             --skill it mixes every practice group
   poker-trainer drill --leaks [--file PATH] [--items N] [--seed N]
@@ -81,6 +81,7 @@ struct DrillArgs {
     minutes: Option<u64>,
     items: Option<u64>,
     seed: Option<u64>,
+    exact_equity: bool,
     leaks: bool,
     leak_file: Option<PathBuf>,
 }
@@ -110,6 +111,7 @@ fn parse_drill_args(args: &[String]) -> Result<DrillArgs, String> {
         minutes: None,
         items: None,
         seed: None,
+        exact_equity: false,
         leaks: false,
         leak_file: None,
     };
@@ -121,6 +123,7 @@ fn parse_drill_args(args: &[String]) -> Result<DrillArgs, String> {
             "--skill" => {
                 parsed.skills.push(parse_skill(value()?)?);
             }
+            "--exact-equity" => parsed.exact_equity = true,
             "--leaks" => parsed.leaks = true,
             "--file" => parsed.leak_file = Some(PathBuf::from(value()?)),
             "--minutes" => parsed.minutes = Some(positive(flag, number(value()?)?)?),
@@ -342,7 +345,8 @@ fn run_drill(args: DrillArgs) -> Result<(), String> {
         Session::mixed(&attempts, now_ms(), seed)
     } else {
         Session::new(drill_skills(&args.skills), &attempts, now_ms(), seed)
-    };
+    }
+    .with_exact_equity(args.exact_equity);
     let style = style();
     let stdin = io::stdin();
     let mut input = stdin.lock();

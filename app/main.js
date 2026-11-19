@@ -1,4 +1,4 @@
-import { engine, onFatalError, prepareDrill, syncLeaks } from './engine.js';
+import { engine, onFatalError, prepareDrill, syncEquityMode, syncLeaks } from './engine.js';
 import * as store from './store.js';
 import { showHome, showDrill, showBaseline, showCheckup, showCard, showProgress, showBackup, showMistakes,
   drillActive, baselineActive, checkupActive, endEverything, noticeIfStorageLost, showFatalNotice, activeNow } from './screens.js';
@@ -43,6 +43,7 @@ window.addEventListener('hashchange', route);
   if (leaks) {
     try { await syncLeaks(leaks); } catch (_) { store.clearLeaks(); await syncLeaks(''); }
   }
+  if (store.readEquityExact()) await syncEquityMode(true);
   await route();
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});

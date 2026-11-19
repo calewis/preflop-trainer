@@ -14,7 +14,7 @@ use crate::groups::{group_of, is_dealt, Group};
 use crate::item::{beats_me_seed_with_rung, chain_seed_for_stage, equity_seed_with_rung, generator_changed, read_price_seed_with_rung, ChainStage, BEATS_ME_RUNGS, GEN_VERSION, Item, Question, Skill, HELD_OUT_BIT, READ_PRICE_RUNGS};
 use crate::log::{Attempt, CheckRef, ItemRef, Mode};
 use crate::schedule::DAY_MS;
-use crate::progress::{meets_mark, pass_mark, window_metrics, PassMark, WindowMetrics};
+use crate::progress::{effective_pass_mark, equity_window_is_numeric, meets_mark, window_metrics, PassMark, WindowMetrics};
 use crate::rng::Rng;
 use crate::table;
 
@@ -334,10 +334,16 @@ pub fn plan_for(kind: CheckupKind, form: u32) -> CheckupPlan {
 impl CheckupPlan {
     /// The item for one slot. Repeats relabel suits; `equity` uses the fixed band.
     pub fn item(&self, index: usize) -> Item {
+        self.item_with_mode(index, false)
+    }
+
+    /// [`CheckupPlan::item`], choosing whether `equity` slots ask for typed percentages.
+    pub fn item_with_mode(&self, index: usize, exact_equity: bool) -> Item {
         let slot = self.slots[index];
         let mut item = generate(slot.skill, slot.seed);
         if let Question::Equity(q) = &mut item.question {
             q.band = CHECKUP_EQUITY_BAND;
+            q.exact_pct = exact_equity;
         }
         if slot.repeat_of.is_some() {
             item.question = item.question.with_suit_perm(&slot.perm);
@@ -559,8 +565,12 @@ fn score_run(kind: CheckupKind, check: CheckRef, rows: &[&Attempt]) -> CheckupSc
         .filter_map(|(_, attempt)| *attempt)
         .collect();
     let metrics = window_metrics(&originals);
-    let mark = kind.skill().map(pass_mark);
-    let metric = mark.as_ref().map_or(CheckupMetric::PercentOk, checkup_metric);
+    let mark = kind.skill().map(|s| effective_pass_mark(s, &originals));
+    let metric = if kind == CheckupKind::Skill(Skill::Equity) && !equity_window_is_numeric(&originals) {
+        CheckupMetric::PercentOk
+    } else {
+        mark.as_ref().map_or(CheckupMetric::PercentOk, checkup_metric)
+    };
     let (score, standard_error) = primary_score(metric, &originals, &metrics);
     let complete = by_slot.iter().all(Option::is_some);
     let stale = match kind {

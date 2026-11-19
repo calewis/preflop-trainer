@@ -244,8 +244,8 @@ impl Attempt {
     ) -> Attempt {
         let mut extra = outcome.equity_log.map_or_else(AttemptExtra::default, |e| AttemptExtra {
             check: None,
-            band: Some(e.band),
-            signed_error: Some(e.signed_error),
+            band: e.band,
+            signed_error: e.signed_error,
             truth_pct: Some(e.truth_pct),
             opponents: Some(e.opponents),
             ..AttemptExtra::default()

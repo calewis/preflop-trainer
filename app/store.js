@@ -3,6 +3,7 @@ const KEY = 'poker-trainer.attempts.v1';
 const LEAKS_KEY = 'poker-trainer.leaks.v1';
 const MINUTES_KEY = 'poker-trainer.minutes';
 const CONFIDENCE_KEY = 'poker-trainer.confidence';
+const EQUITY_EXACT_KEY = 'poker-trainer.equity-exact';
 
 let memory = '';
 let leaksMemory = '';
@@ -65,6 +66,14 @@ export function readConfidence() {
 
 export function writeConfidence(on) {
   safely(() => localStorage.setItem(CONFIDENCE_KEY, on ? '1' : '0'));
+}
+
+export function readEquityExact() {
+  return safely(() => localStorage.getItem(EQUITY_EXACT_KEY), null) === '1';
+}
+
+export function writeEquityExact(on) {
+  safely(() => localStorage.setItem(EQUITY_EXACT_KEY, on ? '1' : '0'));
 }
 
 export function readLeaks() {

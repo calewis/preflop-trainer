@@ -181,15 +181,22 @@ fn board_type_and_equity_drills_run_and_log() {
     let script = "rp\nrc\nrd\ntp\ntc\ntd\nmc\nmd\n50\n".repeat(60);
     let out = run(&home, &["drill", "--items", "8", "--seed", "11", "--skill", "board_type"], &script);
     assert!(out.status.success());
-    let out = run(&home, &["drill", "--items", "3", "--seed", "11", "--skill", "equity"], &"50\n".repeat(10));
+    let out = run(&home, &["drill", "--items", "3", "--seed", "11", "--skill", "equity"], &"m\n".repeat(10));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{stdout}");
-    assert!(stdout.contains("Exact equity:"), "{stdout}");
+    assert!(stdout.contains("l Low (under 30%), m Medium (30-60%), h High (over 60%)"), "{stdout}");
+    assert!(stdout.contains("Answer: "), "{stdout}");
+    assert!(!stdout.contains("Exact equity:"), "choice reveal should stay short: {stdout}");
+    let out_exact = run(&home, &["drill", "--items", "2", "--seed", "12", "--skill", "equity", "--exact-equity"], &"50\n".repeat(10));
+    let stdout_exact = String::from_utf8_lossy(&out_exact.stdout);
+    assert!(out_exact.status.success(), "{stdout_exact}");
+    assert!(stdout_exact.contains("Exact equity:"), "{stdout_exact}");
     let rows = log_rows(&home);
     assert_eq!(rows.iter().filter(|r| r[3] == "board_type").count(), 8);
     let equity: Vec<_> = rows.iter().filter(|r| r[3] == "equity").collect();
-    assert_eq!(equity.len(), 3);
-    assert!(equity.iter().all(|r| r.len() == 24 && !r[15].is_empty()));
+    assert_eq!(equity.len(), 5);
+    assert!(equity[..3].iter().all(|r| r.len() == 24 && r[10] == "m" && r[15].is_empty() && !r[16].is_empty()));
+    assert!(equity[3..].iter().all(|r| r.len() == 24 && !r[15].is_empty()));
     let _ = fs::remove_dir_all(&home);
 }
 

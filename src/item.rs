@@ -264,9 +264,11 @@ pub struct EquityQuestion {
     pub hero: Holding,
     pub board: Vec<Card>,
     pub opponents: EquityOpponents,
-    /// Points either side of the true equity that count as a hit. Fixed when
-    /// the item is served (see [`crate::equity_skill`]), and logged with it.
+    /// Points either side of the true equity that count as a hit in typed mode.
+    /// Fixed when the item is served (see [`crate::equity_skill`]), and logged with it.
     pub band: u8,
+    /// False (default) for the three-choice bands; true for typed-percentage harder mode.
+    pub exact_pct: bool,
 }
 
 impl EquityQuestion {
@@ -572,6 +574,7 @@ impl Question {
                     EquityOpponents::Classes(list) => EquityOpponents::Classes(list.clone()),
                 },
                 band: q.band,
+                exact_pct: q.exact_pct,
             }),
             Question::BoardType { board: b, options } => Question::BoardType {
                 board: board(b),

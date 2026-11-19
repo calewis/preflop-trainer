@@ -382,13 +382,13 @@ function tableReveal(r) {
   const cap = text => text.charAt(0).toUpperCase() + text.slice(1);
   return [
     h('p', { class: 'reveal-answer' }, 'Best: ', h('strong', {}, r.best)),
-    r.loss ? p(`Cost: ${r.loss}${r.band ? ` (${r.band})` : ''}.`) : null,
     r.verdict === 'close' ? p('Close: the top options are about equal.') : null,
     h('ul', { class: 'table-options' }, r.options.map(o => h('li', { class: o.is_chosen ? 'chosen' : '' },
       h('div', { class: 'tl-head' }, h('strong', {}, o.label), h('span', { class: 'hint' }, o.ev_bb),
         o.is_best ? h('span', { class: 'pill good' }, 'Best') : null)))),
     plays.length ? h('ul', { class: 'facts' }, plays.map(e => h('li', {}, `${cap(e.play)} vs ${e.who.join(', ')}.`))) : null,
     more('About these numbers',
+      r.loss ? p(`Cost: ${r.loss}${r.band ? ` (${r.band})` : ''}.`) : null,
       p(r.explanation),
       r.read_note ? p(r.read_note) : null,
       r.options.map(o => p(`${o.label}: ${o.ev_bb}, ${o.ev_pct}, ${o.share}`)),
@@ -435,19 +435,30 @@ function boardTypeReveal(r) {
 }
 
 function equityReveal(r) {
+  const how = !r.combos
+    ? 'These are exact hands, so there is just one matchup to work out.'
+    : r.tuples
+    ? `Worked out over ${r.combos} opponent combos (${r.tuples} possible once clashing cards are removed).`
+    : r.sampled
+      ? `Estimated over ${r.combos} opponent combos from a ${r.sample_size}-outcome sample.`
+      : `Worked out over ${r.combos} opponent combos.`;
+  if (r.mode === 'choice') {
+    return [
+      answerLine(r.answer),
+      r.reason ? p(r.reason) : null,
+      more('How this was worked out',
+        p(`Exact equity: ${r.exact}.`),
+        r.close ? p('Within 3 points of the line, so either band counts.') : null,
+        p(how)),
+    ];
+  }
   return [
     h('p', { class: 'reveal-answer' }, 'Exact equity: ', h('strong', {}, r.answer)),
     p(`${r.error}.`),
     h('dl', { class: 'stat-list' },
       row('You said', r.estimate),
       row(`Within ${plural(r.band, 'point', 'points')} counts as a hit`, r.hit ? 'Hit' : 'Miss')),
-    p(!r.combos
-      ? 'These are exact hands, so there is just one matchup to work out.'
-      : r.tuples
-      ? `Worked out over ${r.combos} opponent combos (${r.tuples} possible once clashing cards are removed).`
-      : r.sampled
-        ? `Estimated over ${r.combos} opponent combos from a ${r.sample_size}-outcome sample.`
-        : `Worked out over ${r.combos} opponent combos.`),
+    p(how),
   ];
 }
 

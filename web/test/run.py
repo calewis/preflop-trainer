@@ -488,7 +488,10 @@ def check_logged(rows, records, where):
         check(row[4] == want["seed"], f"{label}: item {row[4]}")
         check(row[10] == want["answer"], f"{label}: answer {row[10]!r}, expected {want['answer']!r}")
         if want["skill"] == "equity":
-            check(len(row) == len(RESEARCH_LOG_COLUMNS.split("\t")) and row[14] and row[15] and row[16] and row[17]
+            is_choice = want["answer"] in ("l", "m", "h")
+            check(len(row) == len(RESEARCH_LOG_COLUMNS.split("\t"))
+                  and (not row[14] and not row[15] if is_choice else bool(row[14] and row[15]))
+                  and row[16] and row[17]
                   and not row[18] and not row[19] and not row[21] and not row[22]
                   and re.fullmatch(r"\d+:\d+:(0-25|25-50|50-75|75-100)", row[20]), f"{label}: equity columns {row[11:]}")
         # A correct spot answer can also be flagged close, so close is only pinned when wrong.
@@ -566,7 +569,7 @@ def drill_session(page, inspector, want_all, max_items, keyboard=False, label_pr
         page.wait("!document.querySelector('.reveal')", 30)
         if not want_all:
             continue
-        if len(seen) == len(ALL_SKILLS) and all({"right", "wrong"} <= v for v in seen.values()):
+        if all({"right", "wrong"} <= seen.get(s, set()) for s in ALL_SKILLS):
             break
     return items, seen, records
 
@@ -959,18 +962,83 @@ def run_new_skills():
         inspector.snapshot("newskill-board-slow")
         page.eval("location.hash = '#home'")
         page.wait("!!document.querySelector('.app-title')", 20)
-        # equity at rung 0 shows the opponent's exact cards; a higher band comes from a fresh log.
-        page.eval(f"localStorage.setItem({json.dumps(LOG_KEY)}, '')")
+        # equity defaults to 3-choice bands at both rungs, with a tight reveal and collapsed details.
+        page.eval(f"localStorage.setItem({json.dumps(LOG_KEY)}, ''); localStorage.removeItem('poker-trainer.equity-exact');")
         page.send("Page.reload", {})
         page.wait("!!document.querySelector('.app-title') && !!window.__trainer", 30)
+        check(page.eval("document.querySelector('[data-equity-exact]').textContent") == "Type exact equity %: off",
+              "equity exact mode toggle must default to off")
         open_limited_drill(page, "equity")
         page.wait(READY, 60)
         check(page.eval("document.querySelector('.question').textContent.includes('Opponent')"), "rung 0 must show the opponent's cards")
         check(page.eval("document.querySelector('.card-opp') !== null"), "rung 0 must show opponent cards as cards")
+        choices = page.eval("[...document.querySelectorAll('.choice')].map(b => b.textContent.replace(/^[0-9]/, '').trim())")
+        check(choices == ["Low (under 30%)", "Medium (30-60%)", "High (over 60%)"], f"unexpected equity choices: {choices}")
+        check(page.eval("!document.querySelector('.keypad')"), "default equity must not show the keypad")
         inspector.snapshot("newskill-equity-q")
-        # Nothing the page holds may leak the exact equity before the answer.
+        # Nothing the page holds may leak the exact equity or graded answers before committing.
         pre = pre_answer_state(page)
         check("\"answer\"" not in pre and "truth" not in pre, f"exact equity is in the page before answering: {pre[:300]}")
+        visible = page.eval("document.body.innerText")
+        before = len(rows_of(page))
+        current, kind, answer = answer_drill_item(page, True)
+        wait_rows(page, before + 1)
+        short = page.eval("(() => { const c = document.querySelector('.reveal').cloneNode(true); c.querySelectorAll('details').forEach(d => d.remove()); return c.innerText; })()")
+        check(re.search(r"Answer:\s*(Low|Medium|High) \(\d+%\)", short), f"short choice reveal missing band+pct: {short}")
+        check("Exact equity" not in short, f"short choice reveal should fold exact equity into details: {short}")
+        page.eval("document.querySelectorAll('.reveal details').forEach(d => { d.open = true; })")
+        reveal = page.eval("document.querySelector('.reveal').innerText")
+        check("Exact equity:" in reveal and "one matchup" in reveal, f"opened choice details incomplete: {reveal}")
+        assert_no_leak(pre, reveal_equity(reveal), "choice rung 0")
+        check_full_truth_absent(pre, rows_of(page)[before], "choice rung 0")
+        check("Exact equity" not in visible and "Answer:" not in visible, "answer shown before committing")
+        row = rows_of(page)[before]
+        check(len(row) == 24 and row[3] == "equity" and row[10] in ("l", "m", "h") and not row[14] and not row[15] and row[16] and row[17],
+              f"choice equity log columns wrong: {row}")
+        next_drill_item(page)
+        # A wrong choice answer.
+        page.wait(READY, 60)
+        answer_drill_item(page, False)
+        wait_rows(page, before + 2)
+        check(page.eval("document.querySelector('.reveal').classList.contains('bad')"), "wrong equity choice not marked bad")
+        check(rows_of(page)[before + 1][6] == "0", "wrong equity answer logged correct")
+        inspector.snapshot("newskill-equity-r")
+        page.eval("location.hash = '#home'")
+        page.wait("!!document.querySelector('.app-title')", 20)
+        # Default 3-choice at rung 1 (old numeric log qualifies for rung 1) and in #checkup:equity.
+        log = drills_only_log([("equity", "50")])
+        seed_log(page, port, log)
+        open_limited_drill(page, "equity")
+        page.wait(READY, 60)
+        check(page.eval("document.querySelector('.question').innerText.includes('Assume')"), "rung 1 must describe opponents in words")
+        check(page.eval("document.querySelectorAll('.choice').length") == 3, "rung 1 choice equity must offer 3 choices")
+        pre = pre_answer_state(page)
+        before = len(rows_of(page))
+        answer_drill_item(page, True)
+        wait_rows(page, before + 1)
+        row = rows_of(page)[before]
+        page.eval("document.querySelectorAll('.reveal details').forEach(d => { d.open = true; })")
+        reveal = page.eval("document.querySelector('.reveal').innerText")
+        check("combos" in reveal, f"rung 1 reveal has no combo count: {reveal}")
+        assert_no_leak(pre, reveal_equity(reveal), "choice rung 1")
+        check_full_truth_absent(pre, row, "choice rung 1")
+        page.eval("location.hash = '#home'")
+        page.wait("!!document.querySelector('.app-title')", 20)
+        # Harder typed-number mode: toggle on Home, persisted in localStorage, preserves keypad & tolerance staircase.
+        page.eval(f"localStorage.setItem({json.dumps(LOG_KEY)}, '')")
+        page.send("Page.reload", {})
+        page.wait("!!document.querySelector('.app-title') && !!window.__trainer", 30)
+        click(page, "[data-equity-exact]")
+        must_see(page, "document.querySelector('[data-equity-exact]').textContent === 'Type exact equity %: on'", 5, "toggle did not turn on")
+        check(page.eval("localStorage.getItem('poker-trainer.equity-exact')") == "1", "equity-exact setting not saved")
+        page.send("Page.reload", {})
+        page.wait("!!document.querySelector('.app-title') && !!window.__trainer", 30)
+        check(page.eval("document.querySelector('[data-equity-exact]').textContent") == "Type exact equity %: on",
+              "equity-exact setting lost across reload")
+        open_limited_drill(page, "equity")
+        page.wait(READY, 60)
+        check(page.eval("!!document.querySelector('.keypad')"), "typed equity mode must show the keypad")
+        pre = pre_answer_state(page)
         visible = page.eval("document.body.innerText")
         before = len(rows_of(page))
         current, kind, answer = answer_drill_item(page, True)
@@ -986,7 +1054,7 @@ def run_new_skills():
         check(len(row) == 24 and row[3] == "equity" and row[14] and row[15] and row[16] and row[17], f"equity log columns missing: {row}")
         check(int(row[14]) == 10, f"first band should be 10, got {row[14]}")
         next_drill_item(page)
-        # A wrong answer: an estimate far from the truth.
+        # A wrong typed answer: an estimate far from the truth.
         page.wait(READY, 60)
         current, kind, answer = answer_drill_item(page, False)
         wait_rows(page, before + 2)
@@ -994,7 +1062,6 @@ def run_new_skills():
         check("Miss" in reveal, f"equity miss not shown: {reveal}")
         check(("points high" in reveal or "points low" in reveal), f"signed error missing: {reveal}")
         check(rows_of(page)[before + 1][6] == "0", "wrong equity answer logged correct")
-        inspector.snapshot("newskill-equity-r")
         next_drill_item(page)
         # The band tightened after the first hit and loosened after the miss: 10, 9, 15.
         page.wait(READY, 60)
@@ -1004,26 +1071,10 @@ def run_new_skills():
         check(int(row[14]) == 15, f"third item band should be 15 after hit then miss, got {row[14]}")
         page.eval("location.hash = '#home'")
         page.wait("!!document.querySelector('.app-title')", 20)
-        # rung 1 states hand types in words, and the band comes from the log's staircase.
-        log = drills_only_log([("equity", "50")])
-        seed_log(page, port, log)
-        open_limited_drill(page, "equity")
-        page.wait(READY, 60)
-        check(page.eval("document.querySelector('.question').innerText.includes('Assume')"), "rung 1 must describe opponents in words")
-        pre = pre_answer_state(page)
-        before = len(rows_of(page))
-        current, kind, answer = answer_drill_item(page, True)
-        wait_rows(page, before + 1)
-        row = rows_of(page)[before]
-        reveal = page.eval("document.querySelector('.reveal').innerText")
-        check("combos" in reveal, f"rung 1 reveal has no combo count: {reveal}")
-        assert_no_leak(pre, reveal_equity(reveal), "rung 1")
-        check_full_truth_absent(pre, row, "rung 1")
-        # After 45 hits the rung-1 staircase is still at its start, 10.
-        check(int(row[14]) == 10, f"rung-1 band should start at 10, got {row[14]}")
-        page.eval("location.hash = '#home'")
-        page.wait("!!document.querySelector('.app-title')", 20)
-        # A checkup must not give the equity away either, at either rung.
+        # Switch back to default 3-choice mode and verify rung 1 typed mode is separate if turned back off;
+        # also test #checkup:equity in default 3-choice mode across both rungs.
+        click(page, "[data-equity-exact]")
+        must_see(page, "document.querySelector('[data-equity-exact]').textContent === 'Type exact equity %: off'", 5, "toggle did not turn off")
         seed_log(page, port, LOG_COLUMNS + "\n")
         page.eval("location.hash = '#checkup:equity'")
         page.wait("[...document.querySelectorAll('.btn.primary')].some(b => b.textContent === 'Begin')", 20)
@@ -1033,12 +1084,13 @@ def run_new_skills():
         while len(rungs) < 2 and number <= 12:
             page.wait(READY + f" && __trainer.current.number === {number}", 60)
             current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+            check(current["bundle"]["format"]["type"] == "choice", f"checkup equity should default to choice: {current['bundle']['format']}")
             rungs.add(current["bundle"]["question"]["rung"])
             pre = pre_answer_state(page)
-            truth = check_probe(page, current, "50")["outcome"]["reveal"]["answer"].rstrip("%")
+            truth = check_probe(page, current, "m")["outcome"]["reveal"]["exact"].rstrip("%")
             assert_no_leak(pre, truth, f"checkup question {number}")
             check("Exact equity" not in page.eval("document.body.innerText"), "a checkup showed the exact equity")
-            answer_percent_keypad(page, "50")
+            type_answer(page, current, "choice", "m")
             number += 1
         check(rungs == {0, 1}, f"checkup leak test saw rungs {rungs}")
         page.eval("document.querySelector('.top-bar button.back').click()")

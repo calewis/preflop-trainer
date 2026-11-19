@@ -10,7 +10,7 @@ use poker_trainer::baseline::{self, BaselineItem, BASELINE_SIZE};
 use poker_trainer::board_type::board_type_status;
 use poker_trainer::cards::Card;
 use poker_trainer::checkup::{
-    checkup_runs, mixed_checkup_offer, next_checkup_run, next_form, plan_for, unfinished_run, CheckupKind, CheckupOffer,
+    checkup_runs, mixed_checkup_offer, next_checkup_run, next_form, plan_for, unfinished_run, CheckupKind, CheckupMetric, CheckupOffer,
     CheckupScore, CHECKUP_LEN, CHECKUP_ORIGINALS, CHECKUP_REPEATS, MIXED_CHECKUP_EVERY_DAYS, MIXED_CHECKUP_LEN,
 };
 use poker_trainer::equity_skill::{
@@ -18,7 +18,7 @@ use poker_trainer::equity_skill::{
 };
 use poker_trainer::generate::generate;
 use poker_trainer::grade::{grade_choices, grade_timed};
-use poker_trainer::item::{Item, Skill};
+use poker_trainer::item::{Item, Question, Skill};
 use poker_trainer::leaks::{
     decode_leak_seed, family_log_tag, parse_leaks, verify_leaks, LeakCounts, LeakLibrary, LeakRevealNote, LeakSession,
     DEFAULT_LEAK_ITEMS,
@@ -28,7 +28,7 @@ use poker_trainer::preflop::{chart_for, preflop_answer, Action, Seat, Situation,
 use poker_trainer::groups::{group_of, is_dealt, Group};
 use poker_trainer::progress::{
     all_stats, baseline_runs, drill_skills, has_baseline, next_baseline_run, pass_mark, reliability_table, BaselineRun,
-    SkillStats, WindowMetrics, MIN_ATTEMPTS, PASS_ATTEMPTS,
+    PassMark, SkillStats, WindowMetrics, MIN_ATTEMPTS, PASS_ATTEMPTS, PASS_EQUITY_CHOICE,
 };
 use poker_trainer::reflection::{reflection_comparison, reflection_form, reflection_row, reflection_state, ReflectState};
 use poker_trainer::ladder::{MISS_POINTS, RIGHT_POINTS, RIGHT_WRONG_GATE};
@@ -91,6 +91,7 @@ struct Engine {
     leaks: Option<LeakLibrary>,
     river_session: Option<LiveRiverSession>,
     baseline: Option<LiveBaseline>,
+    exact_equity: bool,
 }
 
 struct LiveSession {
@@ -159,7 +160,7 @@ fn question_check_of(question: &V) -> String {
 fn bundle(item: &Item, origin: Option<Origin>, make_template: &dyn Fn(&poker_trainer::grade::Outcome) -> Attempt) -> V {
     let format = poker_trainer::answer::answer_format(&item.question);
     let mut graded: Vec<(String, V)> = Vec::new();
-    if !matches!(item.skill, Skill::BoardType | Skill::Table | Skill::River) {
+    if !matches!(item.skill, Skill::BoardType | Skill::Table | Skill::River | Skill::Equity) {
         if let poker_trainer::answer::AnswerFormat::Choice(options) = &format {
             let codes: Vec<&str> = options.iter().map(|o| o.code).collect();
             for (option, result) in options.iter().zip(grade_choices(item, &codes)) {
@@ -202,9 +203,17 @@ fn drill_item(skill: Skill, seed: u64) -> Item {
     generate(skill, seed)
 }
 
+fn with_equity_mode(mut item: Item, exact_equity: bool) -> Item {
+    if let Question::Equity(q) = &mut item.question {
+        q.exact_pct = exact_equity;
+    }
+    item
+}
+
 impl Engine {
     fn run(&mut self, fields: &[&str]) -> Reply {
         match fields.first().copied().unwrap_or("") {
+            "set_equity_exact" => self.set_equity_exact(arg(fields, 1)?),
             "prepare" => self.prepare(fields),
             "prepare_leak" => self.prepare_leak(fields),
             "prepare_baseline" => self.prepare_baseline(fields),
@@ -237,6 +246,14 @@ impl Engine {
             "check_report" => self.check_report(fields),
             other => Err(format!("unknown command {other}")),
         }
+    }
+
+    fn set_equity_exact(&mut self, raw: &str) -> Reply {
+        self.exact_equity = raw == "1";
+        if let Some(live) = self.session.as_mut() {
+            live.real.set_exact_equity(self.exact_equity);
+        }
+        Ok(obj! { "exact_equity": self.exact_equity })
     }
 
     fn load_leaks(&mut self, text: &str) -> Reply {
@@ -285,7 +302,7 @@ impl Engine {
     fn prepare(&mut self, fields: &[&str]) -> Reply {
         let skill = skill_from(arg(fields, 1)?)?;
         let seed = parse_u64(arg(fields, 2)?, "seed")?;
-        let item = drill_item(skill, seed);
+        let item = with_equity_mode(drill_item(skill, seed), self.exact_equity);
         let origin = fields.get(3).map_or(Origin::New, |text| origin_from(text));
         let planned = Planned { skill, seed, origin };
         Ok(bundle(&item, Some(origin), &|outcome| drill_template(planned, outcome)))
@@ -409,7 +426,7 @@ impl Engine {
         let skills: Vec<V> = stats
             .iter()
             .filter(|s| (group_of(s.skill).is_some() && is_dealt(s.skill)) || s.total_attempts > 0)
-            .map(stats_json)
+            .map(|s| stats_json(s, self.exact_equity))
             .collect();
         let runs = baseline_runs(&self.attempts, BASELINE_SIZE);
         obj! {
@@ -568,7 +585,7 @@ impl Engine {
         self.leak_session = None;
         // Nothing is the default mixed drill; `group:CODE` deals one practice group;
         // a comma-separated list of skills deals exactly those.
-        let real = match fields.get(3).copied().unwrap_or("") {
+        let mut real = match fields.get(3).copied().unwrap_or("") {
             "" => Session::mixed(&self.attempts, now_ms, seed),
             pick if pick.starts_with(GROUP_PREFIX) => {
                 let group = Group::from_code(&pick[GROUP_PREFIX.len()..]).ok_or("unknown group")?;
@@ -583,6 +600,7 @@ impl Engine {
                 Session::new(drill_skills(&requested), &self.attempts, now_ms, seed)
             }
         };
+        real.set_exact_equity(self.exact_equity);
         let limits = SessionLimits::resolve(None, None);
         self.session = Some(LiveSession {
             limits,
@@ -801,7 +819,7 @@ impl Engine {
     fn session_item(&self, skill: Skill, seed: u64) -> Item {
         match &self.session {
             Some(live) => live.real.item_for(Planned { skill, seed, origin: Origin::New }),
-            None => drill_item(skill, seed),
+            None => with_equity_mode(drill_item(skill, seed), self.exact_equity),
         }
     }
 
@@ -949,7 +967,7 @@ impl Engine {
         let (kind, form, slot, run) = check_fields(fields)?;
         let plan = checked_plan(kind, form)?;
         let entry = *plan.slots.get(slot).ok_or("no such slot")?;
-        let item = plan.item(slot);
+        let item = plan.item_with_mode(slot, self.exact_equity);
         let check = CheckRef { run, form, slot: slot as u32 };
         Ok(bundle(&item, None, &|outcome| Attempt::from_check(check, entry.skill, entry.seed, outcome, 0, 0)))
     }
@@ -1052,14 +1070,14 @@ impl Engine {
         let response = response_field(fields, 6)?;
         let plan = checked_plan(kind, form)?;
         let entry = *plan.slots.get(slot).ok_or("no such slot")?;
-        let item = plan.item(slot);
+        let item = plan.item_with_mode(slot, self.exact_equity);
         match grade_timed(&item, raw, response) {
             Ok(outcome) => {
                 let check = CheckRef { run, form, slot: slot as u32 };
                 let template = format_attempt(&Attempt::from_check(check, entry.skill, entry.seed, &outcome, 0, 0));
                 Ok(obj! { "outcome": present::outcome(&item, &outcome, template, response, V::Null), "check": question_check(&item) })
             }
-            Err(invalid) => Ok(obj! { "invalid": invalid.0 }),
+            Err(invalid) => Ok(obj! { "invalid": invalid.0, "check": question_check(&item) }),
         }
     }
 
@@ -1213,14 +1231,15 @@ fn randomized_baseline(seed: u64) -> Result<Vec<BaselineItem>, String> {
     Ok(baseline::randomize(&items, &mut rng))
 }
 
-fn mark_lines(skill: Skill) -> Vec<String> {
-    let mark = pass_mark(skill);
+fn mark_lines(skill: Skill, mark: PassMark) -> Vec<String> {
     let mut parts = Vec::new();
     if let Some(m) = mark.min_correct_pct {
         parts.push(format!("at least {m:.0}% correct"));
     }
     if let (Some(m), Skill::Chain) = (mark.min_within_one_pct, skill) {
         parts.push(format!("at least {m:.0}% of stages right (outs within 1 count)"));
+    } else if let (Some(m), Skill::Equity) = (mark.min_within_one_pct, skill) {
+        parts.push(format!("at least {m:.0}% right"));
     } else if let Some(m) = mark.min_within_one_pct {
         parts.push(format!("at least {m:.0}% within 1"));
     }
@@ -1243,14 +1262,15 @@ fn mark_lines(skill: Skill) -> Vec<String> {
 }
 
 /// The measures that count for `skill`'s pass mark, as plain phrases.
-fn measure_lines(skill: Skill, m: &WindowMetrics) -> Vec<String> {
-    let mark = pass_mark(skill);
+fn measure_lines(skill: Skill, mark: PassMark, m: &WindowMetrics) -> Vec<String> {
     let mut parts = Vec::new();
     if mark.min_correct_pct.is_some() {
         parts.push(format!("{:.0}% correct", m.correct_pct));
     }
     if mark.min_within_one_pct.is_some() && skill == Skill::Chain {
         parts.push(format!("{:.0}% of stages right", m.within_one_pct));
+    } else if mark.min_within_one_pct.is_some() && skill == Skill::Equity {
+        parts.push(format!("{:.0}% right", m.within_one_pct));
     } else if mark.min_within_one_pct.is_some() {
         parts.push(format!("{:.0}% within 1 ({:.0}% exact)", m.within_one_pct, m.correct_pct));
     }
@@ -1269,7 +1289,7 @@ fn measure_lines(skill: Skill, m: &WindowMetrics) -> Vec<String> {
     parts
 }
 
-fn stat_lines(stats: &SkillStats) -> Vec<String> {
+fn stat_lines(stats: &SkillStats, mark: PassMark) -> Vec<String> {
     let metrics = WindowMetrics {
         correct_pct: stats.correct_pct,
         within_one_pct: stats.within_one_pct,
@@ -1279,7 +1299,7 @@ fn stat_lines(stats: &SkillStats) -> Vec<String> {
         mean_abs_error: stats.mean_abs_error,
     };
     let mut parts = vec![format!("Last {}", stats.window)];
-    parts.extend(measure_lines(stats.skill, &metrics));
+    parts.extend(measure_lines(stats.skill, mark, &metrics));
     parts
 }
 
@@ -1305,7 +1325,12 @@ fn skill_status(s: &SkillStats) -> String {
     }
 }
 
-fn stats_json(s: &SkillStats) -> V {
+fn stats_json(s: &SkillStats, exact_equity: bool) -> V {
+    let mark = if s.skill == Skill::Equity && s.total_attempts == 0 && exact_equity {
+        pass_mark(s.skill)
+    } else {
+        s.mark
+    };
     obj! {
         "title": present::skill_title(s.skill),
         "group": group_of(s.skill).map(Group::title),
@@ -1315,8 +1340,8 @@ fn stats_json(s: &SkillStats) -> V {
         "passed": s.passed,
         "drill_passed": s.drill_passed,
         "checkup_passed": s.checkup_passed,
-        "stats": stat_lines(s),
-        "mark": mark_lines(s.skill),
+        "stats": stat_lines(s, mark),
+        "mark": mark_lines(s.skill, mark),
         "status": skill_status(s),
     }
 }
@@ -1351,14 +1376,21 @@ fn checkup_json(s: &CheckupScore) -> V {
 
 fn checkup_report_json(s: &CheckupScore, earlier: &[&CheckupScore]) -> V {
     let mut json = match s.kind {
-        CheckupKind::Skill(skill) => vec![
-            ("summary".to_string(), checkup_json(s)),
-            ("repeats".to_string(), present::repeats_line(&s.agreement).into()),
-            ("mark".to_string(), mark_lines(skill).into()),
-            ("measures".to_string(), measure_lines(skill, &s.metrics).into()),
-            ("groups".to_string(), V::Null),
-            ("scope".to_string(), format!("Scored on the {CHECKUP_ORIGINALS} new questions.").into()),
-        ],
+        CheckupKind::Skill(skill) => {
+            let mark = if skill == Skill::Equity && s.metric == CheckupMetric::PercentOk {
+                PASS_EQUITY_CHOICE
+            } else {
+                pass_mark(skill)
+            };
+            vec![
+                ("summary".to_string(), checkup_json(s)),
+                ("repeats".to_string(), present::repeats_line(&s.agreement).into()),
+                ("mark".to_string(), mark_lines(skill, mark).into()),
+                ("measures".to_string(), measure_lines(skill, mark, &s.metrics).into()),
+                ("groups".to_string(), V::Null),
+                ("scope".to_string(), format!("Scored on the {CHECKUP_ORIGINALS} new questions.").into()),
+            ]
+        }
         CheckupKind::Mixed => {
             let groups: Vec<V> = s
                 .groups
@@ -1739,11 +1771,34 @@ mod tests {
     #[test]
     fn exact_hands_have_no_combo_count_to_show() {
         load("");
-        let exact = dispatch("grade\x1fequity\x1f17\x1f45\x1f0");
+        let exact = dispatch("grade\x1fequity\x1f17\x1fm\x1f0");
         assert!(exact.contains("\"combos\":null"), "{exact}");
         // The same seed at the second rung averages over hand types.
-        let classes = dispatch("grade\x1fequity\x1f4611686018427387921\x1f45\x1f0");
+        let classes = dispatch("grade\x1fequity\x1f4611686018427387921\x1fm\x1f0");
         assert!(!classes.contains("\"combos\":null"), "{classes}");
+    }
+
+    #[test]
+    fn equity_defaults_to_three_choices_without_spoilers_and_switches_to_exact_mode() {
+        load("");
+        assert!(dispatch("set_equity_exact\x1f0").contains("\"exact_equity\":false"));
+        let prep = dispatch("prepare\x1fequity\x1f17\x1fnew");
+        assert!(prep.contains("\"type\":\"choice\"") && prep.contains("Low (under 30%)"), "{prep}");
+        assert!(prep.contains("Medium (30-60%)") && prep.contains("High (over 60%)"), "{prep}");
+        assert!(prep.contains("\"graded\":{}"), "choice equity must not pre-grade spoilers: {prep}");
+        let graded = dispatch("grade\x1fequity\x1f17\x1fm\x1f1000");
+        assert!(graded.contains("\"mode\":\"choice\"") && graded.contains("\"reason\":\"") && graded.contains("\"exact\":\""), "{graded}");
+        assert_eq!(check_of(&prep), check_of(&graded));
+
+        // Harder mode switches prepare and grade to percentage input, with a different question check.
+        assert!(dispatch("set_equity_exact\x1f1").contains("\"exact_equity\":true"));
+        let prep_exact = dispatch("prepare\x1fequity\x1f17\x1fnew");
+        assert!(prep_exact.contains("\"type\":\"percent\""), "{prep_exact}");
+        assert_ne!(check_of(&prep), check_of(&prep_exact));
+        let graded_exact = dispatch("grade\x1fequity\x1f17\x1f45\x1f1000");
+        assert!(graded_exact.contains("\"mode\":\"percent\"") && graded_exact.contains("\"estimate\":\"45%\""), "{graded_exact}");
+        assert_eq!(check_of(&prep_exact), check_of(&graded_exact));
+        dispatch("set_equity_exact\x1f0");
     }
 
     #[test]
@@ -1872,7 +1927,7 @@ mod tests {
         let template_line = if bundle.contains("\"attempt\":\"") {
             template(&bundle)
         } else {
-            let graded = ["5", "rp", "AsKs", "c", "f", "r", "a", "1", "50"]
+            let graded = ["5", "rp", "AsKs", "c", "f", "r", "a", "m", "1", "50"]
                 .into_iter()
                 .map(|answer| grade_check(kind, form, slot, run, answer, 1500))
                 .find(|reply| reply.contains("\"outcome\""))
@@ -2183,7 +2238,7 @@ mod tests {
 
     /// The first of a few answers the item accepts, graded through `grade`.
     fn graded_reply(grade: impl Fn(&str) -> String) -> String {
-        const ANSWERS: [&str; 21] = ["check", "fold", "call", "c", "f", "4", "25", "AKs", "Ax", "top", "none", "a", "fs", "td", "r", "6", "e", "hc", "board", "AA", "22"];
+        const ANSWERS: [&str; 22] = ["check", "fold", "call", "c", "f", "4", "25", "AKs", "Ax", "top", "none", "a", "m", "fs", "td", "r", "6", "e", "hc", "board", "AA", "22"];
         let replies: Vec<String> = ANSWERS.iter().map(|a| grade(a)).collect();
         if let Some(reply) = replies.iter().find(|reply| reply.contains("\"outcome\"")) {
             return reply.clone();

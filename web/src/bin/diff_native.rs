@@ -30,6 +30,7 @@ fn main() {
     }
     let mut out = Out { commands: Vec::new() };
     drills(&mut out, count);
+    exact_equity_drills(&mut out);
     origins(&mut out);
     read_price_session(&mut out);
     chain_session(&mut out);
@@ -85,7 +86,7 @@ fn answers_for(skill: &str) -> Vec<(&'static str, &'static str)> {
             ("rc", "1000"), ("rd", "1000"), ("tp", "1000"), ("td", "1000"), ("mc", "1000"),
             ("rc", "7000"), ("rc", "13000"), ("rp", "1000"),
         ],
-        "equity" => vec![("10", "0"), ("45", "0"), ("90", "0")],
+        "equity" => vec![("l", "0"), ("m", "0"), ("h", "0"), ("zzz", "0")],
         "chain" => ["hc", "top", "2p", "4", "9", "25", "33", "c", "f", "zzz"].into_iter().map(|a| (a, "0")).collect(),
         "beats_me" => BEATS_ME_ANSWERS.iter().map(|&a| (a, "0")).collect(),
         "read_price" => READ_PRICE_ANSWERS.iter().map(|&a| (a, "0")).collect(),
@@ -121,6 +122,29 @@ fn drills(out: &mut Out, count: u64) {
     }
 }
 
+/// Harder typed-percentage equity mode through the bridge, then resets back to choice mode.
+fn exact_equity_drills(out: &mut Out) {
+    out.call(&["set_equity_exact", "1"]);
+    out.call(&["load", ""]);
+    out.call(&["session_open", "5151", "1000000", "equity"]);
+    out.call(&["session_start", "15"]);
+    for step in 0..4u64 {
+        let next = out.call(&["session_next", &(step * 1000).to_string()]);
+        let (Some(skill), Some(seed)) = (field(&next, "skill"), field(&next, "seed")) else { break };
+        let (skill, seed) = (skill.to_string(), seed.to_string());
+        out.call(&["prepare", &skill, &seed]);
+        let mut last = String::new();
+        for ans in ["10", "45", "90"] {
+            last = out.call(&["grade", &skill, &seed, ans, "1500"]);
+        }
+        let Some(template) = first_template(&last) else { break };
+        out.call(&["commit", &template, &(2_000_000 + step).to_string(), "1500"]);
+    }
+    out.call(&["session_summary"]);
+    out.call(&["set_equity_exact", "0"]);
+    out.call(&["load", ""]);
+}
+
 /// The optional origin on `prepare`: it decides whether a miss offers a reflection.
 fn origins(out: &mut Out) {
     for skill in ["made", "beats", "spot", "spot_mw", "preflop", "chain"] {
@@ -154,7 +178,8 @@ fn scripted_answer(skill: &str) -> &'static str {
         "possible" => "f",
         "outs" => "4",
         "price" | "hit" => "25",
-        "equity" | "anchor" => "42",
+        "equity" => "m",
+        "anchor" => "42",
         "board_type" => "td",
         "chain" => "c",
         "read_price" => "c",
@@ -427,7 +452,7 @@ fn preflop_charts(out: &mut Out) {
             out.call(&["card_view", seat, situation]);
         }
     }
-    for i in 0..400u64 {
+    for i in 0..600u64 {
         let seed = (i * 2_654_435_761 + 5).to_string();
         out.call(&["prepare", "preflop", &seed]);
         for answer in ["r", "c", "f"] {

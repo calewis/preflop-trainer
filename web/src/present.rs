@@ -7,7 +7,7 @@ use poker_trainer::answer::{answer_format, AnswerFormat, AnswerOption};
 use poker_trainer::board_type::{BoardCategory, RankPattern, SuitPattern, BOARD_TYPE_MISS_MS, BOARD_TYPE_TARGET_MS};
 use poker_trainer::cards::{Card, Holding};
 use poker_trainer::checkup::{CheckupKind, CheckupMetric, CheckupScore, RepeatAgreement};
-use poker_trainer::equity_skill::BiasBucket;
+use poker_trainer::equity_skill::{BiasBucket, EquityBand};
 use poker_trainer::eval::HandRank;
 use poker_trainer::beats_me::{mix_method, prompt_text, ways_method, Standing};
 use poker_trainer::grade::{any_of_suit_text, AheadKind, BeatsMeReveal, EquityAnalysis, EvBand, FlipFacts, Outcome, Reveal, BEATS_RANDOM_NOTE};
@@ -389,6 +389,7 @@ fn equity_question(q: &EquityQuestion) -> V {
         "opponents": q.opponents.count(),
         "exact": exact,
         "classes": classes,
+        "exact_pct": q.exact_pct,
     }
 }
 
@@ -829,8 +830,8 @@ fn reveal(item: &Item, o: &Outcome, response_ms: u32) -> V {
             "answer": r.answer.as_str(),
             "lines": r.lines.iter().map(|l| V::from(l.as_str())).collect::<Vec<V>>(),
         },
-        Reveal::Equity { analysis, estimate_pct, signed_error, band, hit } => {
-            equity_reveal(analysis, *estimate_pct, *signed_error, *band, *hit)
+        Reveal::Equity { analysis, reason, choice, close, estimate_pct, signed_error, band, hit } => {
+            equity_reveal(analysis, reason, *choice, *close, *estimate_pct, *signed_error, *band, *hit)
         }
         Reveal::Anchor { card, estimate_pct, signed_error } => {
             anchor_reveal(card, *estimate_pct, *signed_error, o.correct)
@@ -943,22 +944,53 @@ fn table_reveal(g: &TableGrade) -> V {
     }
 }
 
-fn equity_reveal(a: &EquityAnalysis, estimate_pct: f64, signed_error: f64, band: u8, hit: bool) -> V {
+#[allow(clippy::too_many_arguments)]
+fn equity_reveal(
+    a: &EquityAnalysis,
+    reason: &str,
+    choice: Option<EquityBand>,
+    close: bool,
+    estimate_pct: f64,
+    signed_error: f64,
+    band: u8,
+    hit: bool,
+) -> V {
     let combos: Vec<String> = a.combos_per_opponent.iter().map(|n| n.to_string()).collect();
     let tuples = a.tuples.map(with_commas);
     // Exact hands are a single matchup; "1 x 1 combos" would mean nothing.
     let averaged = a.combos_per_opponent.iter().any(|&n| n != 1);
+    let exact = format!("{:.1}%", a.truth_pct);
+    let combos_val = averaged.then(|| combos.join(" x "));
+    let sample_size = with_commas(poker_trainer::equity::SAMPLE_SIZE);
+    if choice.is_some() {
+        return obj! {
+            "kind": "equity",
+            "mode": "choice",
+            "answer": EquityBand::answer_text(a.truth_pct),
+            "exact": exact,
+            "reason": reason,
+            "close": close,
+            "combos": combos_val,
+            "tuples": tuples,
+            "sampled": a.sampled,
+            "sample_size": sample_size,
+        };
+    }
     obj! {
         "kind": "equity",
-        "answer": format!("{:.1}%", a.truth_pct),
+        "mode": "percent",
+        "answer": exact.clone(),
+        "exact": exact,
+        "reason": reason,
+        "close": false,
         "estimate": plain_percent(estimate_pct),
         "error": signed_error_words(signed_error),
         "band": band,
         "hit": hit,
-        "combos": averaged.then(|| combos.join(" x ")),
+        "combos": combos_val,
         "tuples": tuples,
         "sampled": a.sampled,
-        "sample_size": with_commas(poker_trainer::equity::SAMPLE_SIZE),
+        "sample_size": sample_size,
     }
 }
 
