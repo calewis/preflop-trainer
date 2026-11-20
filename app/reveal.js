@@ -225,18 +225,22 @@ function holdingsLine(list) {
     list.more > 0 ? h('span', {}, `and ${list.more} more`) : null);
 }
 
+function priceTable(rows) {
+  return h('table', { class: 'price-table' },
+    h('thead', {}, h('tr', {},
+      h('th', { scope: 'col' }, 'Bet vs pot'),
+      h('th', { scope: 'col' }, 'Need'))),
+    h('tbody', {}, rows.map(row => h('tr', { class: row.marked ? 'marked' : '' },
+      h('td', {}, row.marked ? `\u25b6 ${row.bet}` : row.bet),
+      h('td', {}, row.need)))));
+}
+
 function readPriceReveal(r) {
   if (r.table) {
     return [
       h('p', { class: 'reveal-answer' }, 'Answer: ', h('strong', {}, r.answer),
         '  ', h('span', { class: 'price-sum' }, `(${r.sum})`)),
-      h('table', { class: 'price-table' },
-        h('thead', {}, h('tr', {},
-          h('th', { scope: 'col' }, 'Bet vs pot'),
-          h('th', { scope: 'col' }, 'Need'))),
-        h('tbody', {}, r.table.map(row => h('tr', { class: row.marked ? 'marked' : '' },
-          h('td', {}, row.marked ? `\u25b6 ${row.bet}` : row.bet),
-          h('td', {}, row.need))))),
+      priceTable(r.table),
     ];
   }
   return [answerLine(r.answer), r.lines.map(line => p(line))];
@@ -424,7 +428,8 @@ function tableReveal(r) {
     r.verdict === 'close' ? p('Close: the top options are about equal.') : null,
     h('ul', { class: 'table-options' }, r.options.map(o => h('li', { class: o.is_chosen ? 'chosen' : '' },
       h('div', { class: 'tl-head' }, h('strong', {}, o.label), h('span', { class: 'hint' }, o.ev_bb),
-        o.is_best ? h('span', { class: 'pill good' }, 'Best') : null)))),
+        o.is_best ? h('span', { class: 'pill good' }, 'Best') : null,
+        o.is_chosen ? h('span', { class: 'pill chosen-pill' }, 'Your pick') : null)))),
     plays.length ? h('ul', { class: 'facts' }, plays.map(e => h('li', {}, `${cap(e.play)} vs ${e.who.join(', ')}.`))) : null,
     more('About these numbers',
       r.loss ? p(`Cost: ${r.loss}${r.band ? ` (${r.band})` : ''}.`) : null,
@@ -451,13 +456,15 @@ function riverReveal(r) {
     r.why.map(line => p(line)),
     h('div', { class: 'river-split', 'data-river-split': '' },
       splitBar(r),
-      h('p', { class: 'reveal-line split-text' }, h('span', { class: 'split-beat-text' }, r.beat_line), ' ',
-        h('span', { class: 'split-lose-text' }, r.beaten_line))),
+      h('p', { class: 'reveal-line split-text' },
+        h('span', { class: 'split-beat-text' }, h('span', { class: 'split-key split-beat', 'aria-hidden': 'true' }), r.beat_line), ' ',
+        h('span', { class: 'split-lose-text' }, h('span', { class: 'split-key split-lose', 'aria-hidden': 'true' }), r.beaten_line))),
     r.replies.length ? h('p', { class: 'reveal-line river-reply', 'data-river-reply': '' }, r.replies[0]) : null,
     more('Every option',
       h('ul', { class: 'table-options' }, r.options.map(o => h('li', { class: o.is_chosen ? 'chosen' : '' },
         h('div', { class: 'tl-head' }, h('strong', {}, o.label),
-          o.is_best ? h('span', { class: 'pill good' }, 'Best') : o.accepted ? h('span', { class: 'pill good' }, 'Also fine') : null),
+          o.is_best ? h('span', { class: 'pill good' }, 'Best') : o.accepted ? h('span', { class: 'pill good' }, 'Also fine') : null,
+          o.is_chosen ? h('span', { class: 'pill chosen-pill' }, 'Your pick') : null),
         h('div', { class: 'hint' }, o.ev)))),
       r.replies.slice(1).map(line => p(line)),
       h('p', { class: 'hint' }, r.note)),
@@ -502,6 +509,13 @@ function equityReveal(r) {
 }
 
 function anchorReveal(r) {
+  if (r.table) {
+    return [
+      h('p', { class: 'reveal-answer' }, 'Answer: ', h('strong', {}, r.answer)),
+      p(`${r.error}.`),
+      priceTable(r.table),
+    ];
+  }
   return [
     h('p', { class: 'reveal-answer' }, 'Answer: ', h('strong', {}, r.answer)),
     p(`${r.error}.`),

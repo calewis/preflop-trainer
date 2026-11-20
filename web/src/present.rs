@@ -1020,6 +1020,13 @@ fn equity_reveal(
 }
 
 fn anchor_reveal(card: &AnchorCard, estimate_pct: f64, signed_error: f64, hit: bool) -> V {
+    let table = match card.kind {
+        AnchorKind::Price { num, den } => {
+            let (_, _, rows) = price_table_reveal(den, num);
+            price_table_json(rows)
+        }
+        AnchorKind::Matchup { .. } | AnchorKind::Preflop { .. } => V::Null,
+    };
     obj! {
         "kind": "anchor",
         "answer": format!("{:.1}%", card.answer_pct),
@@ -1027,6 +1034,7 @@ fn anchor_reveal(card: &AnchorCard, estimate_pct: f64, signed_error: f64, hit: b
         "error": signed_error_words(signed_error),
         "tolerance": card.tolerance,
         "hit": hit,
+        "table": table,
     }
 }
 
@@ -1459,26 +1467,30 @@ fn price_table_reveal(pot_before: u32, bet: u32) -> (String, String, Vec<PriceTa
     (answer, sum, rows)
 }
 
+fn price_table_json(rows: Vec<PriceTableRow>) -> V {
+    V::Arr(
+        rows.into_iter()
+            .map(|row| {
+                obj! {
+                    "bet": row.bet_vs_pot,
+                    "need": row.need,
+                    "marked": row.marked,
+                }
+            })
+            .collect(),
+    )
+}
+
 fn read_price_reveal(item: &Item, r: &poker_trainer::read_price::ReadPriceReveal) -> V {
     match &item.question {
         Question::ReadPrice(q) if matches!(q.ask, ReadPriceAsk::Number) && q.callers == 0 => {
             let (answer, sum, rows) = price_table_reveal(q.pot_before, q.bet);
-            let table: Vec<V> = rows
-                .into_iter()
-                .map(|row| {
-                    obj! {
-                        "bet": row.bet_vs_pot,
-                        "need": row.need,
-                        "marked": row.marked,
-                    }
-                })
-                .collect();
             obj! {
                 "kind": "read_price",
                 "answer": answer,
                 "sum": sum,
                 "lines": V::Arr(Vec::new()),
-                "table": table,
+                "table": price_table_json(rows),
             }
         }
         _ => obj! {
@@ -1580,6 +1592,37 @@ mod tests {
             let o = grade(&item, ans).unwrap();
             let json = outcome(&item, &o, String::new(), 1000, V::Null).into_string();
             assert!(json.contains("\"table\":null") && json.contains("\"sum\":null"), "{json}");
+        }
+    }
+
+    #[test]
+    fn anchor_price_cards_get_marked_bet_table_and_others_do_not() {
+        let deck = anchors::deck();
+        let expected_labels = [
+            "\u{00bc} pot", "\u{2153}", "\u{00bd}", "\u{2154}",
+            "\u{00be}", "1\u{00d7} pot", "1\u{00bd}\u{00d7}", "2\u{00d7}",
+        ];
+        for (idx, card) in deck.iter().enumerate() {
+            let item = Item {
+                skill: Skill::Anchor,
+                seed: idx as u64,
+                question: Question::Anchor { card: idx as u16 },
+            };
+            let o = grade(&item, "30").unwrap();
+            let json = outcome(&item, &o, String::new(), 1000, V::Null).into_string();
+            match card.kind {
+                AnchorKind::Price { .. } => {
+                    let want = format!("{{\"bet\":\"{}\",\"need\":", expected_labels[idx]);
+                    assert!(json.contains(&want), "card {} missing row {}: {json}", card.id, want);
+                    assert_eq!(json.matches("\"marked\":true").count(), 1, "card {} marked count: {json}", card.id);
+                    assert_eq!(json.matches("\"bet\":").count(), 9, "card {} should have 9 standard rows: {json}", card.id);
+                    assert!(!json.contains("(this bet)"), "card {} inserted unexpected row: {json}", card.id);
+                    assert!(json.contains("\"error\":\"You were "), "card {} missing error line: {json}", card.id);
+                }
+                AnchorKind::Matchup { .. } | AnchorKind::Preflop { .. } => {
+                    assert!(json.contains("\"table\":null"), "non-price card {} got a table: {json}", card.id);
+                }
+            }
         }
     }
 

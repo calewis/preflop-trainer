@@ -1,5 +1,5 @@
 """Full browser test suite: python3 web/test/run.py [sections...]
-Sections: river libriver limpers liblimpers samebuild phonefit hiddendrills native libgroups groups libresearch libreadprice readprice libcli research researchshots (on request only) libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card preflopspots libpreflop offline nostorage legacy screens
+Sections: river libriver limpers liblimpers samebuild phonefit hiddendrills native libgroups groups libresearch libreadprice readprice libcli research researchshots (on request only) libtable tablespots midgrade wasmclean doubletap twotabs dealing prepfail export swscope quota hiddenevent differential timing e2e baseline newskills noneleft checkup checkupquit checkuptabs checkupconflict progressnew card preflopspots libpreflop offline nostorage legacy screens redfilter
 Results go to target/webtest/results.json and screenshots to target/webtest/screens/."""
 import itertools, json, os, pathlib, random, re, shutil, subprocess, sys, time
 
@@ -1099,7 +1099,7 @@ def run_new_skills():
         page.wait("document.body.innerText.includes('Checkup saved')", 20)
         page.eval("location.hash = '#home'")
         page.wait("!!document.querySelector('.app-title')", 20)
-        # anchor.
+        # anchor: price cards show the bet-size table with that bet marked; non-price cards keep You said / tolerance.
         seed_log(page, port, "")
         open_limited_drill(page, "anchor")
         page.wait(READY, 60)
@@ -1107,7 +1107,12 @@ def run_new_skills():
         inspector.snapshot("newskill-anchor-q")
         current, kind, answer = answer_drill_item(page, True)
         reveal = page.eval("document.querySelector('.reveal').innerText")
-        check("Answer:" in reveal and "You said" in reveal, f"anchor reveal: {reveal}")
+        check("Answer:" in reveal and "Bet vs pot" in reveal and "Need" in reveal and "\u25b6" in reveal
+              and "You were" in reveal and "You said" not in reveal and "counts as correct" not in reveal,
+              f"price anchor reveal: {reveal}")
+        info = page.eval("({sw: document.documentElement.scrollWidth, sh: document.documentElement.scrollHeight, rows: document.querySelectorAll('.price-table tbody tr').length, marked: document.querySelectorAll('.price-table tr.marked').length, rbot: document.querySelector('.reveal').getBoundingClientRect().bottom, btop: document.querySelector('.action-bar').getBoundingClientRect().top})")
+        check(info["rows"] == 9 and info["marked"] == 1 and info["sw"] <= 390 and info["sh"] <= 844 and info["rbot"] <= info["btop"] + 0.5,
+              f"price anchor table fit/shape: {info}")
         inspector.snapshot("newskill-anchor-r")
         # A slow grade shows it is working, with the controls locked.
         next_drill_item(page)
@@ -1121,6 +1126,19 @@ def run_new_skills():
         must_see(page, "(document.querySelector('[data-pending]') || {}).textContent === 'Working it out...'", 3, "no pending state while grading")
         check(page.eval("[...document.querySelectorAll('.answers button')].every(b => b.disabled)"), "controls unlocked while grading")
         page.wait("!!document.querySelector('.reveal')", 30)
+        # Non-price anchor card (matchup): keeps You said / tolerance and shows no bet-size table.
+        page.eval("location.hash = '#home'")
+        wait_home(page)
+        t = int(time.time() * 1000) - 60000
+        seen_prices = "\n".join(f"{t + i}\tdrill\t\tanchor\t{i}\t1\t1\t0\t\t1500\t33" for i in range(8))
+        seed_log(page, port, LOG_COLUMNS + "\n" + seen_prices + "\n")
+        open_limited_drill(page, "anchor")
+        page.wait(READY, 60)
+        answer_drill_item(page, True)
+        reveal = page.eval("document.querySelector('.reveal').innerText")
+        check("Answer:" in reveal and "You said" in reveal and "counts as correct" in reveal and "Bet vs pot" not in reveal,
+              f"non-price anchor reveal: {reveal}")
+        check(not page.eval("!!document.querySelector('.price-table')"), "non-price anchor must not render price-table")
         check(not browser.errors, f"new skill errors: {browser.errors[:5]}")
         print("new skills ok, boards right:", boards_right)
     finally:
@@ -1622,6 +1640,8 @@ def run_table_spots():
             check(bundle["graded"] == {}, "table options must not be graded before the answer")
             if attempt == 0:
                 check(page.eval("document.querySelectorAll('.tl-street').length") >= 2, "no street timeline")
+                card_w = page.eval("Math.round(document.querySelector('.tl-head .card-small').getBoundingClientRect().width)")
+                check(card_w >= 34, f"table street cards too small unanswered: {card_w}px")
                 text = page.eval("document.querySelector('.question').innerText")
                 for needle in ("Pot", "To call", "Your seat", "Behind", "What do you do"):
                     check(needle in text, f"question lacks {needle}: {text[:300]}")
@@ -1629,6 +1649,8 @@ def run_table_spots():
                 for secret in ("best at", "verdict", "explanation", "ev_bb", "simulated"):
                     check(secret not in pre, f"the page holds '{secret}' before the answer")
                 inspector.snapshot("table-question", full=True)
+            if page.eval("document.querySelectorAll('.tl-street').length") == 4:
+                check_fit(page, f"table river question {attempt}", 390, True)
             outcomes = table_outcomes(page, bundle)
             verdict = next(iter(outcomes.values()))["reveal"]["verdict"]
             right = [c for c, o in outcomes.items() if o["correct"]]
@@ -1652,6 +1674,9 @@ def run_table_spots():
             check(row[18].isdigit(), f"no spot id logged: {row}")
             check(row[6] == ("1" if outcome["correct"] else "0") and row[8] != "", f"flags or loss: {row[6:9]}")
             check_table_reveal(page, verdict, outcome["correct"], outcome, f"{verdict} {'right' if outcome['correct'] else 'wrong'}")
+            if attempt == 0:
+                rev_card_w = page.eval("Math.round(document.querySelector('.tl-head .card-small').getBoundingClientRect().width)")
+                check(rev_card_w >= 24, f"table street cards too small after answering: {rev_card_w}px")
             needed.discard((verdict, outcome["correct"]))
             seen_rows.append(row)
             shot = f"table-reveal-{verdict}-{'right' if outcome['correct'] else 'wrong'}"
@@ -3538,7 +3563,7 @@ def run_phone_fit():
                     current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
                     stage = current["bundle"]["question"].get("stage", "")
                     where = f"{width} {skill}{(' ' + stage) if stage else ''} {i}"
-                    check_fit(page, f"{where} question", width, fits and skill != "table")
+                    check_fit(page, f"{where} question", width, fits)
                     kind, answer = pick_answer(page, current, False)
                     type_answer(page, current, kind, answer)
                     page.wait("!!document.querySelector('.reveal')", 30)
@@ -4021,6 +4046,11 @@ def run_limpers():
         srv.shutdown()
 
 
+def run_red_filter():
+    import red_audit
+    red_audit.run_section(sys.modules[__name__])
+
+
 SECTIONS = {
     "native": run_native, "wasmclean": run_wasm_clean, "doubletap": run_doubletap, "twotabs": run_twotabs,
     "libresearch": run_lib_research, "libcli": run_lib_cli, "libreadprice": run_lib_read_price, "readprice": run_read_price, "research": run_research, "researchshots": run_research_shots, "libtable": run_lib_table, "tablespots": run_table_spots, "midgrade": run_mid_grade,
@@ -4033,6 +4063,7 @@ SECTIONS = {
     "liblimpers": run_lib_limpers, "limpers": run_limpers,
     "samebuild": run_same_build, "phonefit": run_phone_fit, "hiddendrills": run_hidden_drills,
     "preflopspots": run_preflop_spots, "libpreflop": run_lib_preflop, "card": run_card, "offline": run_offline, "nostorage": run_nostorage, "legacy": run_legacy, "screens": run_screens,
+    "redfilter": run_red_filter,
 }
 
 if __name__ == "__main__":
