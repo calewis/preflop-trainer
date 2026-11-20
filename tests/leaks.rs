@@ -136,3 +136,34 @@ fn cli_check_leaks_accepts_valid_and_rejects_bad_files() {
     assert!(!bad.status.success());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn preflop_mistakes_grade_three_bet_and_four_bet_against_new_card() {
+    let updated = "#LEAKS v1\n\
+LEAK|0|preflop|leak:pf:btn:3bet_ip:AKo|2000|1|2026-11-15|s1|h1|3.0|-3.0|You folded AKo on the button facing a blind 3-bet|Gave up a call in position|players=5|hero_pos=BTN|behind=2|sit=3bet:ip|hand=AhKd|hero_act=f|expect=c\n\
+LEAK|1|preflop|leak:pf:co:3bet_oop:QQ|2000|1|2026-11-15|s1|h2|3.0|-3.0|You folded QQ in the cutoff facing a button 3-bet|Gave up a call out of position|players=5|hero_pos=CO|behind=3|sit=3bet:oop|hand=QhQd|hero_act=f|expect=c\n\
+LEAK|2|preflop|leak:pf:btn:3bet_ip:55|1500|1|2026-11-15|s1|h3|3.0|-3.0|You folded 55 on the button facing a blind 3-bet|Gave up a set-mining call in position|players=5|hero_pos=BTN|behind=2|sit=3bet:ip|hand=5h5d|hero_act=f|expect=c\n\
+LEAK|3|preflop|leak:pf:co:3bet_oop:55|1500|1|2026-11-15|s1|h4|9.0|-9.0|You called with 55 out of position facing a 3-bet|Put in 9bb out of position|players=5|hero_pos=CO|behind=3|sit=3bet:oop|hand=5h5d|hero_act=c|expect=f\n\
+LEAK|4|preflop|leak:pf:btn:3bet_ip:AQo|1500|1|2026-11-15|s1|h5|9.0|-9.0|You called with AQo facing a 3-bet|Dominated by AK and big pairs|players=5|hero_pos=BTN|behind=2|sit=3bet:ip|hand=AhQd|hero_act=c|expect=f\n\
+LEAK|5|preflop|leak:pf:btn:4bet:AKs|2000|1|2026-11-15|s1|h6|9.0|-9.0|You folded AKs facing a 4-bet|Gave up equity against a 4-bet|players=5|hero_pos=BTN|behind=2|sit=4bet|hand=AhKh|hero_act=f|expect=c\n\
+LEAK|6|preflop|leak:pf:btn:4bet:JJ|2000|1|2026-11-15|s1|h7|22.0|-22.0|You called a 4-bet with JJ|Behind the 4-bet range|players=5|hero_pos=BTN|behind=2|sit=4bet|hand=JhJd|hero_act=c|expect=f\n";
+    let lib = parse_leaks(updated).expect("valid leak file");
+    let counts = verify_leaks(&lib).expect("all 3-bet and 4-bet leaks match the new card");
+    assert_eq!(counts.preflop, 7);
+
+    // An old-rule leak claiming AKo should fold to a 3-bet is now rejected.
+    let stale_old_rule = "#LEAKS v1\n\
+LEAK|0|preflop|leak:pf:btn:3bet_ip:AKo|2000|1|2026-11-11|s1|old1|9.0|-9.0|You called with AKo facing a 3-bet|Old card folded AKo|players=5|hero_pos=BTN|behind=2|sit=3bet:ip|hand=AhKd|hero_act=c|expect=f\n";
+    let old_lib = parse_leaks(stale_old_rule).unwrap();
+    assert!(verify_leaks(&old_lib).is_err());
+
+    let mut sess = LeakSession::new(lib, &[], 17, Some(7)).preflop_only();
+    for _ in 0..7 {
+        let planned = sess.try_next_item().unwrap();
+        let entry = sess.entry_for_seed(planned.seed).unwrap().clone();
+        let item = sess.item_for(planned);
+        assert!(grade(&item, entry.expect_code()).unwrap().correct);
+        assert!(!grade(&item, entry.hero_act_code()).unwrap().correct);
+        sess.record(planned, true);
+    }
+}

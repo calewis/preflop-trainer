@@ -175,17 +175,31 @@ fn deal_preflop_hand(rng: &mut Rng, seat: Seat, situation: Situation) -> Holding
     }
 }
 
-/// Strong hands a player is tempted to continue with against a 3-bet or a 4-bet.
-const TEMPTING: &str = "TT+ AJs+ KQs AQo+";
+/// Real fold candidates against a 3-bet: dominated offsuit broadways (AQo, AJo, KQo),
+/// weaker suited hands, and pairs and suited hands that call in position but fold out of
+/// position. Subtracting the chart's continue range and intersecting with `held` leaves
+/// only plausible folds hero actually opened.
+const THREE_BET_FOLDS: &str = "22+ A5s+ KTs+ QTs+ JTs T9s 98s 87s 76s AJo+ KQo";
 
-/// Facing a 3-bet or a 4-bet only kings or aces continue, so most hands are plain folds.
-/// Deal from the hands near the line instead: a third of the time a hand that continues,
-/// otherwise a tempting hand that folds, always among the hands `held` allows.
+/// Facing a 3-bet or a 4-bet, deal a mix of 4-bets/all-ins (1 in 5, so kings or aces
+/// stay at most about one time in four), calls (2 in 5) and real folds (2 in 5), always
+/// among the hands `held` allows.
 fn close_to_the_line(rng: &mut Rng, seat: Seat, situation: Situation, held: Range) -> Range {
     let chart = chart_for(seat, situation).expect("this situation has a chart");
     let (raise, call) = chart.lines();
     let continues = raise.range.union(&call.range);
-    let wanted = if rng.chance(1, 3) { continues } else { Range::parse(TEMPTING).without(&continues) };
+    let folds = match situation {
+        Situation::FourBet => held.without(&continues),
+        _ => Range::parse(THREE_BET_FOLDS).without(&continues),
+    };
+    let roll = rng.below(5);
+    let wanted = if roll == 0 {
+        raise.range
+    } else if roll <= 2 {
+        call.range
+    } else {
+        folds
+    };
     wanted.intersect(&held)
 }
 
@@ -201,8 +215,7 @@ const SHARE_FOLDED: u64 = 28;
 const SHARE_LIMPERS: u64 = 22;
 const SHARE_RAISED: u64 = 27;
 const SHARE_CALLERS: u64 = 16;
-/// Facing a 3-bet or a 4-bet is rare: only kings or aces continue, so these spots
-/// teach one rule and would mostly be folds if dealt often.
+/// Facing a 3-bet or a 4-bet comes up less often than opening or facing one raise.
 const SHARE_THREE_BET: u64 = 5;
 // The remaining 2 percent is facing a 4-bet.
 /// In the big blind: limpers, a lone raise, callers, a 4-bet.

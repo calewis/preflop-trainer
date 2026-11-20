@@ -93,15 +93,16 @@ Hands not listed fold. The ranges are rules of thumb built for deep stacks (abou
 leaning toward standard deep-stack charts: wide opens (from about 16% of hands early to 44% on
 the button), more 3-bets and few flat calls against a lone raise, and a wide big blind defence.
 Some 3-bets are semi-bluffs (suited aces such as A5s, and suited connectors such as 76s), and
-ace-queen offsuit folds to a raise from an early or middle seat. You 3-bet, but against a 3-bet
-or a 4-bet only kings or aces continue (4-bet or all in) and everything else folds, queens and
-ace-king included.
+ace-queen offsuit folds to a raise from an early or middle seat. Facing a 3-bet, only kings and
+aces 4-bet for value (bluff 4-bets fare poorly when players call too much), while hands that play
+well deep call (more in position than out of position) and dominated offsuit broadways fold;
+facing a 4-bet, kings and aces go all in, queens and ace-king call, and the rest fold.
 Drills deal hands you could really hold: after opening, the seat's open range; after
-3-betting, the hands the chart 3-bets. Facing a 3-bet or a 4-bet, a third of the hands are
-kings or aces and the rest are tempting folds (tens or better, ace-king, ace-queen, ace-jack
-suited, king-queen suited), never trash. About a third of preflop items are folded to you,
-a fifth limpers, a quarter a lone raise and a tenth a raise with callers; 3-bets (about 4%)
-and 4-bets (about 1.5%) are rare.
+3-betting, the hands the chart 3-bets. Facing a 3-bet or a 4-bet, drills deal a mix of
+4-bets/all-ins (about one time in five), calls and real folds (dominated offsuit hands and
+weaker suited hands or pairs out of position), never trash. About a third of preflop items are
+folded to you, a fifth limpers, a quarter a lone raise and a tenth a raise with callers; 3-bets
+(about 4%) and 4-bets (about 1.5%) are rare.
 
 Attempts go to `$POKER_TRAINER_HOME/attempts.tsv` (default `~/.poker-trainer/`), an
 append-only log. Colour is used only on a terminal with `NO_COLOR` unset.
@@ -368,7 +369,7 @@ after each correct review, reset to 1 day by a miss, retired after a correct 30-
 and a retired family can come back on a new miss. Among due families the slowest relative to
 the skill's median come first. Rows logged before families existed are not reviewed.
 A generator change resets queued reviews and unfinished checkups only for the skills it changed:
-`spot`, `spot_mw` and `equity` at version 2, and `preflop` at versions 3 and 4. `table` checkups reset
+`spot`, `spot_mw` and `equity` at version 2, `preflop` at versions 3 to 7 (plus `spot`, `spot_mw`, `equity` and `chain` at version 6). `table` checkups reset
 when the spot library changes instead.
 
 Spot reveals add library-computed flip facts: the largest call that breaks even, from

@@ -2562,9 +2562,11 @@ def check_card_charts(page, inspector):
         check(page.eval(seat_group_visible) == seat_visible, f"seat tabs at situation {k}")
         check(page.eval(f"[...document.querySelectorAll('.legend li')].some(l => l.textContent.includes({json.dumps(word)}))"),
               f"legend misses {word} at situation {k}")
-        # Facing a 3-bet or a 4-bet nothing calls, so the chart shows only its raise line.
+        # Facing a 3-bet or a 4-bet the chart shows both its raise line and its call line.
         if k >= 4:
-            check(page.eval("document.querySelectorAll('.range-lines h3').length") == 1, f"empty call line shown at situation {k}")
+            check(page.eval("document.querySelectorAll('.range-lines h3').length") == 2, f"call line missing at situation {k}")
+            check(page.eval("[...document.querySelectorAll('.legend li')].some(l => l.textContent.includes('Call'))"),
+                  f"legend misses Call at situation {k}")
         inspector.snapshot(f"card-chart-{k}")
     # The callers chart adds two calls in the big blind.
     page.eval("document.querySelectorAll('.tabs')[1].children[3].click(); document.querySelectorAll('.tabs')[0].children[5].click();")

@@ -1657,6 +1657,10 @@ mod beats_me {
         assert!(stale(Skill::Spot, 5) && !due(Skill::Spot, 5));
         assert!(stale(Skill::Chain, 5) && !due(Skill::Chain, 5));
         assert!(!stale(Skill::Made, 5) && due(Skill::Made, 5));
+        // Version 7 changes only preflop's 3-bet and 4-bet charts and dealing mix.
+        assert!(stale(Skill::Preflop, 6) && !due(Skill::Preflop, 6));
+        assert!(!stale(Skill::Spot, 6) && due(Skill::Spot, 6));
+        assert!(!stale(Skill::Made, 6) && due(Skill::Made, 6));
         // Version 1 rows are only void for the generators that changed at version 2.
         assert!(!stale(Skill::Made, 1) && due(Skill::Made, 1));
         assert!(stale(Skill::Spot, 1) && !due(Skill::Spot, 1));
@@ -1704,6 +1708,7 @@ mod beats_me {
             assert_eq!(generator_changed(skill, 4, 5), skill == Skill::Preflop, "{skill:?} v4 to v5");
             let to_v6 = [Skill::Preflop, Skill::Spot, Skill::SpotMw, Skill::Equity, Skill::Chain];
             assert_eq!(generator_changed(skill, 5, 6), to_v6.contains(&skill), "{skill:?} v5 to v6");
+            assert_eq!(generator_changed(skill, 6, 7), skill == Skill::Preflop, "{skill:?} v6 to v7");
             assert!(!generator_changed(skill, GEN_VERSION, GEN_VERSION), "{skill:?}: a version is itself");
             assert!(generator_changed(skill, GEN_VERSION + 1, GEN_VERSION), "{skill:?}: an unknown version is a change");
             assert!(generator_changed(skill, GEN_VERSION, GEN_VERSION + 1));

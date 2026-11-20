@@ -1590,7 +1590,7 @@ fn card_lines(seat: Seat, situation: Situation) -> Vec<V> {
             let chart = chart_for(seat, situation).expect("these situations have a chart");
             let (raise, call) = chart.lines();
             let mut lines = vec![line(format!("{}: {}", chart.title(), chart.raise_word()), raise)];
-            // Facing a 3-bet or a 4-bet nothing calls, so there is no call line to show.
+            // Skip the call line only if a chart leaves it empty.
             if !call.text.is_empty() {
                 lines.push(line(format!("{}: call", chart.title()), call));
             }
