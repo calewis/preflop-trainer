@@ -112,6 +112,10 @@ def check_differential_coverage(commands, replies):
     def count(kind, test=lambda f: True):
         return sum(1 for f in fields if f[0] == kind and test(f))
     check(count("prepare", lambda f: f[1] == "read_price") >= 50, "differential: read_price prepares missing")
+    check(count("prepare", lambda f: f[1] == "count_pot") >= 50, "differential: count_pot prepares missing")
+    check(count("grade", lambda f: f[1] == "count_pot") >= 50, "differential: count_pot grades missing")
+    for rung in range(3):
+        check(sum(f'"kind":"count_pot","rung":{rung}' in r for r in replies) >= 5, f"differential: count_pot rung {rung} never compared")
     check(count("prepare", lambda f: f[1] == "limpers") >= 50, "differential: limpers prepares missing")
     check(count("grade", lambda f: f[1] == "limpers") >= 50, "differential: limpers grades missing")
     for rung in range(5):
@@ -243,7 +247,7 @@ def run_timing():
     try:
         page = browser.page
         boot_app(page, 8952 + PORT_SHIFT)
-        skills = ["preflop", "limpers", "nuts", "possible", "made", "beats", "outs", "price", "hit", "board_type", "anchor", "read_price"]
+        skills = ["preflop", "limpers", "nuts", "possible", "made", "beats", "outs", "price", "hit", "board_type", "anchor", "read_price", "count_pot"]
         fast = page.eval(f"({TIMING})({json.dumps(skills)}, 200)")
         slow = page.eval(f"({TIMING})(['spot'], 200)")
         mw = page.eval(f"({TIMING})(['spot_mw'], 150)")
@@ -299,6 +303,8 @@ class Inspector:
         text = self.page.eval("document.body.innerText")
         found = INTERNAL.findall(text)
         check(not found, f"internal code {found[:3]} shown in {where}")
+        q_text = self.page.eval("(document.querySelector('.question:not(.revealed)') || {}).innerText || ''")
+        check("Assume they have one of" not in q_text, f"hand-list wording in question at {where}: {q_text[:200]}")
         return text
 
     def snapshot(self, name, full=False):
@@ -379,6 +385,10 @@ def pick_answer(page, current, want_ok, probe=None):
                 return kind, code
         return kind, "none"
     if kind == "integer":
+        probe0 = probe("0")["outcome"]
+        if probe0["reveal"]["kind"] == "count_pot":
+            pot = probe0["reveal"]["pot"]
+            return kind, str(pot if want_ok else pot + 5)
         for n in range(0, 48):
             result = probe(str(n))
             if result["outcome"]["correct"] == want_ok:
@@ -579,7 +589,7 @@ def drill_session(page, inspector, want_all, max_items, keyboard=False, label_pr
 # Every skill the default drill deals except `table`, which comes too rarely to
 # promise both a right and a wrong answer. `price` and `beats` are no longer dealt.
 # `spot` and `spot_mw` are hidden for now (HIDDEN_SKILLS in src/groups.rs), so never dealt.
-ALL_SKILLS = ["preflop", "limpers", "nuts", "possible", "made", "beats_me", "read_price", "outs", "hit",
+ALL_SKILLS = ["preflop", "limpers", "nuts", "possible", "made", "beats_me", "read_price", "count_pot", "outs", "hit",
               "board_type", "equity", "anchor", "chain"]
 # The monthly checkup without the hidden drills' four items.
 MIXED_LEN = 36
@@ -1304,6 +1314,10 @@ def run_research(viewport=(390, 844), mobile=True, theme="light", port_offset=0)
         wait_home(page)
         seed_log(page, port, LOG_COLUMNS + "\n")
         open_limited_drill(page, "spot_mw")
+        mw_q = page.eval("document.querySelector('.question').innerText")
+        check("The bettor is " in mw_q and ("The caller is " in mw_q or "Caller 1 is " in mw_q)
+              and "nobody can raise." in mw_q.lower() and "Assume they have one of" not in mw_q,
+              f"multiway question wording wrong: {mw_q}")
         answer_drill_item(page, True)
         page.eval("document.querySelectorAll('.reveal details').forEach(d => { d.open = true; })")
         text = page.eval("document.querySelector('.reveal').innerText")
@@ -1536,8 +1550,14 @@ def run_research(viewport=(390, 844), mobile=True, theme="light", port_offset=0)
                 check("opponent shows" in text.lower() and bundle["format"]["type"] == "integer", f"outs stage: {text}")
             if index == 2:
                 check(bundle["format"]["type"] == "percent", f"price stage format {bundle['format']['type']}")
+                check("Pot now" in text and "To call" in text and "The pot was" not in text, f"chain price stage tiles: {text}")
+                check(page.eval("!!document.querySelector('.price-breakdown')") and bundle["question"]["breakdown"] in text,
+                      f"chain price stage breakdown missing: {text}")
             if index == 3:
                 check(any(s in text for s in ("All-in", "one more card")), f"decide stage states no assumption: {text}")
+                check("Assume they have one of" not in text, f"chain decide stage lists hands: {text}")
+                if bundle["question"].get("second"):
+                    check("The other opponent is " in text and "Nobody can raise." in text, f"chain 3-way wording: {text}")
                 check([o["code"] for o in bundle["format"]["options"]] == ["c", "f"], "decide stage asks call or fold")
             check("Your hand" not in page.eval("document.querySelector('.top-title').textContent"), "chain stages must not carry a skill label")
             seeds.append(bundle["seed"])
@@ -1559,6 +1579,19 @@ def run_research(viewport=(390, 844), mobile=True, theme="light", port_offset=0)
         check(len({int(s) & ~3 for s in seeds}) == 1, f"stages were not one hand: {seeds}")
         check(all(int(row[9]) >= 0 for row in rows_of(page)), "a stage has no time")
         check(len(rows_of(page)) == 4, f"{len(rows_of(page))} rows for 4 stages")
+        # Also verify a 3-way Whole hand decide stage uses the short opponent wording (never "Assume they have one of").
+        saw_3way_chain = page.eval("""(async () => {
+          for (let i = 0; i < 60; i++) {
+            const seed = String((i * 4) + 3);
+            const b = await __trainer.engine.call('prepare', 'chain', seed, 'new');
+            const s = b.question.second;
+            if (s) return s;
+          }
+          return '';
+        })()""")
+        check("The other opponent is " in saw_3way_chain and "Nobody can raise." in saw_3way_chain
+              and "Assume they have one of" not in saw_3way_chain,
+              f"3-way chain opponent wording: {saw_3way_chain!r}")
         page.eval("location.hash = '#home'")
         wait_home(page)
         # --- 6. Progress panels: not enough, then enough.
@@ -1868,7 +1901,7 @@ def run_lib_groups():
 
 
 GROUP_SKILLS = {
-    "preflop": {"preflop", "limpers"}, "read_price": {"read_price"}, "equity": {"equity", "anchor"}, "hands": {"chain"},
+    "preflop": {"preflop", "limpers"}, "read_price": {"read_price", "count_pot"}, "equity": {"equity", "anchor"}, "hands": {"chain"},
     "board": {"nuts", "possible", "made", "board_type", "beats_me"}, "outs": {"outs", "hit"}, "spots": {"spot", "spot_mw", "table"},
 }
 
@@ -1966,12 +1999,25 @@ def run_read_price():
                 question = current["bundle"]["question"]
                 check(question["kind"] == "read_price" and question["rung"] == rung, f"rung {rung}: {question}")
                 text = page.eval("document.querySelector('.question').innerText")
-                check("Pot before the bet" in text, f"rung {rung}: pot not labelled: {text}")
-                check(len(question["context"]) >= 1 and all(line in text for line in question["context"]), f"rung {rung}: the context lines are not shown: {text}")
+                check(all(line in text for line in question["context"]), f"rung {rung}: the context lines are not shown: {text}")
                 if rung == 4:
-                    check(question["bet"] is None and "Bet" not in text.replace("betting", "").replace("bets", ""), f"rung 4 shows a bet chip: {text}")
+                    check("Pot before the bet" in text, f"rung 4: pot not labelled: {text}")
+                    check(len(question["context"]) == 2, f"rung 4 context lines: {question['context']}")
+                    check(question["bet"] is None and question["pot_now"] is None and "Bet" not in text.replace("betting", "").replace("bets", ""), f"rung 4 shows a bet chip: {text}")
                 else:
-                    check(f"${question['bet']}" in text and question["context"][0].index("pot") < question["context"][0].index("bets"), f"rung {rung}: bet missing: {text}")
+                    check("Pot now" in text and "To call" in text, f"rung {rung}: missing Pot now / To call tiles: {text}")
+                    check(f"${question['pot_now']:,}" in text and f"${question['bet']:,}" in text, f"rung {rung}: pot_now/bet amounts missing: {text}")
+                    check(page.eval("!!document.querySelector('.price-breakdown')") and question["breakdown"] in text,
+                          f"rung {rung}: muted breakdown missing: {text}")
+                    check("The pot was" not in text, f"rung {rung}: repeating sentence still shown: {text}")
+                    if question["callers"] == 0:
+                        check("caller" not in question["breakdown"], f"rung {rung}: caller shown with 0 callers: {question['breakdown']}")
+                    elif question["callers"] == 1:
+                        check("1 caller" in question["breakdown"] and "callers" not in question["breakdown"], f"rung {rung}: singular caller: {question['breakdown']}")
+                    else:
+                        check(f"{question['callers']} callers" in question["breakdown"], f"rung {rung}: plural callers: {question['breakdown']}")
+                    if rung in (2, 3):
+                        check(len(question["context"]) == 1, f"rung {rung}: expected 1 hand/draw context line: {question['context']}")
                 check(rung != 3 or "%" not in text, f"rung 3 shows the share: {text}")
                 inspector.snapshot(f"readprice-q{rung}-{theme}", full=True)
                 answer_drill_item(page, False)
@@ -2221,7 +2267,7 @@ def run_checkup():
         counts = {}
         for r in rows:
             counts[r[3]] = counts.get(r[3], 0) + 1
-        check(counts == {"preflop": 4, "limpers": 4, "read_price": 7, "equity": 5, "anchor": 2, "chain": 4, "nuts": 1, "possible": 1, "made": 1,
+        check(counts == {"preflop": 4, "limpers": 4, "read_price": 4, "count_pot": 3, "equity": 5, "anchor": 2, "chain": 4, "nuts": 1, "possible": 1, "made": 1,
                          "board_type": 1, "beats_me": 2, "outs": 2, "hit": 2}, f"mixed checkup skills (call or fold hidden): {counts}")
         # Taken: Home stops offering it for a month.
         page.eval("location.hash = '#home'")
@@ -3523,7 +3569,7 @@ FIT_JS = """(() => {
 # Drills whose question and feedback must fit a 390 x 844 screen without scrolling.
 # Table spots run longer; there Next follows the feedback instead of covering it.
 # River questions must fit as well; River feedback usually does (see run_river).
-FIT_SKILLS = ["preflop", "limpers", "nuts", "possible", "made", "beats_me", "read_price", "outs", "hit", "board_type", "equity", "anchor", "chain"]
+FIT_SKILLS = ["preflop", "limpers", "nuts", "possible", "made", "beats_me", "read_price", "count_pot", "outs", "hit", "board_type", "equity", "anchor", "chain"]
 
 
 def check_fit(page, where, width, must_fit):
@@ -4051,10 +4097,262 @@ def run_red_filter():
     red_audit.run_section(sys.modules[__name__])
 
 
+def run_lib_count_pot():
+    done = subprocess.run(["cargo", "test", "--release", "--test", "count_pot"], capture_output=True, text=True, cwd=ROOT)
+    print(done.stdout[-3000:])
+    if done.returncode != 0:
+        print(done.stderr[-1500:])
+    check(done.returncode == 0, f"library count_pot tests failed: {done.stdout[-400:]}")
+
+
+COUNT_POT_RUNG_SEED = lambda rung, i: (rung << 60) + 1000 + i
+
+
+def count_pot_log(rung):
+    lines = [LOG_COLUMNS]
+    t = int(time.time() * 1000) - 86400000 * 5
+    for lower in range(rung):
+        for i in range(READ_PRICE_PASS_RUN):
+            t += 1000
+            lines.append(f"{t}\tdrill\t\tcount_pot\t{COUNT_POT_RUNG_SEED(lower, i)}\t6\t1\t0\t\t1500\t40")
+    return "\n".join(lines) + "\n"
+
+
+def run_count_pot():
+    """Count the pot: all 3 rungs, plain chip numbers, exact grading, tight reveal, phone fit, Progress panel."""
+    port = 9002 + PORT_SHIFT
+    srv = server.start(port)
+    browser = Browser("countpot")
+    try:
+        page = browser.page
+        boot_app(page, port, viewport=(390, 844, True))
+        inspector = Inspector(page, (390, 844), "light", False)
+        saw_long = False
+        for rung in range(3):
+            seed_log(page, port, count_pot_log(rung))
+            open_limited_drill(page, "count_pot")
+            attempts = 16 if rung == 2 else 3
+            for step in range(attempts):
+                page.wait(READY, 60)
+                current = json.loads(page.eval("JSON.stringify(__trainer.current)"))
+                q = current["bundle"]["question"]
+                check(q["kind"] == "count_pot" and q["rung"] == rung, f"count_pot rung {rung}: {q}")
+                q_text = page.eval("document.querySelector('.question').innerText")
+                check("Preflop" in q_text and "blinds 5/10" in q_text and "How big is the pot?" in q_text, f"count_pot prompt: {q_text}")
+                check("$" not in q_text and "bb" not in q_text and not re.search(r"\d[ \t]*bb\b", q_text, re.I),
+                      f"count_pot question used currency/bb: {q_text}")
+                check(page.eval("!!document.querySelector('.pot-act.you')"), "count_pot missing You highlight")
+                check(page.eval("!!document.querySelector('.keypad')"), "count_pot missing keypad")
+                voluntary = len([a for a in q["actions"] if a["kind"] != "post"])
+                check_fit(page, f"count_pot rung {rung} step {step} ({voluntary} acts) question", 390, True)
+                if rung == 2 and voluntary >= 9:
+                    saw_long = True
+                if step == 0:
+                    inspector.snapshot(f"countpot-q-{rung}")
+                want_ok = (step % 2 == 0)
+                kind, answer = pick_answer(page, current, want_ok)
+                type_answer(page, current, kind, answer)
+                page.wait("!!document.querySelector('.reveal')", 30)
+                r_text = page.eval("document.querySelector('.reveal').innerText")
+                check(re.search(r"Pot:\s*\d+", r_text), f"count_pot reveal missing Pot: {r_text}")
+                check("\u00b7" in r_text and "$" not in r_text and "bb" not in r_text and not re.search(r"\d[ \t]*bb\b", r_text, re.I),
+                      f"count_pot reveal breakdown: {r_text}")
+                check(page.eval("document.querySelectorAll('.reveal > p').length") == 3, f"count_pot reveal not tight (expected verdict + Pot + breakdown): {r_text}")
+                if want_ok:
+                    check(page.eval("document.querySelector('.reveal').classList.contains('good')"), f"exact match not marked good: {r_text}")
+                else:
+                    check(page.eval("document.querySelector('.reveal').classList.contains('bad')"), f"off-by-5 not marked bad: {r_text}")
+                check_fit(page, f"count_pot rung {rung} step {step} reveal", 390, True)
+                if step == 0:
+                    inspector.snapshot(f"countpot-r-{rung}")
+                if rung == 2 and saw_long and step >= 2:
+                    break
+                next_drill_item(page)
+            page.eval("location.hash = '#home'")
+            wait_home(page)
+        check(saw_long, "count_pot rung 2 did not test a 9-10 action hand on phone")
+        # Progress panel for Count the pot: rung 2 of 3, then top rung 3 of 3.
+        seed_log(page, port, count_pot_log(1))
+        page.eval("location.hash = '#progress'")
+        must_see(page, "!!document.querySelector('[data-count-pot]')", 20, "no count the pot panel on Progress")
+        panel = page.eval("document.querySelector('[data-count-pot]').innerText")
+        check("Rung 2 of 3" in panel and "Raises and limpers" in panel and "Points toward the next rung: 10 of 32." in panel, f"count_pot panel: {panel}")
+        seed_log(page, port, count_pot_log(2))
+        page.eval("location.hash = '#progress'")
+        must_see(page, "!!document.querySelector('[data-count-pot]')", 20, "no count the pot panel at top rung")
+        top = page.eval("document.querySelector('[data-count-pot]').innerText")
+        check("Rung 3 of 3" in top and "This is the top rung." in top and "Points" not in top, f"count_pot top panel: {top}")
+        check(not browser.errors, f"count_pot errors: {browser.errors[:5]}")
+        print("count_pot ok")
+    finally:
+        browser.close()
+        srv.shutdown()
+
+
+def run_sw_update():
+    """Installed PWA self-update: Home auto-reloads onto B, mid-drill shows banner and
+    reloads on return to Home without losing answers, manual tap works, reload-loop guard
+    prevents loops, index.html is fetched fresh, and offline start works on B."""
+    base_sw = (ROOT / "sw.js").read_text()
+    base_idx = (ROOT / "index.html").read_text()
+    ver_a, ver_b = "aaaa11112222", "bbbb33334444"
+
+    def set_build(srv, sw_ver, js_ver=None, html_tag=None):
+        js_ver = js_ver or sw_ver
+        html_tag = html_tag or sw_ver
+        srv.text_overrides["/sw.js"] = re.sub(r"const VERSION = '[^']*';", f"const VERSION = '{sw_ver}';", base_sw)
+        srv.text_overrides["/app/version.js"] = f"// Stamped by web/build.sh alongside sw.js.\nexport const VERSION = '{js_ver}';\n"
+        srv.text_overrides["/index.html"] = base_idx.replace('<html lang="en">', f'<html lang="en" data-test-build="{html_tag}">')
+
+    # 1. Home screen auto-update + fresh HTML shell + throttle + no reload loop.
+    port = 8998 + PORT_SHIFT
+    srv = server.start(port)
+    set_build(srv, ver_a)
+    browser = Browser("swupdate-home")
+    try:
+        page = browser.page
+        boot_app(page, port)
+        page.wait("!!navigator.serviceWorker.controller", 30)
+        check(page.eval("__trainer.version") == ver_a, f"expected version A, got {page.eval('__trainer.version')}")
+        build_label = page.eval("document.querySelector('[data-build-version]')?.textContent")
+        check(build_label == f"Build {ver_a}", f"home build version text: {build_label}")
+        check(page.eval("document.documentElement.dataset.testBuild") == ver_a, "initial index.html tag mismatch")
+        # Throttling skips immediate repeat checks when throttle is large.
+        page.eval("__trainer.updateThrottleMs = 180000")
+        check(page.eval("__trainer.checkForUpdate(false)") is False, "update check was not throttled")
+
+        # Publish version B; simulate returning to foreground via visibilitychange.
+        set_build(srv, ver_b)
+        page.eval("__trainer.updateThrottleMs = 0")
+        page.eval(VISIBLE_AGAIN)
+        must_see(page, f"window.__trainer && __trainer.version === {json.dumps(ver_b)} && !!document.querySelector('[data-build-version]')",
+                 30, "home screen did not auto-reload onto version B")
+        check(page.eval("document.querySelector('[data-build-version]').textContent") == f"Build {ver_b}",
+              "home screen did not display Build B after auto-reload")
+        check(page.eval("document.documentElement.dataset.testBuild") == ver_b,
+              "index.html was served stale instead of fetched fresh")
+        # Even without a new SW version, navigations fetch index.html fresh (network-first).
+        srv.text_overrides["/index.html"] = base_idx.replace('<html lang="en">', '<html lang="en" data-test-build="fresh-nav">')
+        page.send("Page.reload", {})
+        must_see(page, "!!document.querySelector('.app-title') && !!window.__trainer", 30, "reload after html change failed")
+        check(page.eval("document.documentElement.dataset.testBuild") == "fresh-nav",
+              "index.html was served stale instead of fetched fresh")
+        # No reload loop after landing on B.
+        page.eval("window.__noLoop = true; __trainer.updateThrottleMs = 0;")
+        page.eval(VISIBLE_AGAIN)
+        time.sleep(1.2)
+        check(page.eval("window.__noLoop === true"), "page reloaded in a loop after updating to B")
+        check(not browser.errors, f"swupdate home errors: {browser.errors[:5]}")
+    finally:
+        browser.close()
+        srv.shutdown()
+
+    # 2. Mid-drill update shows banner, never drops answers, reloads on Home, then works offline on B.
+    port = 8999 + PORT_SHIFT
+    srv = server.start(port)
+    set_build(srv, ver_a)
+    browser = Browser("swupdate-drill")
+    try:
+        page = browser.page
+        boot_app(page, port)
+        page.wait("!!navigator.serviceWorker.controller", 30)
+        open_limited_drill(page, "count_pot")
+        answer_drill_item(page, True)
+        wait_rows(page, 1)
+        next_drill_item(page)
+
+        # Publish B mid-drill and trigger visibility update.
+        set_build(srv, ver_b)
+        page.eval("__trainer.updateThrottleMs = 0")
+        page.eval(VISIBLE_AGAIN)
+        must_see(page, "!!document.getElementById('update-banner') && !document.getElementById('update-banner').hidden",
+                 30, "mid-drill update banner did not appear")
+        banner_text = page.eval("document.getElementById('update-banner').textContent.trim()")
+        check(banner_text == "Update ready - tap to reload", f"unexpected banner text: {banner_text!r}")
+        check(page.eval("__trainer.version") == ver_a, "page reloaded mid-drill instead of waiting")
+
+        # Keep answering: second answer logs cleanly, drill ends to summary, then Home triggers reload to B.
+        answer_drill_item(page, True)
+        wait_rows(page, 2)
+        page.eval("document.querySelector('.top-bar button.back').click()")
+        page.wait("!!document.querySelector('.big-score')", 20)
+        check(page.eval("__trainer.version") == ver_a, "reloaded before returning to Home from summary")
+        click(page, ".action-bar .btn")
+        must_see(page, f"window.__trainer && __trainer.version === {json.dumps(ver_b)} && !!document.querySelector('.app-title')",
+                 30, "returning to Home after drill did not reload onto version B")
+        check(len(rows_of(page)) == 2, f"answers lost across drill update reload: {len(rows_of(page))}")
+        check(page.eval("document.getElementById('update-banner').hidden"), "update banner stayed visible after updating to B")
+
+        # Offline start still works on version B.
+        time.sleep(0.4)
+        srv.shutdown()
+        srv.server_close()
+        page.send("Page.reload", {})
+        must_see(page, f"window.__trainer && __trainer.version === {json.dumps(ver_b)} && !!document.querySelector('.app-title')",
+                 30, "offline reload failed after updating to B")
+        start_drill(page)
+        check(page.eval("!!document.querySelector('.question')"), "could not start drill offline on version B")
+        check(not browser.errors, f"swupdate drill/offline errors: {browser.errors[:5]}")
+    finally:
+        browser.close()
+
+    # 3. Tapping the mid-drill banner saves answers and reloads onto B.
+    port = 9000 + PORT_SHIFT
+    srv = server.start(port)
+    set_build(srv, ver_a)
+    browser = Browser("swupdate-tap")
+    try:
+        page = browser.page
+        boot_app(page, port)
+        page.wait("!!navigator.serviceWorker.controller", 30)
+        open_limited_drill(page, "made")
+        answer_drill_item(page, True)
+        wait_rows(page, 1)
+        next_drill_item(page)
+        set_build(srv, ver_b)
+        page.eval("__trainer.updateThrottleMs = 0")
+        page.eval(VISIBLE_AGAIN)
+        must_see(page, "!document.getElementById('update-banner').hidden", 30, "banner did not appear for tap test")
+        click(page, "#update-banner")
+        must_see(page, f"window.__trainer && __trainer.version === {json.dumps(ver_b)} && !!document.querySelector('.app-title')",
+                 30, "tapping update banner did not reload onto version B")
+        check(len(rows_of(page)) == 1, f"tapping update banner lost logged answer: {len(rows_of(page))}")
+        check(not browser.errors, f"swupdate tap errors: {browser.errors[:5]}")
+    finally:
+        browser.close()
+        srv.shutdown()
+
+    # 4. Reload-loop guard: if sw.js is B while app/version.js stays A, reload at most once.
+    port = 9001 + PORT_SHIFT
+    srv = server.start(port)
+    set_build(srv, ver_a)
+    browser = Browser("swupdate-loop")
+    try:
+        page = browser.page
+        boot_app(page, port)
+        page.wait("!!navigator.serviceWorker.controller", 30)
+        set_build(srv, sw_ver=ver_b, js_ver=ver_a, html_tag=ver_a)
+        page.eval("__trainer.updateThrottleMs = 0")
+        page.eval(VISIBLE_AGAIN)
+        must_see(page, f"sessionStorage.getItem('poker-trainer.reloaded-for') === {json.dumps(ver_b)} && !!window.__trainer",
+                 30, "first reload did not set the session loop guard")
+        page.eval("window.__stayedAfterGuard = true; __trainer.updateThrottleMs = 0;")
+        page.eval(VISIBLE_AGAIN)
+        time.sleep(1.5)
+        check(page.eval("window.__stayedAfterGuard === true"), "reload-loop guard failed: page reloaded a second time")
+        check(not browser.errors, f"swupdate loop errors: {browser.errors[:5]}")
+        print("sw update ok")
+    finally:
+        browser.close()
+        srv.shutdown()
+
+
 SECTIONS = {
     "native": run_native, "wasmclean": run_wasm_clean, "doubletap": run_doubletap, "twotabs": run_twotabs,
-    "libresearch": run_lib_research, "libcli": run_lib_cli, "libreadprice": run_lib_read_price, "readprice": run_read_price, "research": run_research, "researchshots": run_research_shots, "libtable": run_lib_table, "tablespots": run_table_spots, "midgrade": run_mid_grade,
-    "dealing": run_dealing, "prepfail": run_prep_failure, "export": run_export, "swscope": run_sw_scope,
+    "libresearch": run_lib_research, "libcli": run_lib_cli, "libreadprice": run_lib_read_price, "readprice": run_read_price,
+    "libcountpot": run_lib_count_pot, "countpot": run_count_pot,
+    "research": run_research, "researchshots": run_research_shots, "libtable": run_lib_table, "tablespots": run_table_spots, "midgrade": run_mid_grade,
+    "dealing": run_dealing, "prepfail": run_prep_failure, "export": run_export, "swscope": run_sw_scope, "swupdate": run_sw_update,
     "quota": run_quota, "hiddenevent": run_hidden_event,
     "differential": run_differential, "timing": run_timing, "e2e": run_e2e, "baseline": run_baseline,
     "newskills": run_new_skills, "noneleft": run_none_left, "checkup": run_checkup, "checkupquit": run_checkup_quit,

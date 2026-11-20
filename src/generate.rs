@@ -7,6 +7,7 @@ use crate::cards::{holding_mask, mask_of, unseen_holdings, Card, Holding, ACE};
 use crate::classes::{
     is_flush_draw, is_oesd, made_class, matches_opp_class, mix_combos, rank_of, worth_a_decision, MadeClass, OppClass, OppMix, PlayerType,
 };
+use crate::count_pot::gen_count_pot;
 use crate::equity::{equity_with_cards_to_come, sampled, Equity};
 use crate::equity_skill::EQUITY_BAND_START;
 use crate::grade::{beats_analysis, chain_equity, equity_analysis, nuts_analysis, outs_analysis, BeatsBucket};
@@ -131,6 +132,7 @@ pub fn generate(skill: Skill, seed: u64) -> Item {
         Skill::ReadPrice => Question::ReadPrice(gen_read_price(&mut rng, seed)),
         Skill::River => Question::River(crate::river::question_for_seed(seed)),
         Skill::Limpers => Question::Limpers(gen_limpers(&mut rng)),
+        Skill::CountPot => Question::CountPot(gen_count_pot(&mut rng, seed)),
     };
     Item { skill, seed, question }
 }

@@ -7,10 +7,11 @@ use poker_trainer::answer::{answer_format, AnswerFormat, AnswerOption};
 use poker_trainer::board_type::{BoardCategory, RankPattern, SuitPattern, BOARD_TYPE_MISS_MS, BOARD_TYPE_TARGET_MS};
 use poker_trainer::cards::{Card, Holding};
 use poker_trainer::checkup::{CheckupKind, CheckupMetric, CheckupScore, RepeatAgreement};
+use poker_trainer::count_pot::{self, CountPotQuestion};
 use poker_trainer::equity_skill::{BiasBucket, EquityBand};
 use poker_trainer::eval::HandRank;
 use poker_trainer::beats_me::{mix_method, prompt_text, ways_method, Standing};
-use poker_trainer::grade::{any_of_suit_text, AheadKind, BeatsMeReveal, EquityAnalysis, EvBand, FlipFacts, Outcome, Reveal, BEATS_RANDOM_NOTE};
+use poker_trainer::grade::{any_of_suit_text, pot_with_bet, AheadKind, BeatsMeReveal, EquityAnalysis, EvBand, FlipFacts, Outcome, Reveal, BEATS_RANDOM_NOTE};
 use poker_trainer::item::{
     BeatsMeAsk, BeatsMeQuestion,
     ChainHand, ChainQuestion, ChainStage, EquityOpponents, EquityQuestion, HitStreet, Item, OpponentLabel, Question,
@@ -48,6 +49,7 @@ pub fn skill_title(skill: Skill) -> &'static str {
         Skill::ReadPrice => "Read the price",
         Skill::River => "River",
         Skill::Limpers => "Limpers",
+        Skill::CountPot => "Count the pot",
     }
 }
 
@@ -163,8 +165,10 @@ pub fn question(q: &Question) -> V {
         Question::Price { pot_before, bet, callers } => obj! {
             "kind": "price",
             "pot_before": *pot_before,
+            "pot_now": pot_with_bet(*pot_before, *bet, *callers),
             "bet": *bet,
             "callers": *callers,
+            "breakdown": price_breakdown(*pot_before, *bet, *callers),
         },
         Question::Hit { outs, street, both } => obj! {
             "kind": "hit",
@@ -184,6 +188,7 @@ pub fn question(q: &Question) -> V {
         Question::Table(q) => table_question(q),
         Question::River(q) => river_question(q),
         Question::Limpers(q) => limpers_question(q),
+        Question::CountPot(q) => count_pot_question(q),
         Question::Chain(q) => chain_question(q),
     }
 }
@@ -296,8 +301,10 @@ fn chain_question(q: &ChainQuestion) -> V {
         ChainStage::Outs => add("villain", holding(&h.villain)),
         ChainStage::Price => {
             add("pot_before", V::from(h.pot_before));
+            add("pot_now", V::from(h.pot()));
             add("bet", V::from(h.bet));
             add("callers", V::from(h.callers()));
+            add("breakdown", V::from(price_breakdown(h.pot_before, h.bet, h.callers())));
         }
         ChainStage::Decide => {
             add("villain", holding(&h.villain));
@@ -467,17 +474,58 @@ fn beats_me_question(q: &BeatsMeQuestion) -> V {
     }
 }
 
+fn price_breakdown(pot_before: u32, bet: u32, callers: u32) -> String {
+    let base = format!(
+        "${} before \u{00b7} bet ${}",
+        with_commas(u64::from(pot_before)),
+        with_commas(u64::from(bet)),
+    );
+    match callers {
+        0 => base,
+        1 => format!("{base} \u{00b7} 1 caller"),
+        n => format!("{base} \u{00b7} {n} callers"),
+    }
+}
+
 fn read_price_question(q: &ReadPriceQuestion) -> V {
     let set_price = matches!(q.ask, ReadPriceAsk::SetPrice { .. });
-    let context: Vec<V> = read_price::context_lines(q).into_iter().map(V::from).collect();
+    let all_context = read_price::context_lines(q);
+    let context: Vec<V> = if set_price {
+        all_context.into_iter().map(V::from).collect()
+    } else {
+        all_context.into_iter().skip(1).map(V::from).collect()
+    };
     obj! {
         "kind": "read_price",
         "rung": u32::from(q.rung()),
         "pot_before": q.pot_before,
+        "pot_now": (!set_price).then(|| pot_with_bet(q.pot_before, q.bet, q.callers)),
         "bet": (!set_price).then_some(q.bet),
         "callers": q.callers,
+        "breakdown": (!set_price).then(|| price_breakdown(q.pot_before, q.bet, q.callers)),
         "context": context,
         "prompt": read_price::prompt_text(q),
+    }
+}
+
+fn count_pot_question(q: &CountPotQuestion) -> V {
+    let actions: Vec<V> = q
+        .actions
+        .iter()
+        .map(|&a| {
+            obj! {
+                "seat": count_pot::seat_label(a.seat, q.hero),
+                "hero": a.seat == q.hero,
+                "kind": a.kind.code(),
+                "text": count_pot::action_text(a, q.hero),
+            }
+        })
+        .collect();
+    obj! {
+        "kind": "count_pot",
+        "rung": u32::from(q.rung),
+        "players": q.players,
+        "actions": actions,
     }
 }
 
@@ -853,6 +901,11 @@ fn reveal(item: &Item, o: &Outcome, response_ms: u32) -> V {
         Reveal::Table(graded) => table_reveal(graded),
         Reveal::River(graded) => river_reveal(graded),
         Reveal::Limpers(graded) => limpers_reveal(graded),
+        Reveal::CountPot { pot, breakdown } => obj! {
+            "kind": "count_pot",
+            "pot": *pot,
+            "breakdown": breakdown.as_str(),
+        },
         Reveal::BeatsMe(reveal) => beats_me_reveal(reveal),
         Reveal::ReadPrice(r) => read_price_reveal(item, r),
         Reveal::Equity { analysis, reason, choice, close, estimate_pct, signed_error, band, hit } => {
@@ -1640,5 +1693,51 @@ mod tests {
         let encoded = spot_question(&q).into_string();
         assert!(encoded.contains("The bettor is a tight player.") && encoded.contains("Caller 1 is") && encoded.contains("Caller 2 is"), "{encoded}");
         assert!(!encoded.contains("Opponent "), "{encoded}");
+    }
+
+    #[test]
+    fn price_questions_expose_pot_now_and_breakdown_without_repeating_sentence() {
+        let with_caller = ReadPriceQuestion { pot_before: 480, bet: 960, callers: 1, ask: ReadPriceAsk::Number };
+        let encoded = read_price_question(&with_caller).into_string();
+        assert!(encoded.contains("\"pot_now\":2400"), "{encoded}");
+        assert!(encoded.contains("\"bet\":960"), "{encoded}");
+        assert!(encoded.contains("\"breakdown\":\"$480 before \u{00b7} bet $960 \u{00b7} 1 caller\""), "{encoded}");
+        assert!(encoded.contains("\"context\":[]"), "{encoded}");
+
+        let no_caller = ReadPriceQuestion { pot_before: 1000, bet: 500, callers: 0, ask: ReadPriceAsk::Number };
+        let encoded_no = read_price_question(&no_caller).into_string();
+        assert!(encoded_no.contains("\"pot_now\":1500"), "{encoded_no}");
+        assert!(encoded_no.contains("\"breakdown\":\"$1,000 before \u{00b7} bet $500\""), "{encoded_no}");
+        assert!(!price_breakdown(1000, 500, 0).contains("caller"), "{encoded_no}");
+
+        let two_callers = Question::Price { pot_before: 100, bet: 50, callers: 2 };
+        let encoded_two = question(&two_callers).into_string();
+        assert!(encoded_two.contains("\"pot_now\":250"), "{encoded_two}");
+        assert!(encoded_two.contains("\"breakdown\":\"$100 before \u{00b7} bet $50 \u{00b7} 2 callers\""), "{encoded_two}");
+
+        let set_price = ReadPriceQuestion {
+            pot_before: 28,
+            bet: 0,
+            callers: 0,
+            ask: ReadPriceAsk::SetPrice { kind: DrawKind::Flush, options: [4, 11, 13, 18] },
+        };
+        let encoded_set = read_price_question(&set_price).into_string();
+        assert!(encoded_set.contains("\"pot_now\":null") && encoded_set.contains("\"breakdown\":null"), "{encoded_set}");
+        assert!(encoded_set.contains("You are betting into a pot of $28"), "{encoded_set}");
+    }
+
+    #[test]
+    fn count_pot_question_and_reveal_use_plain_chip_numbers() {
+        let item = poker_trainer::generate::generate(Skill::CountPot, 42);
+        let q_json = question(&item.question).into_string();
+        assert!(q_json.contains("\"kind\":\"count_pot\"") && q_json.contains("\"actions\":["), "{q_json}");
+        assert!(!q_json.contains('$') && !q_json.contains("bb"), "{q_json}");
+        let Question::CountPot(q) = &item.question else { panic!() };
+        let pot = count_pot::pot_summary(q).pot;
+        let o = grade(&item, &pot.to_string()).unwrap();
+        assert!(o.correct);
+        let r_json = outcome(&item, &o, String::new(), 1000, V::Null).into_string();
+        assert!(r_json.contains(&format!("\"pot\":{pot}")) && r_json.contains("\"breakdown\":\""), "{r_json}");
+        assert!(!r_json.contains('$') && !r_json.contains("bb"), "{r_json}");
     }
 }

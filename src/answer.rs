@@ -2,6 +2,7 @@
 
 use crate::beats_me::{BeatKind, MixBand};
 use crate::classes::MadeClass;
+use crate::count_pot::MAX_COUNT_POT_ANSWER;
 use crate::equity_skill::EquityBand;
 use crate::item::{BeatsMeAsk, BeatsMeQuestion, ChainQuestion, ChainStage, Question, ReadPriceAsk, ReadPriceQuestion};
 use crate::limpers::{LimperSeat, LimpersQuestion};
@@ -157,5 +158,6 @@ pub fn answer_format(question: &Question) -> AnswerFormat {
         Question::River(q) => AnswerFormat::Choice(q.options.clone()),
         Question::BeatsMe(q) => beats_me_format(q),
         Question::ReadPrice(q) => read_price_format(q),
+        Question::CountPot(_) => AnswerFormat::Integer { min: 0, max: MAX_COUNT_POT_ANSWER },
     }
 }

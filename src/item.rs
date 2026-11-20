@@ -3,6 +3,7 @@
 use crate::board_type::BoardCategory;
 use crate::cards::{Card, Holding};
 use crate::classes::{OppClass, OppMix, PlayerType};
+use crate::count_pot::CountPotQuestion;
 use crate::limpers::LimpersQuestion;
 use crate::preflop::{Seat, Situation};
 use crate::read_price::DrawKind;
@@ -111,6 +112,22 @@ pub const fn read_price_seed_with_rung(seed: u64, rung: u8) -> u64 {
     (seed & !READ_PRICE_RUNG_MASK) | ((rung as u64) << READ_PRICE_RUNG_SHIFT)
 }
 
+/// How many rungs the [`Skill::CountPot`] ladder has.
+pub const COUNT_POT_RUNGS: u8 = 3;
+const COUNT_POT_RUNG_SHIFT: u32 = 60;
+const COUNT_POT_RUNG_MASK: u64 = 0b11 << COUNT_POT_RUNG_SHIFT;
+
+/// The rung a `count_pot` seed asks for, carried in its bits like `read_price`.
+/// Two bits hold four values and there are three rungs, so the extra value wraps.
+pub const fn count_pot_rung_of_seed(seed: u64) -> u8 {
+    ((seed & COUNT_POT_RUNG_MASK) >> COUNT_POT_RUNG_SHIFT) as u8 % COUNT_POT_RUNGS
+}
+
+/// `seed` with its `count_pot` rung set to `rung`.
+pub const fn count_pot_seed_with_rung(seed: u64, rung: u8) -> u64 {
+    (seed & !COUNT_POT_RUNG_MASK) | ((rung as u64) << COUNT_POT_RUNG_SHIFT)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Skill {
     Preflop,
@@ -133,10 +150,11 @@ pub enum Skill {
     ReadPrice,
     River,
     Limpers,
+    CountPot,
 }
 
 impl Skill {
-    pub const ALL: [Skill; 19] = [
+    pub const ALL: [Skill; 20] = [
         Skill::Preflop,
         Skill::Nuts,
         Skill::Possible,
@@ -156,6 +174,7 @@ impl Skill {
         Skill::ReadPrice,
         Skill::River,
         Skill::Limpers,
+        Skill::CountPot,
     ];
 
     pub fn name(self) -> &'static str {
@@ -179,6 +198,7 @@ impl Skill {
             Skill::ReadPrice => "read_price",
             Skill::River => "river",
             Skill::Limpers => "limpers",
+            Skill::CountPot => "count_pot",
         }
     }
 
@@ -541,6 +561,8 @@ pub enum Question {
     River(RiverQuestion),
     /// Facing one or more limpers, graded from Q7's limper ranges.
     Limpers(LimpersQuestion),
+    /// Preflop pot-counting action sequence in 5/10 chips.
+    CountPot(CountPotQuestion),
 }
 
 impl Question {
@@ -572,7 +594,7 @@ impl Question {
                 board: board(b),
                 villain: holding(villain),
             },
-            Question::Price { .. } | Question::Hit { .. } | Question::Anchor { .. } | Question::ReadPrice(_) => self.clone(),
+            Question::Price { .. } | Question::Hit { .. } | Question::Anchor { .. } | Question::ReadPrice(_) | Question::CountPot(_) => self.clone(),
             Question::Equity(q) => Question::Equity(EquityQuestion {
                 hero: holding(&q.hero),
                 board: board(&q.board),

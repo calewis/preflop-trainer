@@ -1780,7 +1780,7 @@ fn correct_answer(item: &Item) -> String {
         Skill::Limpers => "c",
         Skill::Equity | Skill::Anchor => "50",
         Skill::BoardType => "rp",
-        Skill::Table | Skill::Chain | Skill::BeatsMe | Skill::ReadPrice | Skill::River => "fold",
+        Skill::Table | Skill::Chain | Skill::BeatsMe | Skill::ReadPrice | Skill::River | Skill::CountPot => "fold",
     };
     let reveal = match &item.question {
         // Two ranks may name no unseen holding, so ask a generic exact holding.
@@ -1906,7 +1906,7 @@ fn reveal_key(skill: Skill) -> &'static str {
         Skill::Spot | Skill::SpotMw => "f",
         Skill::Equity | Skill::Anchor => "50",
         Skill::BoardType => "rp",
-        Skill::Table | Skill::Chain | Skill::BeatsMe | Skill::ReadPrice | Skill::River => "fold",
+        Skill::Table | Skill::Chain | Skill::BeatsMe | Skill::ReadPrice | Skill::River | Skill::CountPot => "fold",
     }
 }
 

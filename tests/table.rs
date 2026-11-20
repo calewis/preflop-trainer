@@ -806,7 +806,7 @@ fn table_is_dealt_lightly_in_spots_and_does_not_disturb_the_baseline_steps() {
     assert!(weight_in_group(Skill::Table) < weight_in_group(Skill::Spot));
     assert_eq!(baseline_step(Skill::Table), None);
     assert_eq!(Skill::Table as u64, 13, "added last so existing seeds don't shift");
-    assert_eq!(Skill::ALL.last(), Some(&Skill::Limpers), "new skills go last");
+    assert_eq!(Skill::ALL.last(), Some(&Skill::CountPot), "new skills go last");
     assert_eq!(Skill::Chain as u64, 14);
     assert!(!skill_stats(Skill::Table, &forty(5.0)).passed);
     let log = vec![baseline_row(1, "b01", Skill::Nuts), baseline_row(1, "b02", Skill::Price), baseline_row(1, "b03", Skill::Spot)];

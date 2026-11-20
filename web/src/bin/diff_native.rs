@@ -8,9 +8,9 @@ use std::time::Instant;
 
 use trainer_web::dispatch;
 
-const SKILLS: [&str; 18] = [
+const SKILLS: [&str; 19] = [
     "preflop", "limpers", "nuts", "possible", "made", "beats", "outs", "price", "hit", "spot", "spot_mw",
-    "board_type", "equity", "anchor", "table", "chain", "beats_me", "read_price",
+    "board_type", "equity", "anchor", "table", "chain", "beats_me", "read_price", "count_pot",
 ];
 /// Answers tried for items that aren't simple choices.
 const FREE_ANSWERS: [&str; 18] = [
@@ -20,6 +20,8 @@ const FREE_ANSWERS: [&str; 18] = [
 const BEATS_ME_ANSWERS: [&str; 11] = ["none", "a", "ab", "abcd", "pk", "ptfh", "6", "3", "16", "e", "b"];
 /// Answers tried on `read_price`: every rung's codes, some numbers, some junk.
 const READ_PRICE_ANSWERS: [&str; 13] = ["c", "f", "e", "l", "a", "b", "d", "20", "33.3", "0", "100", "zzz", "cf"];
+/// Answers tried on `count_pot`: valid chip counts, out-of-range, and junk.
+const COUNT_POT_ANSWERS: [&str; 7] = ["15", "40", "135", "185", "400", "9999", "zzz"];
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -33,6 +35,7 @@ fn main() {
     exact_equity_drills(&mut out);
     origins(&mut out);
     read_price_session(&mut out);
+    count_pot_session(&mut out);
     chain_session(&mut out);
     retried_session(&mut out);
     start_over_notes(&mut out);
@@ -76,7 +79,7 @@ impl Out {
 }
 
 fn is_free_form(skill: &str) -> bool {
-    matches!(skill, "nuts" | "possible" | "outs" | "price" | "hit" | "equity" | "anchor" | "board_type" | "chain" | "beats_me" | "read_price")
+    matches!(skill, "nuts" | "possible" | "outs" | "price" | "hit" | "equity" | "anchor" | "board_type" | "chain" | "beats_me" | "read_price" | "count_pot")
 }
 
 /// Answers for one skill: `board_type` tries its codes at target, slow and too-slow
@@ -91,6 +94,7 @@ fn answers_for(skill: &str) -> Vec<(&'static str, &'static str)> {
         "chain" => ["hc", "top", "2p", "4", "9", "25", "33", "c", "f", "zzz"].into_iter().map(|a| (a, "0")).collect(),
         "beats_me" => BEATS_ME_ANSWERS.iter().map(|&a| (a, "0")).collect(),
         "read_price" => READ_PRICE_ANSWERS.iter().map(|&a| (a, "0")).collect(),
+        "count_pot" => COUNT_POT_ANSWERS.iter().map(|&a| (a, "0")).collect(),
         _ => FREE_ANSWERS.iter().map(|&a| (a, "0")).collect(),
     }
 }
@@ -103,6 +107,7 @@ fn drills(out: &mut Out, count: u64) {
             let rung_bits = match skill {
                 "beats_me" => (i % 4) << 60,
                 "read_price" => (i % 5) << 60,
+                "count_pot" => (i % 3) << 60,
                 _ => 0,
             };
             let seed = (rung_bits + i * 2_654_435_761 + 17).to_string();
@@ -184,6 +189,7 @@ fn scripted_answer(skill: &str) -> &'static str {
         "board_type" => "td",
         "chain" => "c",
         "read_price" => "c",
+        "count_pot" => "40",
         _ => "",
     }
 }
@@ -379,6 +385,25 @@ fn read_price_session(out: &mut Out) {
         out.call(&["check_commit", &template, &(3_000_000 + slot.parse::<u64>().unwrap()).to_string(), "1500"]);
     }
     out.call(&["check_info", "read_price"]);
+}
+
+/// A `count_pot`-only session and checkup, through the bridge.
+fn count_pot_session(out: &mut Out) {
+    out.call(&["load", ""]);
+    out.call(&["session_open", "5152", "1000000", "count_pot"]);
+    out.call(&["session_start", "15"]);
+    for step in 0..12u64 {
+        let next = out.call(&["session_next", &(step * 1000).to_string()]);
+        let (Some(skill), Some(seed)) = (field(&next, "skill"), field(&next, "seed")) else { break };
+        let (skill, seed) = (skill.to_string(), seed.to_string());
+        out.call(&["session_peek", "0"]);
+        let reply = out.call(&["grade", &skill, &seed, "40", "1500"]);
+        let Some(template) = first_template(&reply) else { break };
+        out.call(&["commit", &template, &(2_000_000 + step).to_string(), "1500"]);
+    }
+    out.call(&["session_summary"]);
+    out.call(&["progress", "2100000"]);
+    out.call(&["export"]);
 }
 
 /// The table checkup start screen: no form in progress, form 4 in progress, form 5 in progress.

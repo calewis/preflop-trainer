@@ -121,7 +121,8 @@ fn existing_skills_keep_their_positions_and_the_generator_version() {
     assert_eq!(Skill::ReadPrice as u64, 16);
     assert_eq!(Skill::River as u64, 17, "river came after read_price");
     assert_eq!(Skill::Limpers as u64, 18, "limpers came after river");
-    assert_eq!(Skill::ALL.last(), Some(&Skill::Limpers));
+    assert_eq!(Skill::CountPot as u64, 19, "count_pot came after limpers");
+    assert_eq!(Skill::ALL.last(), Some(&Skill::CountPot));
 }
 
 #[test]
@@ -774,8 +775,9 @@ fn checkups_take_eight_of_each_rung_from_held_out_seeds() {
 #[test]
 fn it_is_dealt_from_day_one_as_its_own_group_and_asks_confidence() {
     assert_eq!(group_of(Skill::ReadPrice), Some(Group::ReadPrice));
-    assert_eq!(Group::ReadPrice.skills(), vec![Skill::ReadPrice]);
+    assert_eq!(Group::ReadPrice.skills(), vec![Skill::ReadPrice, Skill::CountPot]);
     assert!(mixed_skills().contains(&Skill::ReadPrice));
+    assert!(mixed_skills().contains(&Skill::CountPot));
     assert!(asks_confidence(Skill::ReadPrice));
     assert_eq!(Skill::from_name("read_price"), Some(Skill::ReadPrice));
 }
@@ -825,7 +827,7 @@ fn reflection_is_offered_on_a_missed_decision_with_true_cues() {
     assert!(seen > 300);
 }
 
-/// (read_price share, preflop share) over many default drills, in percent.
+/// (read_price group share, preflop share) over many default drills, in percent.
 fn default_shares(sessions: u64, items: u64, miss_one_in: u64) -> (f64, f64) {
     let (mut read_price, mut preflop, mut total) = (0u64, 0u64, 0u64);
     for seed in 0..sessions {
@@ -833,7 +835,7 @@ fn default_shares(sessions: u64, items: u64, miss_one_in: u64) -> (f64, f64) {
         let mut misses = Rng::new(seed);
         for _ in 0..items {
             let planned = session.try_next_item().expect("always an item");
-            read_price += u64::from(planned.skill == Skill::ReadPrice);
+            read_price += u64::from(poker_trainer::groups::group_of(planned.skill) == Some(poker_trainer::groups::Group::ReadPrice));
             preflop += u64::from(poker_trainer::groups::group_of(planned.skill) == Some(poker_trainer::groups::Group::Preflop));
             total += 1;
             let ok = miss_one_in == 0 || !misses.chance(1, miss_one_in);

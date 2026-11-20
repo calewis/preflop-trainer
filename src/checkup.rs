@@ -11,7 +11,7 @@ use crate::anchors;
 use crate::board_type::{seed_with_category, BoardCategory};
 use crate::generate::generate;
 use crate::groups::{group_of, is_dealt, Group};
-use crate::item::{beats_me_seed_with_rung, chain_seed_for_stage, equity_seed_with_rung, generator_changed, read_price_seed_with_rung, ChainStage, BEATS_ME_RUNGS, GEN_VERSION, Item, Question, Skill, HELD_OUT_BIT, READ_PRICE_RUNGS};
+use crate::item::{beats_me_seed_with_rung, chain_seed_for_stage, count_pot_seed_with_rung, equity_seed_with_rung, generator_changed, read_price_seed_with_rung, ChainStage, BEATS_ME_RUNGS, COUNT_POT_RUNGS, GEN_VERSION, Item, Question, Skill, HELD_OUT_BIT, READ_PRICE_RUNGS};
 use crate::log::{Attempt, CheckRef, ItemRef, Mode};
 use crate::schedule::DAY_MS;
 use crate::progress::{effective_pass_mark, equity_window_is_numeric, meets_mark, window_metrics, PassMark, WindowMetrics};
@@ -47,7 +47,28 @@ pub const fn is_mixed_form(form: u32) -> bool {
 /// out: its held-out spots are walked by its own forms. Drills in
 /// [`crate::groups::HIDDEN_SKILLS`] are dropped from the plan, leaving the rest
 /// as they were, so the checkup is [`MIXED_CHECKUP_LEN`] long.
-pub const MIXED_CHECKUP_MIX: [(Skill, usize); 15] = [
+pub const MIXED_CHECKUP_MIX: [(Skill, usize); 16] = [
+    (Skill::Preflop, 4),
+    (Skill::Limpers, 4),
+    (Skill::ReadPrice, 4),
+    (Skill::CountPot, 3),
+    (Skill::Equity, 5),
+    (Skill::Anchor, 2),
+    (Skill::Chain, 4),
+    (Skill::Nuts, 1),
+    (Skill::Possible, 1),
+    (Skill::Made, 1),
+    (Skill::BoardType, 1),
+    (Skill::BeatsMe, 2),
+    (Skill::Outs, 2),
+    (Skill::Hit, 2),
+    (Skill::Spot, 2),
+    (Skill::SpotMw, 2),
+];
+
+/// The older mixed checkup composition before `count_pot` joined the read-price group,
+/// kept so completed runs from earlier logs still load and score.
+const PRE_COUNT_POT_MIX: [(Skill, usize); 15] = [
     (Skill::Preflop, 4),
     (Skill::Limpers, 4),
     (Skill::ReadPrice, 7),
@@ -181,6 +202,7 @@ fn original_seeds(skill: Skill, form: u32, rng: &mut Rng) -> Vec<u64> {
                 Skill::BeatsMe => beats_me_seed_with_rung(seed, (i % usize::from(BEATS_ME_RUNGS)) as u8),
                 // Eight items per rung.
                 Skill::ReadPrice => read_price_seed_with_rung(seed, (i % usize::from(READ_PRICE_RUNGS)) as u8),
+                Skill::CountPot => count_pot_seed_with_rung(seed, (i % usize::from(COUNT_POT_RUNGS)) as u8),
                 Skill::BoardType => seed_with_category(seed, BoardCategory::ALL[i % BoardCategory::ALL.len()]),
                 Skill::Anchor => anchors::seed_with_card(seed, i % deck_len),
                 // A fixed robust and close mix, walking the reserved spots form by form.
@@ -336,6 +358,7 @@ fn mixed_plan_from_mix(form: u32, mix: &[(Skill, usize)]) -> CheckupPlan {
                 // The upper rungs first: the lowest ones are practice steps.
                 Skill::BeatsMe => beats_me_seed_with_rung(seed, top_down(i, BEATS_ME_RUNGS)),
                 Skill::ReadPrice => read_price_seed_with_rung(seed, top_down(i, READ_PRICE_RUNGS)),
+                Skill::CountPot => count_pot_seed_with_rung(seed, top_down(i, COUNT_POT_RUNGS)),
                 Skill::BoardType => seed_with_category(seed, BoardCategory::ALL[rng.below(BoardCategory::ALL.len() as u64) as usize]),
                 Skill::Anchor => anchors::seed_with_card(seed, rng.below(deck_len) as usize),
                 _ => seed,
@@ -345,6 +368,15 @@ fn mixed_plan_from_mix(form: u32, mix: &[(Skill, usize)]) -> CheckupPlan {
     }
     rng.shuffle(&mut units);
     CheckupPlan { kind: CheckupKind::Mixed, form, slots: units.concat() }
+}
+
+/// The older pre-`count_pot` mixed checkup plan (hidden skills filtered out if `dealt_only`).
+pub fn pre_count_pot_mixed_checkup_plan(form: u32, dealt_only: bool) -> CheckupPlan {
+    let mut plan = mixed_plan_from_mix(form, &PRE_COUNT_POT_MIX);
+    if dealt_only {
+        plan.slots.retain(|slot| is_dealt(slot.skill));
+    }
+    plan
 }
 
 /// The older pre-`limpers` mixed checkup plan (hidden skills filtered out if `dealt_only`).
@@ -578,6 +610,8 @@ fn score_run(kind: CheckupKind, check: CheckRef, rows: &[&Attempt]) -> CheckupSc
     if kind == CheckupKind::Mixed && !rows_follow(&plan, rows) {
         let candidates = [
             full_mixed_checkup_plan(check.form),
+            pre_count_pot_mixed_checkup_plan(check.form, true),
+            pre_count_pot_mixed_checkup_plan(check.form, false),
             legacy_mixed_checkup_plan(check.form, true),
             legacy_mixed_checkup_plan(check.form, false),
         ];

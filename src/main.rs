@@ -42,7 +42,7 @@ Usage:
   poker-trainer progress    show results against the pass marks
 
 Skills: preflop, limpers, nuts, possible, made, beats, board_type, outs, price, hit,
-equity, anchor, spot, spot_mw, chain, table, beats_me, read_price
+equity, anchor, spot, spot_mw, chain, table, beats_me, read_price, count_pot
 Type q at any question to quit and save.";
 
 fn main() -> ExitCode {

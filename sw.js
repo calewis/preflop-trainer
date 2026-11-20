@@ -1,6 +1,6 @@
 /* Poker Trainer service worker: precaches the app so it runs offline.
    web/build.sh rewrites the VERSION line. */
-const VERSION = 'dda3fbb6fd32';
+const VERSION = 'fc525e41be87';
 const CACHE_PREFIX = 'poker-trainer-';
 const CACHE = CACHE_PREFIX + VERSION;
 // The origin is shared with other project pages, so only these caches are ours.
@@ -12,6 +12,8 @@ const FILES = [
   'trainer.html',
   'manifest.webmanifest',
   'app/style.css',
+  'app/version.js',
+  'app/update.js',
   'app/main.js',
   'app/engine.js',
   'app/worker.js',
@@ -28,6 +30,12 @@ const FILES = [
   'app/icon-512.png',
   'app/icon-512-maskable.png',
 ];
+
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'version' && event.ports[0]) {
+    event.ports[0].postMessage({ version: VERSION });
+  }
+});
 
 self.addEventListener('install', event => {
   // `reload` skips the browser's HTTP cache, so a new version gets new bytes.
@@ -59,14 +67,39 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const request = event.request;
   if (request.method !== 'GET' || new URL(request.url).origin !== location.origin) return;
+  if (request.mode === 'navigate') {
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE);
+      try {
+        // Fetch navigations fresh so a stale shell cannot pin old script URLs.
+        const fresh = await fetch(request.url, { cache: 'reload' });
+        if (fresh && fresh.ok) {
+          let resp = fresh;
+          if (fresh.redirected) {
+            const body = await fresh.arrayBuffer();
+            resp = new Response(body, { status: fresh.status, statusText: fresh.statusText, headers: fresh.headers });
+          }
+          const path = new URL(request.url).pathname;
+          if (path.endsWith('/trainer.html')) {
+            cache.put('trainer.html', resp.clone()).catch(() => {});
+          } else if (path.endsWith('/') || path.endsWith('/index.html')) {
+            cache.put('index.html', resp.clone()).catch(() => {});
+            cache.put('./', resp.clone()).catch(() => {});
+          }
+          return resp;
+        }
+      } catch (_) {}
+      // Offline or unknown legacy address: fall back to the precached shell.
+      const exact = await cache.match(request, { ignoreSearch: true });
+      if (exact) return exact;
+      return (await cache.match('index.html')) || Response.error();
+    })());
+    return;
+  }
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const hit = await cache.match(request, { ignoreSearch: true });
     if (hit) return hit;
-    if (request.mode === 'navigate') {
-      // Any page under this scope, including the old app's addresses, is this app.
-      return (await cache.match('index.html')) || fetch(request);
-    }
     return fetch(request);
   })());
 });

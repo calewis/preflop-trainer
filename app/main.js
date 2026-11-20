@@ -1,11 +1,19 @@
 import { engine, onFatalError, prepareDrill, syncEquityMode, syncLeaks } from './engine.js';
 import * as store from './store.js';
+import { VERSION } from './version.js';
+import { initUpdates, applyPendingUpdate, checkForUpdate, pendingUpdateVersion } from './update.js';
 import { showHome, showDrill, showBaseline, showCheckup, showCard, showProgress, showBackup, showMistakes,
-  drillActive, baselineActive, checkupActive, endEverything, noticeIfStorageLost, showFatalNotice, activeNow } from './screens.js';
+  drillActive, baselineActive, checkupActive, isStarting, answersSettled, endEverything, noticeIfStorageLost, showFatalNotice, activeNow } from './screens.js';
 
 const fatal = showFatalNotice;
 onFatalError(fatal);
-window.__trainer = { engine, store, current: null, activeNow, prepare: prepareDrill }; // for the test harness
+window.__trainer = {
+  engine, store, current: null, activeNow, prepare: prepareDrill,
+  version: VERSION, checkForUpdate, pendingUpdateVersion,
+}; // for the test harness
+
+const updateBanner = document.getElementById('update-banner');
+if (updateBanner) updateBanner.addEventListener('click', () => applyPendingUpdate());
 
 const routes = {
   home: showHome,
@@ -45,8 +53,10 @@ window.addEventListener('hashchange', route);
   }
   if (store.readEquityExact()) await syncEquityMode(true);
   await route();
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
-  }
+  initUpdates({
+    isBusy: () => drillActive() || baselineActive() || checkupActive() || isStarting(),
+    onFlushBeforeReload: async () => { endEverything(); await answersSettled(); },
+    onPendingChange: pending => { if (updateBanner) updateBanner.hidden = !pending; },
+  });
 })();
 

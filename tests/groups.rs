@@ -5,7 +5,8 @@
 use std::collections::HashMap;
 
 use poker_trainer::checkup::{
-    checkup_runs, full_mixed_checkup_plan, mixed_checkup_offer, mixed_checkup_plan, next_checkup_form, next_form, next_mixed_form, unfinished_run,
+    checkup_runs, full_mixed_checkup_plan, mixed_checkup_offer, mixed_checkup_plan, next_checkup_form, next_form, next_mixed_form,
+    pre_count_pot_mixed_checkup_plan, unfinished_run,
     CheckupKind, CheckupMetric, CheckupOffer, FIRST_CHECKUP_MIN_DAYS, FIRST_CHECKUP_MIN_DRILLS, MIXED_CHECKUP_EVERY_DAYS,
     MIXED_CHECKUP_LEN, MIXED_CHECKUP_MIX, MIXED_FORM_BASE,
 };
@@ -223,6 +224,50 @@ fn a_one_group_drill_weights_its_skills_like_the_default_drill() {
     }
     // Weights 2:2:1, so table is about a fifth.
     assert!((0.15..=0.25).contains(&table), "table at {table:.3}: {counts:?}");
+}
+
+#[test]
+fn board_type_has_roughly_doubled_share_in_board_group_and_mixed_sessions() {
+    assert_eq!(weight_in_group(Skill::BoardType), 3);
+    for other in [Skill::Nuts, Skill::Possible, Skill::Made, Skill::BeatsMe] {
+        assert_eq!(weight_in_group(other), 1, "{other:?} weight");
+    }
+
+    // In Group::Board alone: raw weight 3/7 = 42.9% (~38% effective with the no-3-in-a-row rule,
+    // roughly double the old 1/5 = 20% / ~19.4%), without starving the other four skills.
+    let mut board_counts: HashMap<Skill, u32> = HashMap::new();
+    for seed in 0..40u64 {
+        let mut session = Session::for_group(Group::Board, &[], 1_000, seed * 37 + 3);
+        for _ in 0..200 {
+            let planned = session.try_next_item().unwrap();
+            *board_counts.entry(planned.skill).or_default() += 1;
+            session.record(planned, true);
+        }
+    }
+    let board_total = 40.0 * 200.0;
+    let bt_group = f64::from(board_counts[&Skill::BoardType]) / board_total;
+    assert!((0.34..=0.43).contains(&bt_group), "board_type in Group::Board at {bt_group:.3}: {board_counts:?}");
+    for other in [Skill::Nuts, Skill::Possible, Skill::Made, Skill::BeatsMe] {
+        let share = f64::from(board_counts[&other]) / board_total;
+        assert!(share >= 0.11, "{other:?} starved in Group::Board at {share:.3}: {board_counts:?}");
+    }
+
+    // In mixed sessions: Group::Board stays 15%, board_type rises from ~3.0% to ~6.4%.
+    let mut mixed_counts: HashMap<Skill, u32> = HashMap::new();
+    for seed in 0..20u64 {
+        let mut session = Session::mixed(&[], 1_000, seed * 53 + 11);
+        for _ in 0..500 {
+            let planned = session.try_next_item().unwrap();
+            *mixed_counts.entry(planned.skill).or_default() += 1;
+            session.record(planned, true);
+        }
+    }
+    let mixed_total = 20.0 * 500.0;
+    let bt_mixed = f64::from(mixed_counts[&Skill::BoardType]) / mixed_total;
+    assert!((0.050..=0.075).contains(&bt_mixed), "board_type in mixed at {bt_mixed:.4}: {mixed_counts:?}");
+    let board_group_mixed: u32 = Group::Board.skills().iter().map(|s| mixed_counts.get(s).copied().unwrap_or(0)).sum();
+    let board_group_pct = 100.0 * f64::from(board_group_mixed) / mixed_total;
+    assert!((13.5..=16.5).contains(&board_group_pct), "Group::Board in mixed at {board_group_pct:.1}%");
 }
 
 #[test]
@@ -539,4 +584,26 @@ fn a_live_release_history_loads_and_works_under_the_new_rules() {
     assert_eq!(groups.len(), 7);
     // The offer works on it too: a resumable old run is not the monthly one.
     assert_eq!(mixed_checkup_offer(&log, 10 * DAY_MS), Some(CheckupOffer::Take));
+}
+
+#[test]
+fn a_mixed_checkup_taken_before_count_pot_keeps_its_score() {
+    let form = MIXED_FORM_BASE;
+    let old = pre_count_pot_mixed_checkup_plan(form, true);
+    let rows: Vec<Attempt> = old
+        .slots
+        .iter()
+        .enumerate()
+        .map(|(slot, s)| {
+            let mut row = drill_row(s.skill, s.seed, 10_000 + slot as u64, slot >= 6, None);
+            row.mode = Mode::Check;
+            row.extra.check = Some(CheckRef { run: 7, form, slot: slot as u32 });
+            row
+        })
+        .collect();
+    let runs = checkup_runs(&rows);
+    assert_eq!(runs.len(), 1);
+    assert!(runs[0].complete && !runs[0].stale, "{:?}", runs[0]);
+    assert_eq!(runs[0].answered, old.slots.len());
+    assert!(runs[0].groups.iter().any(|g| g.group == Group::ReadPrice && g.answered == 7));
 }

@@ -51,10 +51,11 @@ impl Group {
     pub const fn members(self) -> &'static [(Skill, u64)] {
         match self {
             Group::Preflop => &[(Skill::Preflop, 1), (Skill::Limpers, 1)],
-            Group::ReadPrice => &[(Skill::ReadPrice, 1)],
+            Group::ReadPrice => &[(Skill::ReadPrice, 1), (Skill::CountPot, 1)],
             Group::Equity => &[(Skill::Equity, 3), (Skill::Anchor, 1)],
             Group::WholeHands => &[(Skill::Chain, 1)],
-            Group::Board => &[(Skill::Nuts, 1), (Skill::Possible, 1), (Skill::Made, 1), (Skill::BoardType, 1), (Skill::BeatsMe, 1)],
+            // `board_type` is weighted 3 so the timed flop-texture quiz appears about twice as often.
+            Group::Board => &[(Skill::Nuts, 1), (Skill::Possible, 1), (Skill::Made, 1), (Skill::BoardType, 3), (Skill::BeatsMe, 1)],
             Group::Outs => &[(Skill::Outs, 3), (Skill::Hit, 2)],
             // `table` is the slowest drill and graded against simulated tables, so it comes least.
             Group::Spots => &[(Skill::Spot, 2), (Skill::SpotMw, 2), (Skill::Table, 1)],

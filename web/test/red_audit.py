@@ -596,7 +596,7 @@ def walk_all_screens(page, port, theme, run_mod, all_findings, totals, shot_pref
     page.wait("!!document.querySelector('.skill-row .pill.good')", 20)
     audit_state(page, "progress-rich", theme, all_findings, totals)
 
-    # 6. Notices (#notice warning and #notice.fatal).
+    # 6. Notices (#notice warning, #notice.fatal, and #update-banner).
     page.eval("location.hash = '#home'")
     run_mod.wait_home(page)
     page.eval("(() => { const n = document.getElementById('notice'); n.hidden = false; n.className = ''; n.textContent = 'Storage is unavailable, so progress will not be saved.'; })()")
@@ -604,6 +604,9 @@ def walk_all_screens(page, port, theme, run_mod, all_findings, totals, shot_pref
     page.eval("(() => { const n = document.getElementById('notice'); n.hidden = false; n.className = 'fatal'; n.textContent = 'Something went wrong.'; })()")
     audit_state(page, "notice-fatal", theme, all_findings, totals)
     page.eval("(() => { const n = document.getElementById('notice'); n.hidden = true; n.className = ''; n.textContent = ''; })()")
+    page.eval("(() => { const b = document.getElementById('update-banner'); if (b) b.hidden = false; })()")
+    audit_state(page, "update-banner", theme, all_findings, totals)
+    page.eval("(() => { const b = document.getElementById('update-banner'); if (b) b.hidden = true; })()")
 
     # 7. Card question with all 4 suits + hearts & diamonds shot + correct & wrong reveals (made).
     run_mod.seed_log(page, port, run_mod.LOG_COLUMNS + "\n")
@@ -680,6 +683,16 @@ def walk_all_screens(page, port, theme, run_mod, all_findings, totals, shot_pref
             break
         run_mod.answer_drill_item(page, True)
         run_mod.next_drill_item(page)
+
+    # 11b. Count the pot (rung 2: action chips + keypad + tight reveal).
+    page.eval("location.hash = '#home'")
+    run_mod.wait_home(page)
+    run_mod.seed_log(page, port, run_mod.count_pot_log(2))
+    run_mod.open_limited_drill(page, "count_pot")
+    page.wait(run_mod.READY, 60)
+    audit_state(page, "count-pot-question", theme, all_findings, totals)
+    run_mod.answer_drill_item(page, True)
+    audit_state(page, "count-pot-reveal", theme, all_findings, totals)
 
     # 12. Table spots: timeline + reveal with Best pill & chosen ("Your pick") option.
     page.eval("location.hash = '#home'")

@@ -12,7 +12,7 @@ RUSTFLAGS="--remap-path-prefix=$HOME=/home --remap-path-prefix=$PWD=/src" \
 cp "${CARGO_TARGET_DIR:-web/target}"/wasm32-unknown-unknown/release/trainer_web.wasm app/trainer.wasm
 python3 - <<'PY'
 import hashlib, pathlib, re
-files = sorted(p for p in pathlib.Path("app").iterdir() if p.is_file())
+files = sorted(p for p in pathlib.Path("app").iterdir() if p.is_file() and p.name != "version.js")
 files += [pathlib.Path(n) for n in ("index.html", "trainer.html", "manifest.webmanifest")]
 digest = hashlib.sha256()
 for path in files:
@@ -20,5 +20,7 @@ for path in files:
 sw = pathlib.Path("sw.js")
 version = digest.hexdigest()[:12]
 sw.write_text(re.sub(r"const VERSION = '[^']*';", f"const VERSION = '{version}';", sw.read_text()))
+ver = pathlib.Path("app/version.js")
+ver.write_text(f"// Stamped by web/build.sh alongside sw.js.\nexport const VERSION = '{version}';\n")
 print("cache version", version)
 PY

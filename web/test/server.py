@@ -13,6 +13,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
+    def do_GET(self):
+        clean = self.path.split("?")[0].split("#")[0]
+        self.server.requests.append(clean)
+        override_key = "/index.html" if clean == "/" else clean
+        if clean in self.server.text_overrides:
+            override_key = clean
+        if override_key in self.server.text_overrides:
+            body = self.server.text_overrides[override_key].encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", self.guess_type(override_key))
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        super().do_GET()
+
     def translate_path(self, path):
         clean = path.split("?")[0].split("#")[0]
         # Set mid-test to stand for a new release published while the page runs.
@@ -45,6 +61,8 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 def start(port):
     server = Server(("127.0.0.1", port), Handler)
+    server.text_overrides = {}
+    server.requests = []
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server

@@ -119,6 +119,23 @@ fn limpers_drill_runs_through_cli_and_logs_attempts() {
 }
 
 #[test]
+fn count_pot_drill_runs_through_cli_and_logs_attempts() {
+    let home = temp_home("countpot");
+    let out = run(&home, &["drill", "--items", "6", "--seed", "23", "--skill", "count_pot"], &"40\n".repeat(20));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert!(stdout.contains("Preflop ("), "{stdout}");
+    assert!(stdout.contains("blinds 5/10"), "{stdout}");
+    assert!(stdout.contains("How big is the pot?"), "{stdout}");
+    assert!(stdout.contains("Pot: "), "{stdout}");
+    assert!(!stdout.contains('$') && !stdout.contains("bb"), "plain chip numbers only: {stdout}");
+    let rows = log_rows(&home);
+    assert_eq!(rows.len(), 6);
+    assert!(rows.iter().all(|r| r[3] == "count_pot"), "{rows:?}");
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
 fn spot_mw_prompt_states_nobody_can_raise() {
     let home = temp_home("mw");
     let out = run(&home, &["drill", "--items", "8", "--seed", "5", "--skill", "spot_mw"], &"c\nr\n".repeat(30));

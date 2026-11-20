@@ -13,7 +13,7 @@ function chip(title, value) {
   return h('div', { class: 'chip' }, h('span', { class: 'chip-label' }, title), h('span', { class: 'chip-value' }, value));
 }
 
-function money(amount) { return `$${amount}`; }
+function money(amount) { return `$${Number(amount).toLocaleString('en-US')}`; }
 
 function board(q) {
   return labelled('Board', cardRow(q.board, 'board'));
@@ -46,6 +46,7 @@ export function questionView(q) {
     case 'chain': return chainQuestion(q);
     case 'beats_me': return beatsMeQuestion(q);
     case 'read_price': return readPriceQuestion(q);
+    case 'count_pot': return countPotQuestion(q);
     case 'river': return riverQuestion(q);
     default: return h('p', {}, 'Unknown question');
   }
@@ -85,13 +86,18 @@ function limpersQuestion(q) {
     prompt(q.context));
 }
 
+function priceTiles(q) {
+  return [
+    h('div', { class: 'chips' },
+      chip('Pot now', money(q.pot_now)),
+      chip('To call', money(q.bet))),
+    q.breakdown ? h('p', { class: 'hint price-breakdown' }, q.breakdown) : null,
+  ];
+}
+
 function priceQuestion(q) {
-  const callers = q.callers === 0 ? ''
-    : q.callers === 1 ? ` 1 player has already called the ${money(q.bet)}.`
-      : ` ${q.callers} players have already called the ${money(q.bet)}.`;
   return h('div', { class: 'stack' },
-    h('div', { class: 'chips' }, chip('Pot', money(q.pot_before)), chip('Bet', money(q.bet))),
-    h('p', { class: 'context' }, `The pot was ${money(q.pot_before)}. Someone bets ${money(q.bet)}.${callers}`),
+    ...priceTiles(q),
     prompt('What equity do you need to call?'));
 }
 
@@ -180,15 +186,26 @@ function riverQuestion(q) {
 }
 
 function readPriceQuestion(q) {
+  const tiles = q.bet === null
+    ? [h('div', { class: 'chips' }, chip('Pot before the bet', money(q.pot_before)))]
+    : priceTiles(q);
   return h('div', { class: 'stack' },
     q.hero ? hand(q.hero) : null,
     q.board ? labelled(`Board (${q.street || 'postflop'})`, cardRow(q.board, 'board')) : null,
-    h('div', { class: 'chips' },
-      chip('Pot before the bet', money(q.pot_before)),
-      q.bet === null ? null : chip('Bet', money(q.bet)),
-      q.callers > 0 ? chip('Callers', q.callers) : null),
+    ...tiles,
     q.context.map(line => h('p', { class: 'context' }, line)),
     prompt(q.prompt));
+}
+
+function countPotQuestion(q) {
+  return h('div', { class: 'stack' },
+    h('div', { class: 'pot-strip' },
+      h('div', { class: 'pot-head' },
+        h('strong', {}, 'Preflop'),
+        h('span', { class: 'tl-pot' }, `${q.players} players \u00b7 blinds 5/10`)),
+      h('div', { class: 'pot-actions' }, q.actions.map(a =>
+        h('span', { class: `pot-act ${a.kind}${a.hero ? ' you' : ''}` }, a.text)))),
+    prompt('How big is the pot?'));
 }
 
 function beatsMeQuestion(q) {
@@ -277,6 +294,7 @@ function revealBody(r) {
     case 'beats': return beatsReveal(r);
     case 'beats_me': return beatsMeReveal(r);
     case 'read_price': return readPriceReveal(r);
+    case 'count_pot': return countPotReveal(r);
     case 'outs': return outsReveal(r);
     case 'price': return [
       answerLine(r.required),
@@ -301,6 +319,13 @@ function limpersReveal(r) {
     more('Details',
       p(r.summary),
       p(r.size_note)),
+  ];
+}
+
+function countPotReveal(r) {
+  return [
+    h('p', { class: 'reveal-answer' }, 'Pot: ', h('strong', {}, String(r.pot))),
+    p(r.breakdown),
   ];
 }
 

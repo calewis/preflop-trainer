@@ -7,13 +7,14 @@ use std::rc::Rc;
 use crate::anchors;
 use crate::board_type::{category_of_seed, seed_with_category, CategoryDealer, BOARD_TYPE_TARGET_MS};
 use crate::beats_me::beats_me_rung;
+use crate::count_pot::count_pot_rung;
 use crate::equity_skill::{equity_band, equity_rung, next_band};
 use crate::family::{family_of, find_sibling};
 use crate::generate::generate;
 use crate::groups::{group_of, mixed_skills, weight_in_group, Group};
 use crate::item::{
-    beats_me_seed_with_rung, chain_seed_for_stage, equity_rung_of_seed, generator_changed, CHAIN_STAGES, equity_seed_with_rung, is_held_out, read_price_seed_with_rung, ChainStage, Item, Question, Skill,
-    GEN_VERSION, HELD_OUT_BIT,
+    beats_me_seed_with_rung, chain_seed_for_stage, count_pot_seed_with_rung, equity_rung_of_seed, generator_changed, CHAIN_STAGES,
+    equity_seed_with_rung, is_held_out, read_price_seed_with_rung, ChainStage, Item, Question, Skill, GEN_VERSION, HELD_OUT_BIT,
 };
 use crate::log::{Attempt, ItemRef, Mode};
 use crate::read_price::read_price_rung;
@@ -319,6 +320,8 @@ pub struct Session {
     /// `read_price`: the rung new items are dealt at, and the reviews dealt so far.
     read_price_rung: u8,
     read_price_reviews: u64,
+    /// `count_pot`: the rung new items are dealt at.
+    count_pot_rung: u8,
     /// `equity`: the rung new items are dealt at, each rung's current band, and
     /// whether items ask for typed percentages (`true`) or three bands (`false`, default).
     equity_rung: u8,
@@ -374,6 +377,7 @@ impl Session {
             beats_me_rung: beats_me_rung(attempts),
             read_price_rung: read_price_rung(attempts),
             read_price_reviews: 0,
+            count_pot_rung: count_pot_rung(attempts),
             equity_rung: equity_rung(attempts),
             equity_bands: [equity_band(attempts, 0), equity_band(attempts, 1)],
             exact_equity: false,
@@ -648,6 +652,7 @@ impl Session {
             Skill::Equity => seed = equity_seed_with_rung(seed, self.equity_rung),
             Skill::BeatsMe => seed = beats_me_seed_with_rung(seed, self.beats_me_rung),
             Skill::ReadPrice => seed = read_price_seed_with_rung(seed, self.read_price_rung),
+            Skill::CountPot => seed = count_pot_seed_with_rung(seed, self.count_pot_rung),
             Skill::BoardType => seed = seed_with_category(seed, self.board_dealer.deal(&mut self.rng)),
             _ => {}
         }

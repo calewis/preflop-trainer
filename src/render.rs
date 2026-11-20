@@ -203,6 +203,18 @@ pub fn question(item: &Item, style: Style) -> String {
             style.holding(q.hand),
             q.context_line(),
         ),
+        Question::CountPot(q) => {
+            let actions: Vec<String> = q
+                .actions
+                .iter()
+                .map(|&a| poker_trainer::count_pot::action_text(a, q.hero))
+                .collect();
+            format!(
+                "Preflop ({} players, blinds 5/10): {}\nHow big is the pot?",
+                q.players,
+                actions.join(", ")
+            )
+        }
         Question::Chain(q) => chain_question(item, q, style),
     }
 }
@@ -661,6 +673,10 @@ pub fn reveal(outcome: &Outcome, style: Style) -> String {
         Reveal::Table(graded) => table_reveal(&mut lines, graded),
         Reveal::River(graded) => river_reveal(&mut lines, graded),
         Reveal::Limpers(graded) => limpers_reveal(&mut lines, graded),
+        Reveal::CountPot { pot, breakdown } => {
+            lines.push(format!("Pot: {pot}"));
+            lines.push(breakdown.clone());
+        }
     }
     lines.extend(outcome.chain_tie.clone());
     lines.join("\n")

@@ -6,6 +6,7 @@ use crate::answer::MAX_OUTS;
 use crate::board_type::{classify_flop, BoardCategory, BOARD_TYPE_MISS_MS};
 use crate::cards::{holding_mask, mask_of, rank_from_byte, suit_from_byte, unseen_cards, unseen_holdings, Card, Holding};
 use crate::classes::{combos_in_class, made_class, matches_opp_class, mix_combos, opponent_role, rank_of, MadeClass, OppMix};
+use crate::count_pot::{pot_summary, CountPotQuestion, MAX_COUNT_POT_ANSWER};
 use crate::equity::{equity_all_in, equity_next_card, share_by_next_card, Equity};
 use crate::equity_skill::EquityBand;
 use crate::eval::{straight_top, Category, HandRank};
@@ -331,6 +332,10 @@ pub enum Reveal {
     BeatsMe(BeatsMeReveal),
     ReadPrice(ReadPriceReveal),
     Limpers(LimperGrade),
+    CountPot {
+        pot: u32,
+        breakdown: String,
+    },
 }
 
 /// One shown hand's result at rung 0 of `beats_me`.
@@ -408,6 +413,7 @@ fn grade_item(item: &Item, raw: &str) -> Result<Outcome, InvalidAnswer> {
         Question::ReadPrice(q) => grade_read_price(q, raw),
         Question::River(q) => grade_river(q, raw),
         Question::Limpers(q) => grade_limpers(q, raw),
+        Question::CountPot(q) => grade_count_pot(q, raw),
     }
 }
 
@@ -597,6 +603,20 @@ fn grade_limpers(q: &LimpersQuestion, raw: &str) -> Result<Outcome, InvalidAnswe
         chosen == graded.action,
         chosen.code().to_string(),
         Reveal::Limpers(graded),
+    ))
+}
+
+fn grade_count_pot(q: &CountPotQuestion, raw: &str) -> Result<Outcome, InvalidAnswer> {
+    let guess: u32 = normalize(raw)
+        .parse()
+        .ok()
+        .filter(|&n| n <= MAX_COUNT_POT_ANSWER)
+        .ok_or_else(|| InvalidAnswer("Answer a whole number of chips.".to_string()))?;
+    let summary = pot_summary(q);
+    Ok(outcome(
+        guess == summary.pot,
+        guess.to_string(),
+        Reveal::CountPot { pot: summary.pot, breakdown: summary.breakdown_line(q.hero) },
     ))
 }
 

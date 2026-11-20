@@ -32,6 +32,7 @@ use poker_trainer::progress::{
 };
 use poker_trainer::reflection::{reflection_comparison, reflection_form, reflection_row, reflection_state, ReflectState};
 use poker_trainer::ladder::{MISS_POINTS, RIGHT_POINTS, RIGHT_WRONG_GATE};
+use poker_trainer::count_pot::count_pot_status;
 use poker_trainer::read_price::read_price_status;
 use poker_trainer::river::{self, RiverSession, DEFAULT_RIVER_ITEMS, RIVER_SPOT_COUNT};
 use poker_trainer::rng::Rng;
@@ -437,6 +438,7 @@ impl Engine {
             "board_types": self.board_types_json(),
             "equity": self.equity_json(),
             "read_price": self.read_price_json(),
+            "count_pot": self.count_pot_json(),
             "anchors": self.anchors_json(now_ms),
             "reflection": present::reflection_comparison(&reflection_comparison(&self.attempts)),
             "reliability": present::reliability(&reliability_table(&self.attempts)),
@@ -477,6 +479,34 @@ impl Engine {
             "rung": u32::from(status.rung) + 1,
             "rungs": u32::from(poker_trainer::item::READ_PRICE_RUNGS),
             "label": poker_trainer::read_price::rung_label(status.rung),
+            "recent": recent,
+            "points": (!top).then(|| format!("Points toward the next rung: {} of {}.", status.points, RIGHT_WRONG_GATE.goal)),
+            "rule": if top {
+                "This is the top rung.".to_string()
+            } else {
+                format!(
+                    "Every rung starts at {} points. Each first-try drill answer at this rung adds {RIGHT_POINTS} if right and takes off {MISS_POINTS} if wrong, never going below 0. Reaching {} moves you up.",
+                    RIGHT_WRONG_GATE.start, RIGHT_WRONG_GATE.goal
+                )
+            },
+        }
+    }
+
+    fn count_pot_json(&self) -> V {
+        let status = count_pot_status(&self.attempts);
+        let recent = (status.recent_total > 0).then(|| {
+            format!(
+                "Last {} at this rung: {} right ({:.0}%).",
+                status.recent_total,
+                status.recent_right,
+                100.0 * status.recent_right as f64 / status.recent_total as f64
+            )
+        });
+        let top = status.rung + 1 == poker_trainer::item::COUNT_POT_RUNGS;
+        obj! {
+            "rung": u32::from(status.rung) + 1,
+            "rungs": u32::from(poker_trainer::item::COUNT_POT_RUNGS),
+            "label": poker_trainer::count_pot::rung_label(status.rung),
             "recent": recent,
             "points": (!top).then(|| format!("Points toward the next rung: {} of {}.", status.points, RIGHT_WRONG_GATE.goal)),
             "rule": if top {
@@ -2446,5 +2476,38 @@ LEAK|0|limpers|limpers:btn:1|1200|1|2026-11-18|s1|h10|100|0|Raised K7s over CO l
         let graded = dispatch(&format!("grade\x1flimpers\x1f{seed}\x1ff\x1f800"));
         assert!(graded.contains("\"correct\":true") && graded.contains("\"leak\":{"), "{graded}");
         assert!(dispatch("load_leaks\x1f").contains("\"loaded\":false"));
+    }
+
+    #[test]
+    fn count_pot_drill_and_progress_work_through_the_bridge() {
+        load("");
+        let home = dispatch("home\x1f1000");
+        assert!(home.contains("\"skills\":[\"Read the price\",\"Count the pot\"]"), "{home}");
+
+        assert!(dispatch("session_open\x1f23\x1f1000\x1fcount_pot").contains("first"));
+        dispatch("session_start\x1f15");
+        for step in 0..10u64 {
+            let next = dispatch(&format!("session_next\x1f{}", step * 1000));
+            assert!(next.contains("\"skill\":\"count_pot\""), "{next}");
+            let seed = field(&next, "seed");
+            let prep = dispatch(&format!("prepare\x1fcount_pot\x1f{seed}\x1fnew"));
+            assert!(prep.contains("\"kind\":\"count_pot\"") && prep.contains("\"type\":\"integer\""), "{prep}");
+            assert!(!prep.contains('$') && !prep.contains("bb"), "{prep}");
+            let probe = dispatch(&format!("grade\x1fcount_pot\x1f{seed}\x1f0\x1f1200"));
+            let pot = number(&probe, "pot");
+            assert!(pot >= 20 && pot <= 1000 && pot % 5 == 0, "pot={pot} {probe}");
+            let right = dispatch(&format!("grade\x1fcount_pot\x1f{seed}\x1f{pot}\x1f1200"));
+            assert!(right.contains("\"correct\":true") && right.contains("\"breakdown\":\""), "{right}");
+            let wrong = dispatch(&format!("grade\x1fcount_pot\x1f{seed}\x1f{}\x1f1200", pot + 5));
+            assert!(wrong.contains("\"correct\":false") && wrong.contains("\"close\":false"), "{wrong}");
+            let invalid = dispatch(&format!("grade\x1fcount_pot\x1f{seed}\x1fzzz\x1f1200"));
+            assert!(invalid.contains("\"invalid\""), "{invalid}");
+            assert_eq!(check_of(&prep), check_of(&right));
+            let line = template(&right);
+            assert!(dispatch(&format!("commit\x1f{line}\x1f{}\x1f1200", 2000 + step)).contains("\\tcount_pot\\t"));
+        }
+        let progress = dispatch("progress\x1f50000");
+        assert!(progress.contains("\"title\":\"Count the pot\"") && progress.contains("\"count_pot\":{"), "{progress}");
+        assert!(progress.contains("Short hands (3-5 actions)"), "{progress}");
     }
 }

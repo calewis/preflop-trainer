@@ -12,6 +12,7 @@ pub mod board_type;
 pub mod cards;
 pub mod checkup;
 pub mod classes;
+pub mod count_pot;
 pub mod equity;
 pub mod equity_skill;
 pub mod eval;

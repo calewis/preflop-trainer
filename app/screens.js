@@ -4,6 +4,8 @@ import { engine, prepareDrill, prepareLeak, prepareBaseline, prepareCheck, clear
 import { answerControls } from './answers.js';
 import { questionView, revealView } from './reveal.js';
 import * as store from './store.js';
+import { VERSION } from './version.js';
+import { consumePendingUpdate } from './update.js';
 
 const app = () => document.getElementById('app');
 let onKey = null;
@@ -54,6 +56,8 @@ function randomSeed() {
 let prepared = null;
 
 export async function showHome() {
+  await answersSettled();
+  if (consumePendingUpdate()) return;
   await syncFromStorage();
   const home = await engine.call('home', Date.now());
   const opened = await engine.call('session_open', randomSeed(), Date.now());
@@ -129,6 +133,7 @@ export async function showHome() {
       link('#progress', 'Progress'),
       link('#baseline', home.has_baseline ? 'Take baseline again' : 'Baseline'),
       link('#backup', 'Backup')),
+    h('p', { class: 'build-version', 'data-build-version': '' }, `Build ${VERSION}`),
   );
 }
 
@@ -283,8 +288,12 @@ function trackAnswer(work) {
   return tracked;
 }
 
-async function answersSettled() {
+export async function answersSettled() {
   while (answerWork) await answerWork;
+}
+
+export function isStarting() {
+  return starting || startingBaseline || startingCheckup;
 }
 
 /** Wraps a submit so a real answer is tracked, while a repeat tap on a locked one is not. */
@@ -1050,6 +1059,7 @@ export async function showProgress() {
         h('p', { class: 'hint' }, 'Pass mark: ', s.mark.join(', '), '.'),
         h('p', { class: 'hint' }, s.status)))),
     readPricePanel(data.read_price),
+    countPotPanel(data.count_pot),
     boardTypePanel(data.board_types),
     equityPanel(data.equity),
     anchorPanel(data.anchors),
@@ -1076,6 +1086,15 @@ function miniTable(headers, rows) {
 function readPricePanel(info) {
   return h('section', { class: 'panel', 'data-read-price': '' },
     h('h2', { class: 'panel-title' }, 'Read the price'),
+    h('p', {}, `Rung ${info.rung} of ${info.rungs}: ${info.label}.`),
+    info.recent ? h('p', {}, info.recent) : h('p', { class: 'hint' }, 'No attempts at this rung yet.'),
+    info.points ? h('p', {}, info.points) : null,
+    h('p', { class: 'hint' }, info.rule));
+}
+
+function countPotPanel(info) {
+  return h('section', { class: 'panel', 'data-count-pot': '' },
+    h('h2', { class: 'panel-title' }, 'Count the pot'),
     h('p', {}, `Rung ${info.rung} of ${info.rungs}: ${info.label}.`),
     info.recent ? h('p', {}, info.recent) : h('p', { class: 'hint' }, 'No attempts at this rung yet.'),
     info.points ? h('p', {}, info.points) : null,

@@ -80,6 +80,8 @@ pub const PASS_BEATS_ME: PassMark = accuracy(BEATS_ME_MIN_CORRECT_PCT, None);
 /// `read_price`: over the last 40 attempts at rungs 2-4. Starting guess.
 pub const READ_PRICE_MIN_CORRECT_PCT: f64 = 85.0;
 pub const PASS_READ_PRICE: PassMark = accuracy(READ_PRICE_MIN_CORRECT_PCT, None);
+/// `count_pot`: exact chip pot count. Starting guess.
+pub const PASS_COUNT_POT: PassMark = accuracy(90.0, None);
 /// Stage accuracy over the last 40 stages, outs within 1 counting as right.
 /// Starting guess.
 pub const PASS_CHAIN: PassMark = PassMark {
@@ -150,6 +152,7 @@ pub fn pass_mark(skill: Skill) -> PassMark {
         // is the table spots' and only says what one would look like.
         Skill::River => PASS_TABLE,
         Skill::Limpers => PASS_LIMPERS,
+        Skill::CountPot => PASS_COUNT_POT,
     }
 }
 
@@ -167,7 +170,7 @@ pub const fn baseline_step(skill: Skill) -> Option<usize> {
         Skill::Nuts | Skill::Possible | Skill::Made | Skill::Beats | Skill::BoardType | Skill::BeatsMe => Some(1),
         Skill::Outs | Skill::Price | Skill::Hit | Skill::Equity | Skill::Anchor => Some(2),
         Skill::Spot | Skill::SpotMw | Skill::Chain => Some(3),
-        Skill::Preflop | Skill::ReadPrice | Skill::Table | Skill::River | Skill::Limpers => None,
+        Skill::Preflop | Skill::ReadPrice | Skill::Table | Skill::River | Skill::Limpers | Skill::CountPot => None,
     }
 }
 
