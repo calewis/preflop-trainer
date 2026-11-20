@@ -1709,6 +1709,7 @@ mod beats_me {
             let to_v6 = [Skill::Preflop, Skill::Spot, Skill::SpotMw, Skill::Equity, Skill::Chain];
             assert_eq!(generator_changed(skill, 5, 6), to_v6.contains(&skill), "{skill:?} v5 to v6");
             assert_eq!(generator_changed(skill, 6, 7), skill == Skill::Preflop, "{skill:?} v6 to v7");
+            assert_eq!(generator_changed(skill, 7, 8), skill == Skill::Preflop, "{skill:?} v7 to v8");
             assert!(!generator_changed(skill, GEN_VERSION, GEN_VERSION), "{skill:?}: a version is itself");
             assert!(generator_changed(skill, GEN_VERSION + 1, GEN_VERSION), "{skill:?}: an unknown version is a change");
             assert!(generator_changed(skill, GEN_VERSION, GEN_VERSION + 1));

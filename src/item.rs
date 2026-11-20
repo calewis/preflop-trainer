@@ -12,7 +12,7 @@ use crate::table::TableQuestion;
 
 /// Bump whenever a generator's output for a given seed changes, and add the
 /// bump to [`GENERATOR_CHANGES`].
-pub const GEN_VERSION: u32 = 7;
+pub const GEN_VERSION: u32 = 8;
 
 /// Which skills' generators changed at each [`GEN_VERSION`], so a bump for one skill
 /// doesn't void another skill's unfinished checkups or queued reviews. `chain` and
@@ -24,14 +24,16 @@ pub const GEN_VERSION: u32 = 7;
 /// ranges change which hands are dealt after opening, after 3-betting and against a raise.
 /// The spot, equity and whole-hand drills deal only hands the card plays, so they change too.
 /// At version 7 the 3-bet and 4-bet charts add deep-stack calling ranges and deal a mix of
-/// 4-bets/all-ins, calls and real folds.
-pub const GENERATOR_CHANGES: [(u32, &[Skill]); 6] = [
+/// 4-bets/all-ins, calls and real folds. At version 8 the facing-raise, 3-bet and 4-bet
+/// rows move to 200bb solver-derived ranges and the 4-bet chart folds everything below aces.
+pub const GENERATOR_CHANGES: [(u32, &[Skill]); 7] = [
     (2, &[Skill::Spot, Skill::SpotMw, Skill::Equity]),
     (3, &[Skill::Preflop]),
     (4, &[Skill::Preflop]),
     (5, &[Skill::Preflop]),
     (6, &[Skill::Preflop, Skill::Spot, Skill::SpotMw, Skill::Equity, Skill::Chain]),
     (7, &[Skill::Preflop]),
+    (8, &[Skill::Preflop]),
 ];
 
 /// Which of `skill`'s generators wrote a row marked `version`: the number of times

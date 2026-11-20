@@ -183,9 +183,10 @@ fn deal_preflop_hand(rng: &mut Rng, seat: Seat, situation: Situation) -> Holding
 /// only plausible folds hero actually opened.
 const THREE_BET_FOLDS: &str = "22+ A5s+ KTs+ QTs+ JTs T9s 98s 87s 76s AJo+ KQo";
 
-/// Facing a 3-bet or a 4-bet, deal a mix of 4-bets/all-ins (1 in 5, so kings or aces
-/// stay at most about one time in four), calls (2 in 5) and real folds (2 in 5), always
-/// among the hands `held` allows.
+/// Facing a 3-bet, deal a mix of 4-bets (1 in 5, so kings or aces stay at most about
+/// one time in four), calls (2 in 5) and real folds (2 in 5). Facing a 4-bet, only AA
+/// goes all in and only KK calls, so deal 1 in 5 all-ins, 1 in 5 calls and 3 in 5 folds,
+/// always among the hands `held` allows.
 fn close_to_the_line(rng: &mut Rng, seat: Seat, situation: Situation, held: Range) -> Range {
     let chart = chart_for(seat, situation).expect("this situation has a chart");
     let (raise, call) = chart.lines();
@@ -194,10 +195,12 @@ fn close_to_the_line(rng: &mut Rng, seat: Seat, situation: Situation, held: Rang
         Situation::FourBet => held.without(&continues),
         _ => Range::parse(THREE_BET_FOLDS).without(&continues),
     };
+    let has_call = !call.range.intersect(&held).is_empty();
+    let call_top = if matches!(situation, Situation::FourBet) { 1 } else { 2 };
     let roll = rng.below(5);
     let wanted = if roll == 0 {
         raise.range
-    } else if roll <= 2 {
+    } else if has_call && roll <= call_top {
         call.range
     } else {
         folds
@@ -278,10 +281,9 @@ fn relevant_range(seat: Seat, situation: Situation) -> Range {
             let extra = chart.extra_call().map_or(Range::EMPTY, |line| line.range);
             // Also hands a player opens with but folds here, so the folds are real decisions.
             // The button opens so wide that mixing its range in everywhere would make most
-            // spots plain folds, so only the big blind, which defends widest, gets it.
+            // spots plain folds, so the cutoff's open range supplies the borderline folds.
             let opener = match (situation, seat) {
                 (Situation::Raised | Situation::RaisedCalled(_), Seat::Early | Seat::Middle) => seat,
-                (Situation::Raised | Situation::RaisedCalled(_), Seat::BigBlind) => Seat::Button,
                 (Situation::Raised | Situation::RaisedCalled(_), _) => Seat::Cutoff,
                 _ => Seat::Button,
             };

@@ -1,11 +1,9 @@
 # Preflop card for deep-stack cash games (built for about 200bb), mostly 4-5 players.
-# It is wider than the earlier card and leans toward standard deep-stack charts: wider opens,
-# more 3-bets and fewer flat calls against a single raise, and a wide big blind defence.
-#
-# Some 3-bets are semi-bluffs, not only value: suited aces such as A5s hold an ace the raiser
-# needs and make the nut flush draw, and suited connectors make straights and flushes that win
-# big pots when stacks are deep. Everything here is a rule of thumb, not a solved range:
-# no public solver numbers exist for multi-limper, no-rake home games.
+# The facing-raise, facing-3-bet and facing-4-bet rows come from two 200bb heads-up
+# solver studies against fixed opponent ranges (preflop-vs-3bet-solve-2026-11-19.md and
+# preflop-our-3bet-solve-2026-11-19.md). Those results are specific to the fixed ranges
+# modeled there; multiway pots and players who adapt preflop change the edges. Everything
+# here is a guide, not a rigid rule.
 #
 # Notation: 77+ is 77 through AA. ATs+ is ATs through AKs. J4s+ is J4s through JTs.
 # AQo+ is AQo and AKo.
@@ -18,45 +16,53 @@ iso.raise = 77+ ATs+ KJs+ QJs AJo+ KQo
 iso.limp = 22 33 44 55 66 A2s A3s A4s A5s A6s A7s A8s A9s KTs QTs JTs T9s 98s 87s 76s 65s 54s
 # From the cutoff or button, these limp-along hands raise instead.
 iso.late.raise = A2s A3s A4s A5s A6s A7s A8s A9s KTs QTs JTs T9s 98s 87s
-# Facing one raise and no callers. The reraise and call lines are for the cutoff and button.
-# 3-bet big hands for value, and some suited aces and suited connectors as semi-bluffs; few hands
-# just call. A lone raise usually comes from a wide late opener, so king-queen 3-bets for value.
-face_raise.reraise = JJ+ AQs+ AQo+ KQs KQo ATs A5s A4s KJs QJs JTs T9s 76s 65s
-face_raise.call = 22 33 44 55 66 77 88 99 TT A2s A3s A6s A7s A8s A9s AJs KTs QTs 98s 87s AJo
-# Early and middle seats raise and call far less: players are still to act behind them.
-# Ace-queen offsuit folds here.
-face_raise.early.reraise = JJ+ AQs+ AKo AJs ATs KQs QJs A5s
+# Facing one raise and no callers. Cutoff and button rows come from Spot D at 200bb
+# (14bb uniform 3-bet sizing, O2 s=0.5 tie-break), restricted to value 3-bets only:
+# no semi-bluff 3-bets; suited connectors (98s-54s) and suited broadways below KJs
+# (QJs, JTs) call in position instead of 3-betting. A5s, A4s, T9s, KQo and 88-22 call.
+# Depends on opener: AQo, ATs, QJs, AJo, KQo, KTs, QTs, T9s, A9s, A2s, 88, 44, 22.
+face_raise.reraise = 99+ ATs+ AQo+ KJs+
+face_raise.call = 22 33 44 55 66 77 88 A2s A3s A4s A5s A6s A7s A8s A9s KTs QTs QJs JTs T9s 98s 87s 76s 65s 54s AJo KQo
+# Early and middle seats are not directly covered by the studies; keep the tight rows
+# and drop only the rejected A5s bluff 3-bet. Ace-queen offsuit folds here.
+face_raise.early.reraise = JJ+ AQs+ AKo AJs ATs KQs QJs
 face_raise.early.call = 77 88 99 TT KJs JTs
-# From the small or big blind you play out of position, so fewer hands 3-bet as semi-bluffs.
-face_raise.blinds.reraise = JJ+ AQs+ AQo+ KQs KQo A5s KJs QJs JTs T9s
-face_raise.blinds.call = 22 33 44 55 66 77 88 99 TT A2s A3s A4s A6s A7s A8s A9s ATs AJs KTs QTs 98s 87s AJo
-# Closing the action from the big blind against one raise, these also call: every suited king and
-# queen, more suited jacks and tens, small suited connectors and gappers, offsuit cards ten or
-# higher, ace-nine and ace-eight offsuit, and jack-nine and ten-nine offsuit.
-face_raise.big_blind.call = K2s K3s K4s K5s K6s K7s K8s K9s Q2s Q3s Q4s Q5s Q6s Q7s Q8s Q9s J7s J8s J9s T7s T8s 97s 96s 86s 85s 76s 75s 65s 64s 54s 53s 43s ATo A9o A8o KJo KTo QJo QTo JTo J9o T9o
-# The callers chart ignores your seat on purpose: multiway prices justify a suited call (54s) a middle seat would not open.
+# Blind rows come from Spot E at 200bb (16bb uniform 3-bet sizing, O2 s=0.5 tie-break),
+# smoothed to a coherent linear value core within study error: TT+, AK and AQs 3-bet;
+# KQs, JTs, A5s, A4s, AQo, KQo, T9s and suited connectors call instead of 3-betting out
+# of position. Depends on opener: JJ, TT, AKo, AQs, KQs, JTs, 99, 77, 55, AJs, ATs,
+# A9s, KJs, QJs.
+face_raise.blinds.reraise = TT+ AKs AKo AQs
+face_raise.blinds.call = 22 33 44 55 66 77 88 99 A2s A3s A4s A5s A6s A7s A8s A9s ATs AJs KTs KJs KQs QTs QJs JTs T9s 98s 87s AJo AQo KQo
+# Closing the action from the big blind against one raise (Spot E at 200bb): call suited
+# kings down to K5s, Q9s, J9s, J8s, T8s, 97s, 86s, 76s, 75s, 65s, 64s and 54s. Weaker
+# offsuit broadways and weak offsuit aces (ATo-A8o, KJo, KTo, QJo, QTo, JTo, J9o, T9o) fold.
+face_raise.big_blind.call = K5s K6s K7s K8s K9s Q9s J8s J9s T8s 97s 86s 76s 75s 65s 64s 54s
+# The callers chart is not directly covered by the studies and has no A5s/A4s bluffs, so leave it intact.
 # Facing a raise and one or more callers: thin 3-bets become calls, and suited hands that make big hands get better.
 face_callers.reraise = QQ+ AKs AKo
 face_callers.call = 22 33 44 55 66 77 88 99 TT JJ A2s A3s A4s A5s A6s A7s A8s A9s ATs AJs AQs KTs+ QTs+ JTs T9s 98s 87s 76s 65s 54s AJo AQo KQo
 # Closing the action from the big blind, these also call.
 face_callers.big_blind.call = ATo KJo KTo QJo QTo JTo
 # You opened and were 3-bet. In position means you did not open the small blind and the 3-bettor is in a blind.
-# 4-bet only kings and aces for value: these games call too much for bluff 4-bets to work.
-# In position you call with hands that play well deep: big pairs, ace-king, suited big cards,
-# and pairs and suited connectors for their sets, straights and flushes. Out of position you
-# call fewer; ace-queen offsuit, ace-jack offsuit, king-queen offsuit and weaker fold.
+# From Spot A (IP) and Spot B (OOP) at 200bb Call-vs-Fold across T0 and T2-T5 (ignoring T1):
+# 4-bet KK+; call QQ-22, AK, AQs, AJs, ATs, A5s, A4s, KQs, KJs, QJs and JTs-54s in both spots
+# (Spot B faces a smaller 9bb IP 3-bet vs 11bb from the blinds, so deep implied odds match IP).
+# Override: JJ folds OOP at T4 (-3.73 vs TT -2.69) inside sampling error, so JJ calls. AQo folds.
 three_bet.ip.fourbet = KK+
-three_bet.ip.call = QQ JJ TT 99 88 77 66 55 44 33 22 AKs AKo AQs AJs KQs KJs QJs JTs T9s 98s 87s 76s
+three_bet.ip.call = QQ JJ TT 99 88 77 66 55 44 33 22 AKs AKo AQs AJs ATs A5s A4s KQs KJs QJs JTs T9s 98s 87s 76s 65s 54s
 three_bet.oop.fourbet = KK+
-three_bet.oop.call = QQ JJ TT 99 AKs AKo AQs KQs
-# You 3-bet and got 4-bet: all in with kings or aces, call with queens or ace-king, fold the rest.
-four_bet.allin = KK+
-four_bet.call = QQ AKs AKo
+three_bet.oop.call = QQ JJ TT 99 88 77 66 55 44 33 22 AKs AKo AQs AJs ATs A5s A4s KQs KJs QJs JTs T9s 98s 87s 76s 65s 54s
+# You 3-bet and got 4-bet (Spot C at 200bb across F0-F2): only AA is robustly all in.
+# KK calls for a general card (it only folded under the two tightest ranges F0/F1 and
+# continues once a 4-bettor has all AK and some QQ); QQ, JJ, AK and weaker fold under F1.
+four_bet.allin = AA
+four_bet.call = KK
 note.seats = Count the players still to act behind you: 5 or more is early, 4 is middle, 3 is cutoff, 2 is button, 1 is small blind. At 5 players the first to act is middle. At 4 players the first to act is cutoff.
 note.open = Folded to you: raise to 3bb with your seat's range, otherwise fold.
 note.iso = One or more limpers: raise to 4bb plus 1bb per limper with iso.raise, and from the cutoff or button also with iso.late.raise. Limp along with the rest of iso.limp only from the cutoff, button or small blind, or when two or more have limped. Fold the rest.
-note.face_raise = One raise and no callers: early and middle seats have the tightest lists, the cutoff and button 3-bet and call wider, and the blinds have their own lists. Some suited aces and suited connectors 3-bet as semi-bluffs. From the big blind, also call many more suited hands, every offsuit hand with two cards ten or higher, and ace-nine, ace-eight, jack-nine and ten-nine offsuit. 3-bet to about 3 times the raise, call or fold.
+note.face_raise = One raise and no callers: 3-bet for value only, sized big against players who call too much, about 14bb in position and 16bb from the big blind over a 3bb opening raise. Early and middle seats play tightest, cutoff and button 3-bet a wider value range (including tens, nines and strong suited aces) while calling smaller pairs, suited connectors and weaker suited broadways in position, and the blinds 3-bet a tighter linear core while calling more suited hands from the big blind and folding weaker offsuit hands.
 note.callers = A raise and at least one caller: use the callers chart. Fewer hands 3-bet here, and hands that make big hands multiway get better. 3-bet to 3 times the raise plus one more raise per caller. From the big blind, also call the other offsuit hands with two cards ten or higher.
-note.three_bet = You opened and got 3-bet: use the in-position chart if you did not open the small blind and the 3-bettor is in a blind, otherwise the out-of-position chart. 4-bet only kings and aces to about 2.5 times the 3-bet for value, because these games call too much for bluff 4-bets to work. In position, call with hands that play well deep (big pairs, ace-king, suited big cards, and pairs and suited connectors for their sets, straights and flushes); out of position, call fewer; fold ace-queen offsuit, ace-jack offsuit, king-queen offsuit and weaker.
-note.four_bet = You 3-bet and got 4-bet: go all in with kings or aces, call with queens or ace-king, and fold the rest.
+note.three_bet = You opened and got 3-bet: use the in-position chart if you did not open the small blind and the 3-bettor is in a blind, otherwise the out-of-position chart. 4-bet only kings and aces to about 2.5 times the 3-bet for value, because these games call too much for bluff 4-bets to work. Deep at 200bb, call with pairs, ace-king, suited broadways, strong and wheel suited aces, and suited connectors; fold ace-queen offsuit, ace-jack offsuit, king-queen offsuit and weaker.
+note.four_bet = You 3-bet and got 4-bet: go all in with aces, call with kings and fold the rest against a tight 4-bet. Calling rather than shoving kings keeps the pot smaller against the tightest 4-bettors. Against players whose only re-raise over a 3-bet is a shove with aces or kings, kings themselves are a fold (about 23% equity against that range).
 note.big_blind = In the big blind with no raise, check. With limpers, raise iso.raise hands and check the rest.

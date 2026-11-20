@@ -231,43 +231,68 @@ fn hand_written_spots_get_the_right_answer() {
         (Seat::Early, Situation::Raised, "JhJd", Raise),
         (Seat::Early, Situation::Raised, "9h9d", Call),
         (Seat::Early, Situation::Raised, "6h6d", Fold),
-        (Seat::Middle, Situation::Raised, "Ah5h", Raise),
+        (Seat::Middle, Situation::Raised, "Ah5h", Fold),
         (Seat::Middle, Situation::Raised, "Ah9h", Fold),
         (Seat::Middle, Situation::Raised, "6h5h", Fold),
         (Seat::Middle, Situation::Raised, "KhTh", Fold),
-        (Seat::Cutoff, Situation::Raised, "Ah5h", Raise),
+        (Seat::Cutoff, Situation::Raised, "ThTd", Raise),
+        (Seat::Cutoff, Situation::Raised, "9h9d", Raise),
+        (Seat::Cutoff, Situation::Raised, "8h8d", Call),
+        (Seat::Cutoff, Situation::Raised, "Ah5h", Call),
         (Seat::Cutoff, Situation::Raised, "Ah6h", Call),
         (Seat::Button, Situation::Raised, "AhTh", Raise),
-        (Seat::Button, Situation::Raised, "AhJh", Call),
-        (Seat::Button, Situation::Raised, "6h5h", Raise),
+        (Seat::Button, Situation::Raised, "AhJh", Raise),
+        (Seat::Button, Situation::Raised, "KhJh", Raise),
+        (Seat::Button, Situation::Raised, "QhJh", Call),
+        (Seat::Button, Situation::Raised, "JhTh", Call),
+        (Seat::Button, Situation::Raised, "6h5h", Call),
         (Seat::Button, Situation::Raised, "9h8h", Call),
+        (Seat::Button, Situation::Raised, "Th9h", Call),
         (Seat::Middle, Situation::Raised, "KhQd", Fold),
         (Seat::Middle, Situation::Raised, "AhQd", Fold),
         (Seat::Early, Situation::Raised, "AhQd", Fold),
-        (Seat::Button, Situation::Raised, "KhQd", Raise),
+        (Seat::Button, Situation::Raised, "KhQd", Call),
         (Seat::Button, Situation::Raised, "AhQd", Raise),
         (Seat::Button, Situation::Raised, "KhQh", Raise),
         (Seat::Button, Situation::Raised, "AhJd", Call),
         (Seat::Button, Situation::Raised, "AhTd", Fold),
-        (Seat::Button, Situation::Raised, "5h4h", Fold),
+        (Seat::Button, Situation::Raised, "5h4h", Call),
+        (Seat::Button, Situation::Raised, "4h3h", Fold),
+        (Seat::SmallBlind, Situation::Raised, "ThTd", Raise),
+        (Seat::SmallBlind, Situation::Raised, "AhQh", Raise),
+        (Seat::SmallBlind, Situation::Raised, "AhQd", Call),
+        (Seat::SmallBlind, Situation::Raised, "KhQh", Call),
+        (Seat::SmallBlind, Situation::Raised, "JhTh", Call),
+        (Seat::SmallBlind, Situation::Raised, "9h9d", Call),
+        (Seat::SmallBlind, Situation::Raised, "Ah5h", Call),
         (Seat::SmallBlind, Situation::Raised, "8h7h", Call),
         (Seat::SmallBlind, Situation::Raised, "7h6h", Fold),
+        (Seat::BigBlind, Situation::Raised, "ThTd", Raise),
+        (Seat::BigBlind, Situation::Raised, "AhQh", Raise),
+        (Seat::BigBlind, Situation::Raised, "AhQd", Call),
+        (Seat::BigBlind, Situation::Raised, "KhQh", Call),
+        (Seat::BigBlind, Situation::Raised, "JhTh", Call),
+        (Seat::BigBlind, Situation::Raised, "Ah5h", Call),
         (Seat::BigBlind, Situation::Raised, "7h6h", Call),
-        (Seat::BigBlind, Situation::Raised, "Kh2h", Call),
-        (Seat::BigBlind, Situation::Raised, "Qh2h", Call),
-        (Seat::BigBlind, Situation::Raised, "Jh5h", Fold),
-        (Seat::BigBlind, Situation::Raised, "4h3h", Call),
-        (Seat::BigBlind, Situation::Raised, "3h2h", Fold),
-        (Seat::BigBlind, Situation::Raised, "Jh9d", Call),
+        (Seat::BigBlind, Situation::Raised, "Kh5h", Call),
+        (Seat::BigBlind, Situation::Raised, "Kh4h", Fold),
+        (Seat::BigBlind, Situation::Raised, "Qh9h", Call),
+        (Seat::BigBlind, Situation::Raised, "Qh8h", Fold),
+        (Seat::BigBlind, Situation::Raised, "Jh8h", Call),
+        (Seat::BigBlind, Situation::Raised, "Jh7h", Fold),
+        (Seat::BigBlind, Situation::Raised, "5h4h", Call),
+        (Seat::BigBlind, Situation::Raised, "4h3h", Fold),
+        (Seat::BigBlind, Situation::Raised, "Jh9d", Fold),
         (Seat::BigBlind, Situation::Raised, "Kh9d", Fold),
         (Seat::BigBlind, Situation::Raised, "AhJd", Call),
-        (Seat::BigBlind, Situation::Raised, "KhQd", Raise),
-        (Seat::BigBlind, Situation::Raised, "JhTd", Call),
-        (Seat::BigBlind, Situation::Raised, "Ah8d", Call),
-        (Seat::BigBlind, Situation::Raised, "Ah7d", Fold),
+        (Seat::BigBlind, Situation::Raised, "KhQd", Call),
+        (Seat::BigBlind, Situation::Raised, "JhTd", Fold),
+        (Seat::BigBlind, Situation::Raised, "AhTd", Fold),
+        (Seat::BigBlind, Situation::Raised, "Ah8d", Fold),
         (Seat::SmallBlind, Situation::Raised, "AhJd", Call),
+        (Seat::SmallBlind, Situation::Raised, "KhQd", Call),
         (Seat::SmallBlind, Situation::Raised, "KhJd", Fold),
-        (Seat::BigBlind, Situation::Raised, "KhJd", Call),
+        (Seat::BigBlind, Situation::Raised, "KhJd", Fold),
         (Seat::Cutoff, Situation::RaisedCalled(1), "AhQd", Call),
         (Seat::Cutoff, Situation::RaisedCalled(2), "AhJd", Call),
         (Seat::Cutoff, Situation::RaisedCalled(2), "KhJd", Fold),
@@ -284,11 +309,11 @@ fn hand_written_spots_get_the_right_answer() {
         (Seat::Middle, Situation::Limpers(2), "Th9h", Call),
         (Seat::BigBlind, Situation::RaisedCalled(1), "JhJd", Call),
         (Seat::Cutoff, Situation::ThreeBet { in_position: true }, "AhJh", Call),
-        (Seat::Cutoff, Situation::ThreeBet { in_position: false }, "AhJh", Fold),
+        (Seat::Cutoff, Situation::ThreeBet { in_position: false }, "AhJh", Call),
         (Seat::Cutoff, Situation::ThreeBet { in_position: true }, "5h5d", Call),
-        (Seat::SmallBlind, Situation::ThreeBet { in_position: false }, "5h5d", Fold),
+        (Seat::SmallBlind, Situation::ThreeBet { in_position: false }, "5h5d", Call),
         (Seat::Cutoff, Situation::ThreeBet { in_position: false }, "9h9d", Call),
-        (Seat::Cutoff, Situation::ThreeBet { in_position: false }, "8h8d", Fold),
+        (Seat::Cutoff, Situation::ThreeBet { in_position: false }, "8h8d", Call),
         (Seat::Button, Situation::ThreeBet { in_position: true }, "QhQd", Call),
         (Seat::Early, Situation::ThreeBet { in_position: false }, "QhQd", Call),
         (Seat::Button, Situation::ThreeBet { in_position: true }, "AhKh", Call),
@@ -300,17 +325,17 @@ fn hand_written_spots_get_the_right_answer() {
         (Seat::Button, Situation::ThreeBet { in_position: true }, "AhQh", Call),
         (Seat::Early, Situation::ThreeBet { in_position: false }, "AhQh", Call),
         (Seat::Button, Situation::ThreeBet { in_position: true }, "7h6h", Call),
-        (Seat::Early, Situation::ThreeBet { in_position: false }, "7h6h", Fold),
+        (Seat::Early, Situation::ThreeBet { in_position: false }, "7h6h", Call),
         (Seat::Button, Situation::ThreeBet { in_position: true }, "KhKd", Raise),
         (Seat::Button, Situation::ThreeBet { in_position: true }, "AhAd", Raise),
         (Seat::Early, Situation::ThreeBet { in_position: false }, "KhKd", Raise),
         (Seat::Early, Situation::ThreeBet { in_position: false }, "AhAd", Raise),
-        (Seat::Early, Situation::FourBet, "AhKh", Call),
-        (Seat::Early, Situation::FourBet, "AhKd", Call),
-        (Seat::Early, Situation::FourBet, "QhQd", Call),
+        (Seat::Early, Situation::FourBet, "AhKh", Fold),
+        (Seat::Early, Situation::FourBet, "AhKd", Fold),
+        (Seat::Early, Situation::FourBet, "QhQd", Fold),
         (Seat::Early, Situation::FourBet, "JhJd", Fold),
         (Seat::Early, Situation::FourBet, "AhQh", Fold),
-        (Seat::Early, Situation::FourBet, "KhKd", Raise),
+        (Seat::Early, Situation::FourBet, "KhKd", Call),
         (Seat::Early, Situation::FourBet, "AhAd", Raise),
     ];
     for (seat, situation, text, expected) in cases {
@@ -318,21 +343,67 @@ fn hand_written_spots_get_the_right_answer() {
     }
 }
 
-/// Six spots from the player's own games, where the card was too tight. Seats follow
-/// the table size: at 4 players the big blind has 0 behind, the button 2 and the small blind 1.
+/// Key findings from the two 200bb solver studies and general-card adjustments must hold.
+#[test]
+fn solver_study_key_facts_hold() {
+    use Action::{Call, Fold, Raise};
+    // AKo calls a 3-bet in and out of position.
+    assert_eq!(preflop_answer(Seat::Button, Situation::ThreeBet { in_position: true }, hand("AhKd")).0, Call);
+    assert_eq!(preflop_answer(Seat::Cutoff, Situation::ThreeBet { in_position: false }, hand("AhKd")).0, Call);
+    assert_eq!(Chart::ThreeBetIp.action(hand("AhKd")), Call);
+    assert_eq!(Chart::ThreeBetOop.action(hand("AhKd")), Call);
+    // AKo folds to a 4-bet.
+    assert_eq!(preflop_answer(Seat::Button, Situation::FourBet, hand("AhKd")).0, Fold);
+    assert_eq!(Chart::FourBet.action(hand("AhKd")), Fold);
+    // AA is the only all-in facing a 4-bet; KK calls; every other hand (including QQ, JJ, AK) folds.
+    for (label, holding) in classes() {
+        let expected = match label.as_str() {
+            "AA" => Raise,
+            "KK" => Call,
+            _ => Fold,
+        };
+        assert_eq!(Chart::FourBet.action(holding), expected, "4-bet {label}");
+    }
+    // TT 3-bets an open in position; IP 3-bets are value only (QJs, JTs, 98s-54s call).
+    assert_eq!(preflop_answer(Seat::Cutoff, Situation::Raised, hand("ThTd")).0, Raise);
+    assert_eq!(preflop_answer(Seat::Button, Situation::Raised, hand("ThTd")).0, Raise);
+    for text in ["QhJh", "JhTh", "9h8h", "8h7h", "7h6h", "6h5h", "5h4h"] {
+        assert_eq!(preflop_answer(Seat::Button, Situation::Raised, hand(text)).0, Call, "IP call {text}");
+    }
+    // Blinds 3-bet TT+ AKs AKo AQs; KQs, JTs and A5s call.
+    for seat in [Seat::SmallBlind, Seat::BigBlind] {
+        assert_eq!(preflop_answer(seat, Situation::Raised, hand("AhQh")).0, Raise, "{seat:?} AQs");
+        assert_eq!(preflop_answer(seat, Situation::Raised, hand("KhQh")).0, Call, "{seat:?} KQs");
+        assert_eq!(preflop_answer(seat, Situation::Raised, hand("JhTh")).0, Call, "{seat:?} JTs");
+    }
+    // A5s does not 3-bet from the big blind (or small blind, early, or IP).
+    assert_ne!(preflop_answer(Seat::BigBlind, Situation::Raised, hand("Ah5h")).0, Raise);
+    assert_ne!(preflop_answer(Seat::SmallBlind, Situation::Raised, hand("Ah5h")).0, Raise);
+    assert_ne!(preflop_answer(Seat::Button, Situation::Raised, hand("Ah5h")).0, Raise);
+    assert_ne!(preflop_answer(Seat::Early, Situation::Raised, hand("Ah5h")).0, Raise);
+    // Note mentions folding KK against an AA/KK shove (about 23% equity), calling KK to keep pot smaller,
+    // and big value 3-bet sizing.
+    let four_bet_note = CARD.note("note.four_bet");
+    assert!(four_bet_note.contains("kings") && four_bet_note.contains("23%"), "{four_bet_note}");
+    assert!(four_bet_note.contains("keeps the pot smaller"), "{four_bet_note}");
+    let face_raise_note = CARD.note("note.face_raise");
+    assert!(face_raise_note.contains("14bb") && face_raise_note.contains("16bb"), "{face_raise_note}");
+}
+
+/// Spots checked through the full grading path, and old dismissed reason lines stay gone.
 #[test]
 fn the_players_disputed_spots_get_the_revised_answers() {
-    use Action::{Call, Raise};
+    use Action::{Call, Fold, Raise};
     let cases = [
-        // 4 players, big blind, one raise in front.
-        (4, 0, Situation::Raised, "KhJd", Call),
+        // 4 players, big blind, one raise in front: offsuit KJo and ATo fold against tight/medium openers.
+        (4, 0, Situation::Raised, "KhJd", Fold),
         // 6 players, big blind: a call, not a 3-bet, so the pot stays small out of position.
         (6, 0, Situation::Raised, "7c6c", Call),
-        // 4 players, button: king-queen 3-bets a wide late opener for value.
-        (4, 2, Situation::Raised, "KhQd", Raise),
-        (4, 0, Situation::Raised, "AhTd", Call),
-        // 4 players, small blind: the same value 3-bet as the button.
-        (4, 1, Situation::Raised, "KhQd", Raise),
+        // 4 players, button: king-queen offsuit calls against a medium opener (trapping s=0.5).
+        (4, 2, Situation::Raised, "KhQd", Call),
+        (4, 0, Situation::Raised, "AhTd", Fold),
+        // 4 players, small blind: king-queen offsuit calls out of position.
+        (4, 1, Situation::Raised, "KhQd", Call),
         // 4 players, button, one limper: raise instead of limping along.
         (4, 2, Situation::Limpers(1), "Th9h", Raise),
     ];
@@ -353,20 +424,20 @@ fn the_players_disputed_spots_get_the_revised_answers() {
     }
 }
 
-/// Wherever king-queen 3-bets, every stronger broadway hand 3-bets too.
+/// Wherever ace-queen offsuit 3-bets, every stronger broadway hand and big pair 3-bets too.
 #[test]
-fn three_bets_are_linear_where_king_queen_three_bets() {
-    let mut charts_with_kqo = 0;
+fn three_bets_are_linear_where_ace_queen_three_bets() {
+    let mut charts_with_aqo = 0;
     for chart in Chart::ALL {
-        if chart.action(hand("KhQd")) != Action::Raise {
+        if chart.action(hand("AhQd")) != Action::Raise {
             continue;
         }
-        charts_with_kqo += 1;
-        for stronger in ["KhQh", "AhQd", "AhQh", "AhKd", "AhKh", "JhJd", "QhQd", "KhKd", "AhAd"] {
-            assert_eq!(chart.action(hand(stronger)), Action::Raise, "{chart:?}: KQo 3-bets but {stronger} does not");
+        charts_with_aqo += 1;
+        for stronger in ["AhQh", "AhKd", "AhKh", "ThTd", "JhJd", "QhQd", "KhKd", "AhAd"] {
+            assert_eq!(chart.action(hand(stronger)), Action::Raise, "{chart:?}: AQo 3-bets but {stronger} does not");
         }
     }
-    assert_eq!(charts_with_kqo, 3, "the cutoff and button, the small blind and the big blind");
+    assert_eq!(charts_with_aqo, 1, "only the cutoff and button 3-bet AQo");
     assert_eq!(Chart::PositionEarly.action(hand("KhQd")), Action::Fold, "early seats keep the tight 3-bets");
     assert_eq!(Chart::PositionEarly.action(hand("AhQd")), Action::Fold, "ace-queen offsuit folds from early seats");
 }
@@ -419,7 +490,7 @@ fn fold_lines_never_argue_against_hands_the_chart_plays() {
 #[test]
 fn the_big_blind_defends_wider_than_the_small_blind() {
     let continues = |chart: Chart| classes().into_iter().filter(|(_, h)| chart.action(*h) != Action::Fold).count();
-    assert!(continues(Chart::BlindsBb) > continues(Chart::Blinds) + 20);
+    assert!(continues(Chart::BlindsBb) > continues(Chart::Blinds) + 10);
     for (label, holding) in classes() {
         if Chart::Blinds.action(holding) != Action::Fold {
             assert_ne!(Chart::BlindsBb.action(holding), Action::Fold, "{label}");
@@ -466,9 +537,9 @@ fn level(chart: Chart, holding: Holding) -> u8 {
     }
 }
 
-/// Some 3-bets are semi-bluffs below hands that only call or fold (A5s 3-bets while A6s
-/// calls, or folds from an early seat), so a 3-bet can sit alone. A call cannot: every
-/// better kicker of a hand that calls continues, and a bigger pair always does at least as much.
+/// Wheel suited aces (A5s, A4s) call deep 3-bets for straight and flush playability even
+/// when middling suited aces (A9s-A6s) fold. Every other call needs every better kicker to
+/// continue, and a bigger pair always does at least as much.
 #[test]
 fn charts_have_no_holes() {
     let calls = |chart: Chart, holding: Holding| level(chart, holding) == 1;
@@ -481,7 +552,10 @@ fn charts_have_no_holes() {
                 if low + 1 < high {
                     let better_s = [Card::new(high, 0), Card::new(low + 1, 0)];
                     let better_o = [Card::new(high, 0), Card::new(low + 1, 1)];
-                    assert!(level(chart, better_s) > 0 || !calls(chart, suited), "{chart:?} suited {high} {low}");
+                    let wheel_ace_3bet = matches!(chart, Chart::ThreeBetIp | Chart::ThreeBetOop) && high == 12 && low <= 3;
+                    if !wheel_ace_3bet {
+                        assert!(level(chart, better_s) > 0 || !calls(chart, suited), "{chart:?} suited {high} {low}");
+                    }
                     assert!(level(chart, better_o) > 0 || !calls(chart, offsuit), "{chart:?} offsuit {high} {low}");
                 }
             }
@@ -533,8 +607,9 @@ fn the_callers_chart_keeps_only_the_big_three_bets() {
     }
 }
 
-/// Facing a 3-bet or a 4-bet, KK+ 4-bets / goes all in, deep-stack hands call (more IP than OOP,
-/// and QQ / AK against a 4-bet), and no reason line dismisses 3-bets as only aces, kings or ace-king.
+/// Facing a 3-bet at 200bb, KK+ 4-bets and deep-stack hands call (both IP and OOP);
+/// facing a 4-bet, AA goes all in, KK calls and the rest fold; no reason line dismisses
+/// 3-bets as only aces, kings or ace-king.
 #[test]
 fn three_bet_and_four_bet_charts_have_deep_stack_calls() {
     use Action::{Call, Fold, Raise};
@@ -543,16 +618,18 @@ fn three_bet_and_four_bet_charts_have_deep_stack_calls() {
     let (raise_4b, call_4b) = Chart::FourBet.lines();
     assert_eq!(raise_ip.text, "KK+");
     assert_eq!(raise_oop.text, "KK+");
-    assert_eq!(raise_4b.text, "KK+");
-    assert!(call_ip.range.combo_count() > call_oop.range.combo_count());
-    assert!(call_oop.range.combo_count() > call_4b.range.combo_count());
-    assert!(call_4b.range.combo_count() > 0);
-    for chart in [Chart::ThreeBetIp, Chart::ThreeBetOop, Chart::FourBet] {
+    assert_eq!(raise_4b.text, "AA");
+    assert_eq!(call_4b.text, "KK");
+    assert!(call_ip.range.combo_count() > 0);
+    assert!(call_oop.range.combo_count() > 0);
+    assert_eq!(call_4b.range.combo_count(), 6);
+    for chart in [Chart::ThreeBetIp, Chart::ThreeBetOop] {
         let s = chart.summary();
         assert!(s.contains(". Call "), "{s}");
         assert!(s.ends_with(". Fold the rest."), "{s}");
     }
-    // Key spots required by the deep-stack rules of thumb.
+    assert_eq!(Chart::FourBet.summary(), "You 3-bet and got 4-bet. All in AA. Call KK. Fold the rest.");
+    // Key spots from the 200bb solver studies.
     for (chart, text, expected) in [
         (Chart::ThreeBetIp, "AhKd", Call),
         (Chart::ThreeBetIp, "AhKh", Call),
@@ -560,6 +637,8 @@ fn three_bet_and_four_bet_charts_have_deep_stack_calls() {
         (Chart::ThreeBetOop, "AhKh", Call),
         (Chart::ThreeBetIp, "QhQd", Call),
         (Chart::ThreeBetOop, "QhQd", Call),
+        (Chart::ThreeBetIp, "JhJd", Call),
+        (Chart::ThreeBetOop, "JhJd", Call),
         (Chart::ThreeBetIp, "KhKd", Raise),
         (Chart::ThreeBetIp, "AhAd", Raise),
         (Chart::ThreeBetOop, "KhKd", Raise),
@@ -567,12 +646,14 @@ fn three_bet_and_four_bet_charts_have_deep_stack_calls() {
         (Chart::ThreeBetIp, "AhQd", Fold),
         (Chart::ThreeBetOop, "AhQd", Fold),
         (Chart::ThreeBetIp, "5h5d", Call),
-        (Chart::ThreeBetOop, "5h5d", Fold),
-        (Chart::FourBet, "QhQd", Call),
-        (Chart::FourBet, "AhKh", Call),
-        (Chart::FourBet, "AhKd", Call),
+        (Chart::ThreeBetOop, "5h5d", Call),
+        (Chart::ThreeBetIp, "Ah5h", Call),
+        (Chart::ThreeBetOop, "Ah5h", Call),
+        (Chart::FourBet, "QhQd", Fold),
+        (Chart::FourBet, "AhKh", Fold),
+        (Chart::FourBet, "AhKd", Fold),
         (Chart::FourBet, "JhJd", Fold),
-        (Chart::FourBet, "KhKd", Raise),
+        (Chart::FourBet, "KhKd", Call),
         (Chart::FourBet, "AhAd", Raise),
     ] {
         assert_eq!(chart.action(hand(text)), expected, "{chart:?} {text}");
@@ -631,8 +712,6 @@ enum Check {
     Set,
     OftenOvercard,
     SlightlyAheadOfAceKing,
-    /// The hand folds out of position while pocket nines call.
-    FoldsWhereNinesCall,
     ThreeWayPrice,
     /// Equity against early, middle and late opens clears the big blind's price.
     BigBlindPrice,
@@ -660,24 +739,24 @@ fn checks(chart: Chart, action: Action, kind: HandKind) -> &'static [Check] {
         (Position | PositionEarly | Blinds | BlindsBb, Raise, KingsOrAces) => &[Ahead(V::RaisesCalls, 0.9)],
         (Position | PositionEarly | Blinds | BlindsBb, Raise, Queens) => &[Ahead(V::RaisesCalls, 0.85)],
         (Position | PositionEarly | Blinds | BlindsBb, Raise, Jacks) => &[Ahead(V::RaisesCalls, 0.6), OftenOvercard],
+        (Position | Blinds | BlindsBb, Raise, Tens) => &[Ahead(V::RaisesCalls, 0.5)],
+        (Position, Raise, MiddlePair) => &[Ahead(V::RaisesCalls, 0.5)],
         (Position | PositionEarly | Blinds | BlindsBb, Raise, AceKing) => &[Dominates(V::Calls, 0.4)],
         (Position | PositionEarly | Blinds | BlindsBb, Raise, AceQueen) => &[Dominates(V::Calls, 0.3)],
-        (Position | Blinds | BlindsBb, Raise, OffsuitBroadway) => {
-            &[Dominates(V::CutoffOpens, 0.1), Dominates(V::ButtonOpens, 0.1)]
-        }
-        // "Still plays well when called": a third of the pot against an opening range.
-        (Position | PositionEarly | Blinds | BlindsBb, Raise, SuitedBroadway | SuitedAce) => &[Equity(V::Raises, 33.0)],
-        (Position | Blinds | BlindsBb, Raise, SuitedConnector) => &[Equity(V::Raises, 33.0)],
+        (Blinds | BlindsBb, Call, AceQueen) => &[],
+        // "Play well in a bigger pot": at least a third of the pot against an opening range.
+        (Position | PositionEarly, Raise, SuitedBroadway) => &[Equity(V::Raises, 33.0)],
+        (Position | PositionEarly, Raise, SuitedAce) => &[Equity(V::Raises, 33.0)],
         // On the button facing 3bb: 3 to call into 4.5. In the small blind: 2.5 into 4.5.
         (Position, Call, OffsuitBroadway) => &[PriceAgainst(40.0, &[V::Raises, V::CutoffOpens])],
         (Blinds, Call, OffsuitBroadway) => &[PriceAgainst(250.0 / 7.0, &[V::CutoffOpens, V::ButtonOpens])],
-        (BlindsBb, Call, OtherSuited | OffsuitAce | OtherOffsuit) => &[BigBlindPrice],
+        (BlindsBb, Call, OtherSuited) => &[BigBlindPrice],
         (Position, Fold, OffsuitBroadway) => &[Kicker(V::Raises, 0.1), Kicker(V::CutoffOpens, 0.1)],
         // The wide button range dominates too few of these, so the line names the tighter raisers.
-        (Blinds, Fold, OffsuitBroadway) => &[Kicker(V::Raises, 0.1), Kicker(V::CutoffOpens, 0.1)],
-        (Blinds | BlindsBb, Fold, OffsuitBroadway | OffsuitAce) => &[Kicker(V::CutoffOpens, 0.1), Kicker(V::ButtonOpens, 0.1)],
+        (Blinds | BlindsBb, Fold, OffsuitBroadway) => &[Kicker(V::Raises, 0.1), Kicker(V::CutoffOpens, 0.1)],
+        (Blinds | BlindsBb, Fold, OffsuitAce) => &[Kicker(V::CutoffOpens, 0.1), Kicker(V::ButtonOpens, 0.1)],
         (Position | Blinds | BlindsBb | Callers | CallersBb, Fold, SuitedConnector) => &[UsuallyOnePairOrLess, BiggerOfKindPlays],
-        (Position | PositionEarly | Blinds | BlindsBb, Call, Tens) => &[OftenOvercard],
+        (PositionEarly, Call, Tens) => &[OftenOvercard],
         (Position | PositionEarly | Blinds | BlindsBb, Call, MiddlePair | SmallPair) => &[Set],
         (Position | PositionEarly | Blinds | BlindsBb, Call, SuitedAce | SuitedBroadway | SuitedConnector) => &[],
         (PositionEarly, Fold, SmallPair) => &[Set],
@@ -700,22 +779,18 @@ fn checks(chart: Chart, action: Action, kind: HandKind) -> &'static [Check] {
         (ThreeBetIp | ThreeBetOop, Call, Queens) => &[Ahead(V::ThreeBets, 0.75), Behind(V::BigPairs)],
         (ThreeBetIp | ThreeBetOop, Call, Jacks | Tens) => &[Ahead(V::ThreeBets, 0.5), Behind(V::BigPairs)],
         (ThreeBetIp | ThreeBetOop, Call, AceKing) => &[Equity(V::Premiums, 35.0), Behind(V::BigPairs)],
-        (ThreeBetIp, Call, MiddlePair | SmallPair) => &[Set],
-        (ThreeBetOop, Call, MiddlePair) => &[Set],
-        (ThreeBetOop, Fold, MiddlePair | SmallPair) => &[FoldsWhereNinesCall],
-        (ThreeBetIp, Call, AceQueen | SuitedAce | SuitedBroadway | SuitedConnector) => &[],
-        (ThreeBetOop, Call, AceQueen | SuitedBroadway) => &[],
+        (ThreeBetIp | ThreeBetOop, Call, MiddlePair | SmallPair) => &[Set],
+        (ThreeBetIp | ThreeBetOop, Call, AceQueen | SuitedAce | SuitedBroadway | SuitedConnector) => &[],
         (ThreeBetIp | ThreeBetOop, Fold, AceQueen) => &[DominatedBy(V::AceKing, 0.9), Behind(V::BigPairs)],
         (ThreeBetIp | ThreeBetOop, Fold, OffsuitBroadway) => &[DominatedBy(V::ThreeBets, 0.1), Behind(V::BigPairs)],
-        (ThreeBetIp | ThreeBetOop, Fold, SuitedAce) => &[DominatedBy(V::ThreeBets, 0.25)],
-        (ThreeBetIp, Fold, SuitedBroadway) => &[DominatedBy(V::ThreeBets, 0.25)],
-        (ThreeBetOop, Fold, SuitedBroadway) => &[DominatedBy(V::ThreeBets, 0.1)],
-        (ThreeBetIp, Fold, SuitedConnector) => &[Behind(V::ThreeBets), BiggerOfKindPlays],
-        (ThreeBetOop, Fold, SuitedConnector) => &[Behind(V::ThreeBets)],
+        (ThreeBetIp | ThreeBetOop, Fold, SuitedAce) => &[DominatedBy(V::ThreeBets, 0.2)],
+        (ThreeBetIp | ThreeBetOop, Fold, SuitedBroadway) => &[DominatedBy(V::ThreeBets, 0.2)],
+        (ThreeBetIp | ThreeBetOop, Fold, SuitedConnector) => &[Behind(V::ThreeBets), BiggerOfKindPlays],
         (ThreeBetIp | ThreeBetOop, Fold, OffsuitAce | OtherSuited | OtherOffsuit) => &[Behind(V::ThreeBets)],
 
         (FourBet, Raise, KingsOrAces) => &[Equity(V::FourBets, 41.0)],
-        (FourBet, Call, Queens | AceKing) => &[Equity(V::FourBets, 35.0), Behind(V::BigPairs)],
+        (FourBet, Call, KingsOrAces) => &[Equity(V::FourBets, 50.0), Behind(V::BigPairs)],
+        (FourBet, Fold, Queens | AceKing) => &[Behind(V::BigPairs)],
         (FourBet, Fold, Jacks) => &[Behind(V::BigPairs), SlightlyAheadOfAceKing],
         (FourBet, Fold, AceQueen) => &[DominatedBy(V::AceKing, 0.9), Behind(V::BigPairs)],
         (FourBet, Fold, _) => &[Behind(V::FourBets)],
@@ -902,15 +977,6 @@ fn apply(lab: &mut Lab, chart: Chart, label: &str, hero: Holding, check: Check, 
                 return fail(format!("equity {got}"));
             }
         }
-        Check::FoldsWhereNinesCall => {
-            let nines = [Card::new(7, 0), Card::new(7, 1)];
-            if hero[0].rank() >= nines[0].rank()
-                || Chart::ThreeBetOop.action(hero) != Action::Fold
-                || Chart::ThreeBetOop.action(nines) != Action::Call
-            {
-                return fail("nines do not call where this pair folds".to_string());
-            }
-        }
         Check::BigBlindPrice => {
             let need = 2.0 / 6.5 * 100.0;
             for v in [V::Raises, V::CutoffOpens, V::ButtonOpens] {
@@ -1084,28 +1150,30 @@ fn lines_that_name_a_hand_describe_only_that_hand() {
     let cases = [
         (Chart::Position, Action::Raise, HandKind::AceQueen, vec!["AQo", "AQs"]),
         (Chart::PositionEarly, Action::Fold, HandKind::AceQueen, vec!["AQo"]),
-        (Chart::Blinds, Action::Raise, HandKind::AceQueen, vec!["AQo", "AQs"]),
-        (Chart::Position, Action::Raise, HandKind::OffsuitBroadway, vec!["KQo"]),
-        (Chart::Blinds, Action::Raise, HandKind::OffsuitBroadway, vec!["KQo"]),
-        (Chart::BlindsBb, Action::Raise, HandKind::OffsuitBroadway, vec!["KQo"]),
-        (Chart::Position, Action::Call, HandKind::OffsuitBroadway, vec!["AJo"]),
-        (Chart::Blinds, Action::Call, HandKind::OffsuitBroadway, vec!["AJo"]),
+        (Chart::Blinds, Action::Raise, HandKind::AceQueen, vec!["AQs"]),
+        (Chart::BlindsBb, Action::Raise, HandKind::AceQueen, vec!["AQs"]),
+        (Chart::Blinds, Action::Call, HandKind::AceQueen, vec!["AQo"]),
+        (Chart::BlindsBb, Action::Call, HandKind::AceQueen, vec!["AQo"]),
+        (Chart::Position, Action::Raise, HandKind::MiddlePair, vec!["99"]),
+        (Chart::Position, Action::Raise, HandKind::Tens, vec!["TT"]),
+        (Chart::Blinds, Action::Raise, HandKind::Tens, vec!["TT"]),
+        (Chart::Position, Action::Call, HandKind::OffsuitBroadway, vec!["AJo", "KQo"]),
+        (Chart::Blinds, Action::Call, HandKind::OffsuitBroadway, vec!["AJo", "KQo"]),
+        (Chart::BlindsBb, Action::Call, HandKind::OffsuitBroadway, vec!["AJo", "KQo"]),
         (Chart::Callers, Action::Call, HandKind::OffsuitBroadway, vec!["AJo", "KQo"]),
         (Chart::Position, Action::Raise, HandKind::Jacks, vec!["JJ"]),
         (Chart::Callers, Action::Call, HandKind::AceQueen, vec!["AQo", "AQs"]),
 
         (Chart::ThreeBetIp, Action::Call, HandKind::AceQueen, vec!["AQs"]),
         (Chart::ThreeBetIp, Action::Fold, HandKind::AceQueen, vec!["AQo"]),
-        (Chart::ThreeBetIp, Action::Call, HandKind::SuitedAce, vec!["AJs"]),
-        (Chart::ThreeBetOop, Action::Call, HandKind::MiddlePair, vec!["99"]),
         (Chart::ThreeBetOop, Action::Call, HandKind::AceQueen, vec!["AQs"]),
         (Chart::ThreeBetOop, Action::Fold, HandKind::AceQueen, vec!["AQo"]),
-        (Chart::ThreeBetOop, Action::Call, HandKind::SuitedBroadway, vec!["KQs"]),
         (Chart::ThreeBetIp, Action::Call, HandKind::AceKing, vec!["AKo", "AKs"]),
         (Chart::ThreeBetOop, Action::Call, HandKind::AceKing, vec!["AKo", "AKs"]),
-        (Chart::FourBet, Action::Raise, HandKind::KingsOrAces, vec!["AA", "KK"]),
-        (Chart::FourBet, Action::Call, HandKind::AceKing, vec!["AKo", "AKs"]),
-        (Chart::FourBet, Action::Call, HandKind::Queens, vec!["QQ"]),
+        (Chart::FourBet, Action::Raise, HandKind::KingsOrAces, vec!["AA"]),
+        (Chart::FourBet, Action::Call, HandKind::KingsOrAces, vec!["KK"]),
+        (Chart::FourBet, Action::Fold, HandKind::Queens, vec!["QQ"]),
+        (Chart::FourBet, Action::Fold, HandKind::AceKing, vec!["AKo", "AKs"]),
         (Chart::FourBet, Action::Fold, HandKind::Jacks, vec!["JJ"]),
         (Chart::FourBet, Action::Fold, HandKind::AceQueen, vec!["AQo", "AQs"]),
     ];
@@ -1324,15 +1392,14 @@ fn dealt_hands_are_ones_you_could_hold_in_the_spot() {
     }
 }
 
-/// The big blind's extra calls outside the button's opening range still get dealt, so
+/// The big blind's extra calls outside the cutoff's opening range still get dealt, so
 /// the drill tests them.
 #[test]
 fn the_big_blind_extra_calls_are_dealt() {
-    let button = card_line("open.button");
+    let cutoff = card_line("open.cutoff");
     let extra = card_line("face_raise.big_blind.call");
-    let outside: BTreeSet<String> = extra.difference(&button).cloned().collect();
-    // The button now opens nearly all of them; 43s is the one left outside.
-    assert!(outside.contains("43s"), "{outside:?}");
+    let outside: BTreeSet<String> = extra.difference(&cutoff).cloned().collect();
+    assert!(outside.contains("86s") && outside.contains("75s") && outside.contains("64s"), "{outside:?}");
     let mut seen = BTreeSet::new();
     for item in all_preflop(60_000) {
         let (seat, situation, holding) = situation_of(&item);
@@ -1360,13 +1427,16 @@ fn raised_hands_are_never_obvious_folds() {
 }
 
 /// Facing a 3-bet or a 4-bet, the hands dealt are a sensible mix of 4-bets/all-ins
-/// (kings or aces no more than about one time in four), calls and real folds, never trash.
+/// (kings or aces no more than about one time in four), calls (when the chart has them)
+/// and real folds, never trash.
 #[test]
 fn three_bet_and_four_bet_spots_deal_hands_close_to_the_line() {
-    let allowed_three_bet = expand("22+ A5s+ KTs+ QTs+ JTs T9s 98s 87s 76s AJo+ KQo");
+    let allowed_three_bet = expand("22+ A4s+ KTs+ QTs+ JTs T9s 98s 87s 76s 65s 54s AJo+ KQo");
     let mut counts: HashMap<&'static str, [u32; 3]> = HashMap::new();
     let mut seen_ip_folds = BTreeSet::new();
     let mut seen_oop_folds = BTreeSet::new();
+    let mut seen_4bet_calls = BTreeSet::new();
+    let mut seen_4bet_folds = BTreeSet::new();
     for item in all_preflop(120_000) {
         let (seat, situation, holding) = situation_of(&item);
         let key = match situation {
@@ -1383,18 +1453,25 @@ fn three_bet_and_four_bet_spots_deal_hands_close_to_the_line() {
         let entry = counts.entry(key).or_insert([0; 3]);
         match action {
             Action::Raise => entry[0] += 1,
-            Action::Call => entry[1] += 1,
+            Action::Call => {
+                entry[1] += 1;
+                if key == "4bet" {
+                    seen_4bet_calls.insert(label);
+                }
+            }
             Action::Fold => {
                 entry[2] += 1;
                 if key == "3bet_ip" {
                     seen_ip_folds.insert(label);
                 } else if key == "3bet_oop" {
                     seen_oop_folds.insert(label);
+                } else {
+                    seen_4bet_folds.insert(label);
                 }
             }
         }
     }
-    for key in ["3bet_ip", "3bet_oop", "4bet"] {
+    for key in ["3bet_ip", "3bet_oop"] {
         let [raises, calls, folds] = counts[key];
         let total = f64::from(raises + calls + folds);
         let r = f64::from(raises) / total;
@@ -1404,12 +1481,23 @@ fn three_bet_and_four_bet_spots_deal_hands_close_to_the_line() {
         assert!((0.33..=0.47).contains(&c), "{key}: call share {c}");
         assert!((0.33..=0.47).contains(&f), "{key}: fold share {f}");
     }
-    for label in ["AQo", "AJo", "KQo"] {
+    {
+        let [raises, calls, folds] = counts["4bet"];
+        let total = f64::from(raises + calls + folds);
+        let r = f64::from(raises) / total;
+        let c = f64::from(calls) / total;
+        let f = f64::from(folds) / total;
+        assert!((0.15..=0.25).contains(&r), "4bet: raise share {r} (aces must be <= 1 in 4)");
+        assert!((0.15..=0.25).contains(&c), "4bet: call share {c} (kings must be <= 1 in 4)");
+        assert!((0.53..=0.67).contains(&f), "4bet: fold share {f}");
+    }
+    for label in ["AQo", "AJo", "KQo", "KTs", "QTs"] {
         assert!(seen_ip_folds.contains(label), "missing IP fold {label}");
         assert!(seen_oop_folds.contains(label), "missing OOP fold {label}");
     }
-    for label in ["55", "AJs", "KJs", "T9s"] {
-        assert!(seen_oop_folds.contains(label), "missing OOP fold {label}");
+    assert_eq!(seen_4bet_calls, BTreeSet::from(["KK".to_string()]));
+    for label in ["QQ", "JJ", "AKs", "AKo"] {
+        assert!(seen_4bet_folds.contains(label), "missing 4-bet fold {label}");
     }
 }
 
@@ -1432,11 +1520,14 @@ fn most_of_the_new_spots_are_real_decisions() {
             *folds.entry(name).or_insert(0u32) += 1;
         }
     }
-    for name in ["raised", "callers", "three_bet", "four_bet"] {
+    for name in ["raised", "callers", "three_bet"] {
         let share = f64::from(folds[name]) / f64::from(totals[name]);
         assert!(share < 0.50, "{name}: {share} folds");
         assert!(share > 0.08, "{name}: {share} folds, always continuing would win");
     }
+    // Facing a 4-bet, AA goes all in (20%) and KK calls (20%), leaving ~60% folds.
+    let fb_share = f64::from(folds["four_bet"]) / f64::from(totals["four_bet"]);
+    assert!(fb_share < 0.70 && fb_share > 0.45, "four_bet: {fb_share} folds");
 }
 
 /// Grading through the answer path, against the card text rather than the code that deals it.
@@ -1502,11 +1593,11 @@ fn the_card_notes_never_use_internal_keys() {
 fn the_chart_summary_names_the_chart_and_its_lines() {
     let text = Chart::Blinds.summary();
     assert!(text.starts_with("One raise, from the blinds."), "{text}");
-    assert!(text.contains("3-bet JJ+"), "{text}");
+    assert!(text.contains("3-bet TT+"), "{text}");
     assert!(text.contains("Call "), "{text}");
     assert!(text.ends_with("Fold the rest."), "{text}");
     assert!(Chart::ThreeBetIp.summary().contains("4-bet KK+. Call QQ JJ"));
-    assert!(Chart::ThreeBetOop.summary().contains("4-bet KK+. Call QQ JJ TT 99 AKs AKo AQs KQs. Fold the rest."));
-    assert!(Chart::FourBet.summary().contains("All in KK+. Call QQ AKs AKo. Fold the rest."));
+    assert!(Chart::ThreeBetOop.summary().contains("4-bet KK+. Call QQ JJ TT 99 88"));
+    assert!(Chart::FourBet.summary().contains("All in AA. Call KK. Fold the rest."));
     assert!(Chart::CallersBb.summary().contains("Also call ATo KJo KTo QJo QTo JTo here."));
 }

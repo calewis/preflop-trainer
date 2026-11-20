@@ -218,12 +218,14 @@ fn facing_a_raise_agrees_on_the_clear_hands_in_every_seat() {
     for seat in [Seat::Middle, Seat::Button, Seat::BigBlind] {
         assert_eq!(pf(seat, Situation::Raised, "JhJd"), Action::Raise);
         assert_eq!(pf(seat, Situation::Raised, "AhKd"), Action::Raise);
-        assert_eq!(pf(seat, Situation::Raised, "ThTd"), Action::Call);
-        // Against the wide late openers the button and blinds face, king-queen 3-bets for value;
-        // a middle seat still has players behind it and 3-bets only the suited one.
-        let (kqo, kqs) = if seat == Seat::Middle { (Action::Fold, Action::Raise) } else { (Action::Raise, Action::Raise) };
+        assert_eq!(pf(seat, Situation::Raised, "8h8d"), Action::Call);
+        // Button and big blind 3-bet tens for value and call king-queen offsuit; middle position
+        // still has players behind it, so tens call and king-queen offsuit folds.
+        let (tt, kqo) = if seat == Seat::Middle { (Action::Call, Action::Fold) } else { (Action::Raise, Action::Call) };
+        assert_eq!(pf(seat, Situation::Raised, "ThTd"), tt);
         assert_eq!(pf(seat, Situation::Raised, "KhQd"), kqo);
-        assert_eq!(pf(seat, Situation::Raised, "KhQh"), kqs);
+        assert_eq!(pf(seat, Situation::Raised, "AhQh"), Action::Raise);
+        assert_eq!(pf(seat, Situation::Raised, "KhQh"), if seat == Seat::BigBlind { Action::Call } else { Action::Raise });
         assert_eq!(pf(seat, Situation::Raised, "7h2d"), Action::Fold);
     }
 }

@@ -89,18 +89,21 @@ limpers (where the cutoff and button also raise some limp-along hands) it covers
 an early or middle seat, from the cutoff or button, or from the blinds, with extra calls closing
 the action from the big blind), a raise with callers (again with extra big blind calls), being
 3-bet after you opened (in position or out of position) and being 4-bet after you 3-bet.
-Hands not listed fold. The ranges are rules of thumb built for deep stacks (about 200bb),
-leaning toward standard deep-stack charts: wide opens (from about 16% of hands early to 44% on
-the button), more 3-bets and few flat calls against a lone raise, and a wide big blind defence.
-Some 3-bets are semi-bluffs (suited aces such as A5s, and suited connectors such as 76s), and
-ace-queen offsuit folds to a raise from an early or middle seat. Facing a 3-bet, only kings and
-aces 4-bet for value (bluff 4-bets fare poorly when players call too much), while hands that play
-well deep call (more in position than out of position) and dominated offsuit broadways fold;
-facing a 4-bet, kings and aces go all in, queens and ace-king call, and the rest fold.
+Hands not listed fold. The opens and limper rows are rules of thumb built for deep stacks (about
+200bb): wide opens (from about 16% of hands early to 44% on the button) and tight early/middle
+facing-raise rows (where ace-queen offsuit folds). The cutoff/button and blind facing-raise rows,
+plus the facing-3-bet and facing-4-bet rows, come from two 200bb heads-up solver studies against
+fixed opponent ranges: linear value-only 3-bets (including tens and nines in position, and tens
+and ace-queen suited from the blinds) sized big (about 14bb IP, 16bb BB over a 3bb open), suited
+connectors and weaker suited broadways calling rather than 3-betting, no A5s/A4s bluff 3-bets, and
+tighter offsuit big blind defence. Facing a 3-bet, kings and aces 4-bet for value, deep-stack
+pairs, ace-king, strong and wheel suited aces, suited broadways and suited connectors call (both
+IP and OOP), and dominated offsuit hands such as ace-queen offsuit fold; facing a 4-bet, aces go
+all in, kings call and the rest (including queens and ace-king) fold.
 Drills deal hands you could really hold: after opening, the seat's open range; after
 3-betting, the hands the chart 3-bets. Facing a 3-bet or a 4-bet, drills deal a mix of
-4-bets/all-ins (about one time in five), calls and real folds (dominated offsuit hands and
-weaker suited hands or pairs out of position), never trash. About a third of preflop items are
+4-bets/all-ins (about one time in five), calls (two in five facing a 3-bet, one in five facing a
+4-bet) and real folds (dominated offsuit hands and weaker suited hands), never trash. About a third of preflop items are
 folded to you, a fifth limpers, a quarter a lone raise and a tenth a raise with callers; 3-bets
 (about 4%) and 4-bets (about 1.5%) are rare.
 

@@ -379,30 +379,34 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
         (Position | PositionEarly | Blinds | BlindsBb, Raise, Jacks) => {
             "Jacks are ahead of most hands that raise or call, so 3-bet before overcards can come."
         }
+        (Position | Blinds | BlindsBb, Raise, Tens) => {
+            "Tens are ahead of most hands that open and call a 3-bet, so 3-bet for value."
+        }
+        (Position, Raise, MiddlePair) => {
+            "Nines are ahead of most hands that open and call a 3-bet, so 3-bet in position for value."
+        }
         (Position | PositionEarly | Blinds | BlindsBb, Raise, AceKing) => {
             "Ace-king dominates the aces and kings that call, so 3-bet and build a pot you flop top pair in."
         }
-        (Position | PositionEarly | Blinds | BlindsBb, Raise, AceQueen) => {
+        (Position | PositionEarly, Raise, AceQueen) => {
             "Ace-queen dominates the weaker aces that call, so 3-bet for value and make them pay."
         }
-        // Only the cutoff, button and blinds 3-bet king-queen offsuit: a lone raise there usually comes from a wide late opener.
-        (Position | Blinds | BlindsBb, Raise, OffsuitBroadway) => {
-            "King-queen dominates the weaker kings and queens a wide late opener plays, so 3-bet for value against players who call too much."
+        (Blinds | BlindsBb, Raise, AceQueen) => {
+            "Ace-queen suited dominates the weaker aces that call and makes the nut flush draw, so 3-bet for value."
         }
-        // The suited 3-bets below value: semi-bluffs that can win the pot at once and play on when called.
-        (Position | PositionEarly | Blinds | BlindsBb, Raise, SuitedBroadway) => {
-            "Two suited high cards make top pairs, straights and flushes, so a 3-bet can take the pot now and still plays well when called."
+        (Blinds | BlindsBb, Call, AceQueen) => {
+            "Ace-queen offsuit is strong enough to continue from the blinds, but out of position calling keeps the pot controlled against stronger hands."
         }
-        (Position | PositionEarly | Blinds | BlindsBb, Raise, SuitedAce) => {
-            "A suited ace holds one of the aces the raiser needs and makes the nut flush draw, so a 3-bet can take the pot now and still plays well when called."
+        // Strong suited 3-bets that play well in a bigger pot when called.
+        (Position | PositionEarly, Raise, SuitedBroadway) => {
+            "Two strong suited high cards make top pairs, straights and flushes that play well in a bigger pot, so 3-bet."
         }
-        (Position | Blinds | BlindsBb, Raise, SuitedConnector) => {
-            "Suited connectors make straights and flushes that win big pots with deep stacks, so a 3-bet can take the pot now and still plays well when called."
+        (Position | PositionEarly, Raise, SuitedAce) => {
+            "A strong suited ace makes strong top pairs and the nut flush draw, so 3-bet for value."
         }
-        (Position | PositionEarly, Call, Tens) => {
+        (PositionEarly, Call, Tens) => {
             "Tens flop an overcard too often to build a big pot, so call and see the flop with position."
         }
-        (Blinds | BlindsBb, Call, Tens) => "Tens flop an overcard too often to build a big pot, so call from the blinds.",
         (Position | PositionEarly, Call, MiddlePair | SmallPair) => {
             "A pair flops a set about one time in eight, and in position a set wins a big pot from players who call too much."
         }
@@ -426,20 +430,16 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
             "Suited connectors make straights and flushes that get paid, and you already have money in the pot."
         }
         (Position, Call, OffsuitBroadway) => {
-            "Ace-jack offsuit has the equity to call a raise, and position makes its top pairs easier to play."
+            "Ace-jack and king-queen offsuit have the equity to call a raise, and position makes their top pairs easier to play."
         }
-        (Blinds, Call, OffsuitBroadway) => "Ace-jack offsuit has the equity to call from the small blind, even out of position.",
+        (Blinds, Call, OffsuitBroadway) => {
+            "Ace-jack and king-queen offsuit have the equity to call from the small blind, even out of position."
+        }
         (BlindsBb, Call, OffsuitBroadway) => {
-            "Closing the action, two offsuit cards ten or higher have the equity to call at the big blind's price."
+            "Closing the action, ace-jack and king-queen offsuit have the equity to call at the big blind's price."
         }
         (BlindsBb, Call, OtherSuited) => {
             "Closing the action, this suited hand has the equity to call at the big blind's price, and it can make a flush."
-        }
-        (BlindsBb, Call, OffsuitAce) => {
-            "Closing the action, an ace with a middling kicker has the equity to call at the big blind's price."
-        }
-        (BlindsBb, Call, OtherOffsuit) => {
-            "Closing the action, these offsuit cards are high enough and close enough together to call at the big blind's price."
         }
 
         // Folds facing one raise where the same seat plays stronger hands of the same kind.
@@ -448,6 +448,9 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
         }
         (Blinds, Fold, OffsuitBroadway) => {
             "From the small blind, offsuit high cards other than ace-jack and king-queen are often outkicked by a middle or cutoff raiser, and out of position they are hard to play."
+        }
+        (BlindsBb, Fold, OffsuitBroadway) => {
+            "Even closing the action, offsuit high cards other than ace-jack and king-queen are often outkicked by a middle or cutoff raiser, and out of position they are hard to play."
         }
         (Blinds | BlindsBb, Fold, OffsuitAce) => {
             "A weak offsuit ace often runs into a better ace, and out of position the pairs it makes are hard to play."
@@ -549,11 +552,8 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
         (ThreeBetIp, Call, MiddlePair | SmallPair) => {
             "A pair flops a set about one time in eight, and deep stacks in position pay well when you hit."
         }
-        (ThreeBetOop, Call, MiddlePair) => {
-            "Nines flop a set about one time in eight and stay ahead of ace-king, enough to call deep even out of position."
-        }
-        (ThreeBetOop, Fold, MiddlePair | SmallPair) => {
-            "Out of position, pairs below nines rarely win without a set and are harder to get paid with, so fold."
+        (ThreeBetOop, Call, MiddlePair | SmallPair) => {
+            "A pair flops a set about one time in eight, and with deep stacks a set pays well even out of position."
         }
         (ThreeBetIp, Call, AceQueen) => {
             "Ace-queen suited makes top pair and the nut flush draw, and deep stacks in position make it a call."
@@ -562,16 +562,22 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
             "Ace-queen suited makes strong top pairs and the nut flush draw, strong enough to call deep even out of position."
         }
         (ThreeBetIp, Call, SuitedAce) => {
-            "Ace-jack suited makes top pair and the nut flush draw, and plays well deep in position."
+            "These suited aces make the nut flush draw and strong top pairs or wheel straights, so call deep in position."
+        }
+        (ThreeBetOop, Call, SuitedAce) => {
+            "These suited aces make the nut flush draw and strong top pairs or wheel straights, enough to call deep even out of position."
         }
         (ThreeBetIp, Call, SuitedBroadway) => {
             "Two strong suited high cards make top pairs, straights and flushes that win big pots deep in position."
         }
         (ThreeBetOop, Call, SuitedBroadway) => {
-            "King-queen suited makes strong pairs, straights and flushes, enough to call deep even out of position."
+            "Two strong suited high cards make top pairs, straights and flushes that win big pots deep even out of position."
         }
         (ThreeBetIp, Call, SuitedConnector) => {
             "Suited connectors make straights and flushes that win big pots deep and in position."
+        }
+        (ThreeBetOop, Call, SuitedConnector) => {
+            "Suited connectors make straights and flushes that win big pots with deep stacks even out of position."
         }
         (ThreeBetIp | ThreeBetOop, Fold, AceQueen) => {
             "Ace-queen offsuit is dominated by the ace-kings and behind the big pairs that 3-bet here, without a flush draw to back it up, so fold."
@@ -580,34 +586,37 @@ pub fn why_line(chart: Chart, action: Action, kind: HandKind) -> &'static str {
             "Offsuit high cards are often dominated by the stronger high cards and behind the big pairs that 3-bet here, so fold."
         }
         (ThreeBetIp, Fold, SuitedAce) => {
-            "A suited ace below ace-jack is often dominated by the stronger aces that 3-bet here, so fold."
+            "Middling and low suited aces are often dominated by the stronger aces that 3-bet here without enough straight playability, so fold."
         }
         (ThreeBetOop, Fold, SuitedAce) => {
-            "Out of position, a suited ace below ace-queen is too often dominated by the stronger aces that 3-bet here, so fold."
+            "Out of position, middling and low suited aces are too often dominated by the stronger aces that 3-bet here, so fold."
         }
         (ThreeBetIp, Fold, SuitedBroadway) => {
             "These weaker suited high cards are often dominated by the bigger high cards that 3-bet here, so fold."
         }
         (ThreeBetOop, Fold, SuitedBroadway) => {
-            "Out of position, suited high cards below king-queen are too often dominated by the bigger hands that 3-bet here, so fold."
+            "Out of position, these weaker suited high cards are too often dominated by the bigger hands that 3-bet here, so fold."
         }
         (ThreeBetIp, Fold, SuitedConnector) => {
             "A suited connector this small makes lower straights and flushes and is behind the hands that 3-bet here, so fold."
         }
         (ThreeBetOop, Fold, SuitedConnector) => {
-            "Out of position, suited connectors miss too often and are hard to play against a 3-bet, so fold."
+            "Out of position, a suited connector this small makes lower straights and flushes and is behind the hands that 3-bet here, so fold."
         }
         (ThreeBetIp | ThreeBetOop, Fold, OffsuitAce | OtherSuited | OtherOffsuit) => {
             "This hand is behind the range that 3-bets here and rarely makes a hand strong enough for a 3-bet pot, so fold."
         }
 
         // You 3-bet and got 4-bet.
-        (FourBet, Raise, KingsOrAces) => "Aces or kings are the hands you 3-bet for, so go all in against a 4-bet.",
-        (FourBet, Call, Queens) => {
-            "Queens are too strong to fold to a 4-bet, but going all in runs into aces and kings, so call and see a flop."
+        (FourBet, Raise, KingsOrAces) => "Aces are the one hand strong enough to go all in against a 4-bet here.",
+        (FourBet, Call, KingsOrAces) => {
+            "Kings are behind aces but ahead of ace-king and queens, so call a 4-bet rather than shoving into aces."
         }
-        (FourBet, Call, AceKing) => {
-            "Ace-king has enough equity to call a 4-bet, but going all in risks running into aces and kings, so call."
+        (FourBet, Fold, Queens) => {
+            "A 4-bet here is almost always aces or kings, and queens are far behind both, so fold."
+        }
+        (FourBet, Fold, AceKing) => {
+            "A 4-bet here is almost always aces or kings, and ace-king is far behind that, so fold."
         }
         (FourBet, Fold, Jacks) => "Jacks are behind the big pairs that 4-bet here and only slightly ahead of ace-king.",
         (FourBet, Fold, AceQueen) => "Ace-queen is dominated by the ace-kings that 4-bet here and behind the big pairs.",
